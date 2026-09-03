@@ -416,8 +416,14 @@ async fn one_scenario_can_be_disabled_without_touching_the_others() {
         .map(|s| (s["id"].as_str().unwrap(), s["available"].as_bool().unwrap()))
         .collect();
 
-    assert_eq!(by_id["dummy_toggle"], false);
-    assert_eq!(by_id["dummy_provider"], true);
+    assert!(
+        !by_id["dummy_toggle"],
+        "the disabled scenario should be unavailable"
+    );
+    assert!(
+        by_id["dummy_provider"],
+        "the other scenario should be untouched"
+    );
 }
 
 #[tokio::test]
@@ -547,4 +553,33 @@ async fn normal_interactive_use_is_not_throttled() {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "request {i} was throttled");
     }
+}
+
+/// Regression test for the Shuttle deployment path.
+///
+/// `oneshot` on a bare `Router` has no `ConnectInfo`, which is exactly how
+/// Shuttle serves the app. With a plain `SmartIpKeyExtractor`, a request that
+/// also lacks `X-Forwarded-For` — an internal health probe, say — fails key
+/// extraction and is rendered as a 500, taking the endpoint down with it.
+///
+/// It must be rate limited under a shared bucket instead, never rejected.
+#[tokio::test]
+async fn a_request_with_no_forwarding_header_and_no_connect_info_still_works() {
+    let resp = app(KillSwitch::default(), None)
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "an unidentifiable caller must not 500 the endpoint"
+    );
+    assert_eq!(body_json(resp).await["status"], "ok");
 }

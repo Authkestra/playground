@@ -40,6 +40,10 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tower-cookies = "0.11.0"
 tower_governor = "0.7"
 
+# --- Shuttle (deployment target) ---
+shuttle-runtime = "0.57.0"
+shuttle-axum = "0.57.0"
+
 # --- support ---
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

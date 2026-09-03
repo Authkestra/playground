@@ -40,8 +40,13 @@ components — an accepted tradeoff for Next.js's larger ecosystem.
 Backend:
 
 ```sh
-cargo run -p api           # http://localhost:8000
+cargo run -p api --bin dev   # http://localhost:8000
 ```
+
+`--bin dev` is the plain-TCP development server. The crate's primary binary
+(`src/main.rs`) is the Shuttle entrypoint and carries `#[shuttle_runtime::main]`,
+which is how Shuttle picks its deployment target — running it directly outside
+Shuttle will not work.
 
 Frontend, in a second terminal:
 
@@ -108,10 +113,15 @@ door:
 
 ## Deployment
 
-Not yet deployed. Configuration is committed and ready
-(`Shuttle.toml`, `apps/web/vercel.json`, `.github/workflows/deploy.yml`) but the
-Shuttle and Vercel projects, DNS, and provider credentials still need creating —
-see the open P0 issues.
+Backend to Shuttle, frontend to Vercel, both on merge to `main`.
+
+Shuttle delivers configuration through its own secret store rather than the
+process environment, so the entrypoint bridges every secret into an env var
+before any configuration is read — that keeps local dev, tests and production on
+one code path. `COOKIE_SECURE` defaults to `true` under Shuttle.
+
+The Shuttle and Vercel projects, DNS, and provider credentials still need
+creating; see the open P0 issues for the exact steps and secret names.
 
 ## CI
 

@@ -30,6 +30,36 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::engine::{EngineFactory, ProviderCredentials};
+
+/// Client-IP key extractor that degrades instead of failing.
+///
+/// `SmartIpKeyExtractor` returns `UnableToExtractKey` — rendered as a 500 —
+/// when a request carries no forwarding header *and* no `ConnectInfo`. Shuttle
+/// serves a bare `Router`, so `ConnectInfo` is absent there, and any request
+/// that arrives without `X-Forwarded-For` (an internal health probe, say) would
+/// take the whole endpoint down with it.
+///
+/// Falling back to a sentinel key means unidentifiable callers share one bucket:
+/// they are still rate limited, just collectively. Failing toward *more*
+/// limiting is the right direction for a public demo.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ClientIpKeyExtractor;
+
+/// The shared bucket for callers we cannot identify.
+const UNIDENTIFIED_CLIENT: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+
+impl tower_governor::key_extractor::KeyExtractor for ClientIpKeyExtractor {
+    type Key = std::net::IpAddr;
+
+    fn extract<T>(
+        &self,
+        req: &axum::http::Request<T>,
+    ) -> Result<Self::Key, tower_governor::GovernorError> {
+        Ok(SmartIpKeyExtractor
+            .extract(req)
+            .unwrap_or(UNIDENTIFIED_CLIENT))
+    }
+}
 use crate::killswitch::KillSwitch;
 use crate::routes::AppState;
 use crate::scenario::ScenarioRegistry;
@@ -115,7 +145,7 @@ pub fn build_router(state: AppState) -> Router {
         let mut b = GovernorConfigBuilder::default();
         b.per_second(STANDARD_REPLENISH_SECS)
             .burst_size(STANDARD_BURST);
-        let mut b = b.key_extractor(SmartIpKeyExtractor);
+        let mut b = b.key_extractor(ClientIpKeyExtractor);
         b.error_handler(governor_error_response);
         Arc::new(b.finish().expect("valid standard governor config"))
     };
@@ -125,7 +155,7 @@ pub fn build_router(state: AppState) -> Router {
         let mut b = GovernorConfigBuilder::default();
         b.per_second(SENSITIVE_REPLENISH_SECS)
             .burst_size(SENSITIVE_BURST);
-        let mut b = b.key_extractor(SmartIpKeyExtractor);
+        let mut b = b.key_extractor(ClientIpKeyExtractor);
         b.error_handler(governor_error_response);
         Arc::new(b.finish().expect("valid sensitive governor config"))
     };
