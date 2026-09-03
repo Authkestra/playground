@@ -50,9 +50,10 @@ this is a registry dependency, not a git one. `Cargo.lock` is committed.
 Rejected `rustls-no-provider` for v0 because it requires the application to
 install a `rustls::CryptoProvider` **before any HTTP client is constructed**, or
 `reqwest` panics at construction. That is a sharp edge to hand a newcomer in a
-generated starter kit — the whole point of the kit is that it runs. Shuttle
-builds in a standard glibc image with a C toolchain, so `aws-lc-rs` compiling C
-and assembly is not a problem there.
+generated starter kit — the whole point of the kit is that it runs. Our own
+container image is Debian-based with `build-essential`, `cmake` and `perl`
+installed for exactly this reason, so `aws-lc-rs` compiling C and assembly is
+not a problem there (see `0003-hosting-platform.md`).
 
 **Escape hatch**, documented for anyone who needs it (musl targets, or a
 `cargo-deny` policy that bans `aws-lc-rs`): turn defaults off and install a

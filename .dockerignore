@@ -1,0 +1,12 @@
+# Keep the build context small — without this, `target/` and `node_modules/`
+# (several GB) are uploaded to the daemon on every build.
+target/
+node_modules/
+.next/
+.git/
+apps/web/
+packages/
+roadmap/
+docs/
+.github/
+*.md

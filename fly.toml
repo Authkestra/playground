@@ -1,0 +1,52 @@
+# Fly.io configuration for the playground API.
+#
+# `app` is set by `fly launch`; keep the name in sync with the Fly app you
+# created. Deploys run from the repo root so the Docker build can see the
+# workspace manifest and lockfile.
+
+app = "authkestra-playground-api"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  PORT = "8000"
+  # Served over HTTPS behind Fly's proxy, so the session cookie must be Secure.
+  COOKIE_SECURE = "true"
+  RUST_LOG = "info,api=debug,authkestra=info"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+
+  # Deliberately NOT scale-to-zero.
+  #
+  # Demo sessions live in process memory and the expiry sweeper is a
+  # `tokio::interval`, so both assume a long-lived process. Letting Fly stop the
+  # machine would silently reset every visitor's configuration and stall the
+  # sweep. Revisit only if the session store moves to Redis
+  # (docs/decisions/0002-session-store.md).
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # One instance. The in-memory session store cannot be shared across machines,
+  # so a second one would hand visitors a different config depending on which
+  # machine they hit. This is a hard constraint of the current design, not a
+  # cost preference.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

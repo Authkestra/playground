@@ -25,7 +25,7 @@ distinct:
 | --- | --- | --- |
 | The playground's own `DemoSession` (config, TTL) | in-process `HashMap` (`apps/api/src/session.rs`) | No |
 | authkestra's `SessionStore` for the per-visitor engine | `MemoryStore` | No |
-| WebAuthn/TOTP credentials (arrives in P2) | `SqlxCredentialStore` + SQLite | Depends on Shuttle's filesystem — **unconfirmed**, see below |
+| WebAuthn/TOTP credentials (arrives in P2) | `SqlxCredentialStore` + SQLite | No — container filesystems are ephemeral, see below |
 
 Rationale: demo sessions have a 12h TTL and carry nothing a visitor would mourn.
 Losing in-flight sessions on a redeploy is a minor annoyance, not data loss.
@@ -41,7 +41,7 @@ in-flight OAuth round-trip fails. The visitor sees the playground as if they had
 arrived fresh. No error, no data loss, no manual recovery.
 
 `OAUTH_STATE_KEY` exists so that the encrypted-cookie OAuth state key can be
-made stable across restarts; without it a random per-process key is generated
+made stable across restarts (set it with `fly secrets set`); without it a random per-process key is generated
 and logged as a warning.
 
 ## Migration path to Redis
@@ -56,10 +56,14 @@ Switch when either becomes true:
 - more than one instance is served (Memory cannot scale past one), or
 - losing configurations on deploy starts generating complaints.
 
-## Open question for the human
+## Credential storage on an ephemeral filesystem
 
-Shuttle's filesystem persistence across redeploys is **not yet confirmed**. It
-does not affect this decision (sessions are in memory either way) but it does
-decide whether P2's SQLite-backed passkey/TOTP credentials survive a deploy.
-Losing them is acceptable given the 12h TTL — but it should be confirmed rather
-than assumed. Tracked in the P0 Shuttle issue.
+Resolved by the move to a container platform (`0003-hosting-platform.md`): the
+container filesystem is ephemeral, so P2's SQLite-backed passkey/TOTP
+credentials **will not survive a redeploy**. That is consistent with the demo
+sessions that own them — a visitor whose session is gone has no use for the
+credentials it created — so it needs no separate mitigation, only for P2 to
+expect it rather than be surprised by it.
+
+If credentials ever need to outlive a deploy, attach a Fly volume or move the
+credential store to Postgres via the `sql-postgres` feature.

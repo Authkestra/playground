@@ -24,7 +24,7 @@ shapes. Nothing is deployed — see [Deployment](#deployment).
 ## Layout
 
 ```
-apps/api/            Rust (Axum) backend, deploys to Shuttle
+apps/api/            Rust (Axum) backend, deploys to Fly.io
 apps/web/            Next.js (App Router) frontend, deploys to Vercel
 packages/api-types/  TypeScript types generated from the Rust API contract
 docs/                playground docs, API contract, decision records
@@ -40,13 +40,11 @@ components — an accepted tradeoff for Next.js's larger ecosystem.
 Backend:
 
 ```sh
-cargo run -p api --bin dev   # http://localhost:8000
+cargo run -p api           # http://localhost:8000
 ```
 
-`--bin dev` is the plain-TCP development server. The crate's primary binary
-(`src/main.rs`) is the Shuttle entrypoint and carries `#[shuttle_runtime::main]`,
-which is how Shuttle picks its deployment target — running it directly outside
-Shuttle will not work.
+There is one binary and no platform-specific entrypoint: the container image in
+production runs exactly this, configured entirely through environment variables.
 
 Frontend, in a second terminal:
 
@@ -113,15 +111,23 @@ door:
 
 ## Deployment
 
-Backend to Shuttle, frontend to Vercel, both on merge to `main`.
+Backend to **Fly.io** (container built from `apps/api/Dockerfile`), frontend to
+**Vercel**, both on merge to `main`.
 
-Shuttle delivers configuration through its own secret store rather than the
-process environment, so the entrypoint bridges every secret into an env var
-before any configuration is read — that keeps local dev, tests and production on
-one code path. `COOKIE_SECURE` defaults to `true` under Shuttle.
+Shuttle was the original plan; it was dropped after the project turned out to be
+abandoned — see
+[`docs/decisions/0003-hosting-platform.md`](docs/decisions/0003-hosting-platform.md).
 
-The Shuttle and Vercel projects, DNS, and provider credentials still need
-creating; see the open P0 issues for the exact steps and secret names.
+⚠️ **`fly.toml` pins `auto_stop_machines = false` and `min_machines_running = 1`
+for architectural reasons, not cost.** Demo sessions live in process memory and
+the expiry sweeper is a `tokio::interval`, so scale-to-zero would reset every
+visitor's config, and a second machine would serve different configs depending
+on which one a visitor reached. Don't relax these without moving the session
+store to Redis.
+
+Secrets go in with `fly secrets set`; the app reads plain env vars either way.
+The Fly app, Vercel project, DNS and provider credentials still need creating —
+see the open P0 issues for the exact steps and secret names.
 
 ## CI
 

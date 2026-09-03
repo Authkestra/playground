@@ -34,10 +34,10 @@ use crate::engine::{EngineFactory, ProviderCredentials};
 /// Client-IP key extractor that degrades instead of failing.
 ///
 /// `SmartIpKeyExtractor` returns `UnableToExtractKey` — rendered as a 500 —
-/// when a request carries no forwarding header *and* no `ConnectInfo`. Shuttle
-/// serves a bare `Router`, so `ConnectInfo` is absent there, and any request
-/// that arrives without `X-Forwarded-For` (an internal health probe, say) would
-/// take the whole endpoint down with it.
+/// when a request carries no forwarding header *and* no `ConnectInfo`. Fly
+/// (and any container platform) puts a proxy in front, and a request that
+/// arrives without `X-Forwarded-For` — the platform's own health probe, say —
+/// would take the whole endpoint down with it.
 ///
 /// Falling back to a sentinel key means unidentifiable callers share one bucket:
 /// they are still rate limited, just collectively. Failing toward *more*
@@ -194,8 +194,8 @@ pub fn build_router(state: AppState) -> Router {
 /// Spawn the background sweep of expired demo sessions.
 ///
 /// Reads already treat expired sessions as absent, so this is about reclaiming
-/// memory and triggering credential cleanup rather than correctness. Shuttle
-/// keeps the process alive, so no external cron is needed.
+/// memory and triggering credential cleanup rather than correctness. The
+/// service runs as a long-lived process, so no external cron is needed.
 pub fn spawn_session_sweeper(sessions: Arc<DemoSessionStore>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(SWEEP_INTERVAL);

@@ -8,7 +8,7 @@
 //! Expiry is belt-and-braces: reads treat a stale session as absent (so an
 //! expired session is unreachable even if the sweeper has not run yet), and a
 //! background `tokio` interval sweep reclaims the memory and triggers
-//! credential cleanup. Shuttle runs a long-lived process, so no external cron
+//! credential cleanup. The service is a long-lived process, so no external cron
 //! is needed.
 
 use std::collections::HashMap;

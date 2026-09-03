@@ -555,10 +555,10 @@ async fn normal_interactive_use_is_not_throttled() {
     }
 }
 
-/// Regression test for the Shuttle deployment path.
+/// Regression test for the deployed path.
 ///
-/// `oneshot` on a bare `Router` has no `ConnectInfo`, which is exactly how
-/// Shuttle serves the app. With a plain `SmartIpKeyExtractor`, a request that
+/// `oneshot` on a bare `Router` has no `ConnectInfo`, which is the same
+/// condition as a platform health probe. With a plain `SmartIpKeyExtractor`, a request that
 /// also lacks `X-Forwarded-For` — an internal health probe, say — fails key
 /// extraction and is rendered as a 500, taking the endpoint down with it.
 ///

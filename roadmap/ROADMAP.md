@@ -20,7 +20,7 @@
 
 **Goal.** Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet.
 
-**Exit criteria.** A trivial Axum endpoint deploys to Shuttle on merge, the Next.js frontend deploys to Vercel on merge, play.authkestra.com resolves through Cloudflare, and all six provider credential sets are registered and stored as secrets.
+**Exit criteria.** A trivial Axum endpoint deploys to Fly.io on merge, the Next.js frontend deploys to Vercel on merge, play.authkestra.com resolves through Cloudflare, and all six provider credential sets are registered and stored as secrets.
 
 ### Issues
 
@@ -31,7 +31,7 @@
 Create the monorepo skeleton for the playground.
 
 ```
-apps/api/          # Rust (Axum) backend, deployed to Shuttle
+apps/api/          # Rust (Axum) backend, deployed to Fly.io
 apps/web/          # Next.js frontend, deployed to Vercel
 packages/api-types # TS types generated from the Rust API contract
 docs/              # playground-specific docs
@@ -59,7 +59,7 @@ Second trap: the TLS backend is a mandatory either/or forwarded through every HT
 
 ### Tasks
 - [ ] Write the exact dependency block for `apps/api` (direct deps: `authkestra-engine`, `authkestra-axum`, `authkestra-providers`, `authkestra-store-sqlx` as needed) with explicit feature lists
-- [ ] Choose the TLS backend for both Shuttle builds and generated starter kits; document why
+- [ ] Choose the TLS backend for both container builds and generated starter kits; document why
 - [ ] Verify with `cargo tree -i aws-lc-rs -e features` that the chosen backend is what actually ends up in the graph
 - [ ] Record the decision in `docs/decisions/` so the starter-kit generator emits the same thing
 
@@ -92,21 +92,23 @@ Given the 12h TTL and that losing in-flight demo sessions on a deploy is a minor
 ### Acceptance
 Decision recorded, store wired, redeploy behavior documented and expected.
 
-#### Set up Shuttle project and deploy-on-merge for apps/api
+#### Set up Fly.io app and deploy-on-merge for apps/api
 
 `area:infra` `type:chore`
 
-Deploy the Rust backend to Shuttle from CI.
+Deploy the Rust backend to Fly.io from CI.
+
+**Platform changed from Shuttle.** Shuttle was the original plan but the project is abandoned — `shuttle-hq/shuttle` is archived and `shuttle-runtime` has not been published since 2025-09-11. See `docs/decisions/0003-hosting-platform.md`.
 
 ### Tasks
-- [ ] Create the Shuttle project; add `Shuttle.toml` pointing at the `apps/api` workspace member
-- [ ] Confirm whether Shuttle's filesystem persists across redeploys (affects the SQLite credential store — losing demo credentials on deploy is acceptable given the 12h TTL, but confirm rather than assume)
-- [ ] GitHub Actions workflow: deploy on merge to `main`
-- [ ] Store all provider secrets via Shuttle secrets, never in the repo
-- [ ] Verify the C toolchain situation for the chosen TLS backend in Shuttle's build image
+- [ ] Create the Fly app (`fly launch --no-deploy` reuses the committed `fly.toml`)
+- [ ] Keep `auto_stop_machines = false` and `min_machines_running = 1` — these are load-bearing, not cost tuning: demo sessions live in process memory and the sweeper is a `tokio::interval`, so scale-to-zero resets every visitor's config and a second machine serves inconsistent state
+- [ ] GitHub Actions workflow: deploy on merge to `main` (needs the `FLY_API_TOKEN` repo secret)
+- [ ] Store all provider secrets via `fly secrets set`, never in the repo
+- [ ] Note that the container filesystem is ephemeral, so P2's SQLite credential store will not survive a redeploy — acceptable given the 12h TTL, but P2 should expect it
 
 ### Acceptance
-A trivial `/health` endpoint is live on the Shuttle URL and redeploys automatically on merge.
+A trivial `/health` endpoint is live on the Fly.io URL and redeploys automatically on merge.
 
 #### Set up Vercel project and play.authkestra.com DNS through Cloudflare
 
@@ -115,12 +117,12 @@ A trivial `/health` endpoint is live on the Shuttle URL and redeploys automatica
 ### Tasks
 - [ ] Vercel project with root directory `apps/web`, ignored-build-step so unrelated commits don't rebuild
 - [ ] `play.authkestra.com` DNS record; Cloudflare proxy enabled for free DDoS/bot mitigation
-- [ ] API subdomain (e.g. `api.play.authkestra.com`) CNAME'd to Shuttle, also Cloudflare-proxied
+- [ ] API subdomain (e.g. `api.play.authkestra.com`) CNAME'd to Fly.io, also Cloudflare-proxied
 - [ ] Preview deployments enabled for PRs
-- [ ] Grant the co-contributor admin on both Vercel and Shuttle (avoid a single point of failure)
+- [ ] Grant the co-contributor admin on both Vercel and Fly.io (avoid a single point of failure)
 
 ### Acceptance
-play.authkestra.com serves the Next.js app over HTTPS; the API subdomain reaches Shuttle; both are Cloudflare-proxied.
+play.authkestra.com serves the Next.js app over HTTPS; the API subdomain reaches Fly.io; both are Cloudflare-proxied.
 
 #### Mirror the framework's CI quality bar in the playground repo
 
@@ -159,7 +161,7 @@ Six credential sets are needed before the scenarios can work end-to-end.
 - [ ] Cloudflare Turnstile site key + secret
 - [ ] hCaptcha site key + secret
 - [ ] Google reCAPTCHA site key + secret
-- [ ] All secrets stored in Shuttle secrets / Vercel env vars; site keys (public) can live in frontend config
+- [ ] All secrets stored in Fly secrets / Vercel env vars; site keys (public) can live in frontend config
 - [ ] Redirect URIs registered for both production and preview domains, or a documented single-callback strategy
 
 ### Acceptance
@@ -183,7 +185,7 @@ Every visitor gets an isolated demo session. Toggles affect only that visitor �
 
 ### Tasks
 - [ ] `DemoSession { id, created_at, expires_at, config }`, id in a signed/HttpOnly cookie
-- [ ] 12h TTL; lazy expiry-on-read (treat stale as absent) plus a `tokio` interval sweep — Shuttle runs a long-lived process, so no external cron is needed
+- [ ] 12h TTL; lazy expiry-on-read (treat stale as absent) plus a `tokio` interval sweep — the service runs as a long-lived process, so no external cron is needed
 - [ ] `POST /session/reset` to start clean
 - [ ] Expiry also cleans up any WebAuthn credentials / TOTP secrets created during that session
 - [ ] Document what a visitor loses on redeploy (depends on the store decision)
@@ -619,7 +621,7 @@ A public playground for an auth framework is a uniquely embarrassing place to ge
 
 ### Tasks
 - [ ] Cookie flags (HttpOnly, Secure, SameSite) and session-id entropy
-- [ ] CORS policy between the Vercel frontend and the Shuttle API
+- [ ] CORS policy between the Vercel frontend and the Fly.io API
 - [ ] Secret handling review: nothing logged, nothing in the archive, nothing in client bundles beyond public site keys
 - [ ] Verify session isolation cannot be crossed by manipulating the session cookie
 - [ ] Confirm expired-session credential cleanup actually removes rows

@@ -6,89 +6,49 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.workflow }}-${{ github.ref }}
-  # Never cancel an in-flight deploy — could leave Shuttle mid-deploy.
+  # Never cancel an in-flight deploy — that could leave a machine half-updated.
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   deploy-backend:
-    name: Deploy backend to Shuttle
+    name: Deploy backend to Fly.io
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Graceful no-op when secrets aren't configured yet: a fork's PR-triggered
-      # run (or this repo before the Shuttle project exists) simply won't have
-      # SHUTTLE_API_KEY / SHUTTLE_PROJECT_ID set. We check for that explicitly
-      # instead of gating the whole job on `if: secrets.X != ''`, because job-level
-      # `if:` conditions evaluating the secrets context directly are unreliable/
-      # unsupported — see https://docs.github.com/actions/security-guides/encrypted-secrets.
+      # `if: secrets.X != ''` is unreliable at job level (secrets aren't
+      # available in job-level `if`), so gate the deploy step on an explicit
+      # check instead. This lets forks and unconfigured clones run the workflow
+      # without failing.
       - name: Check required secrets are configured
         id: check
         env:
-          SHUTTLE_API_KEY: ${{ secrets.SHUTTLE_API_KEY }}
-          SHUTTLE_PROJECT_ID: ${{ secrets.SHUTTLE_PROJECT_ID }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          if [ -n "${SHUTTLE_API_KEY}" ] && [ -n "${SHUTTLE_PROJECT_ID}" ]; then
+          if [ -n "${FLY_API_TOKEN}" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::SHUTTLE_API_KEY and/or SHUTTLE_PROJECT_ID repo secrets are not set — skipping Shuttle deploy. Create the Shuttle project first, then add these secrets (Settings > Secrets and variables > Actions)."
+            echo "::warning::FLY_API_TOKEN is not set — skipping deploy. Run 'fly launch' then add the token (Settings > Secrets and variables > Actions)."
           fi
 
-      # https://github.com/shuttle-hq/deploy-action (verified against the v2 tag's
-      # action.yml directly). `working-directory` is the *cargo workspace root*
-      # (".", i.e. this repo's root, where Cargo.toml and Shuttle.toml live) — not
-      # apps/api — see the comment in Shuttle.toml for why no further
-      # workspace-member selection is needed. `project-id` (starts with "proj_")
-      # must come from a project already created in the Shuttle console; this
-      # action does NOT create one.
-      - name: Deploy to Shuttle
+      - uses: superfly/flyctl-actions/setup-flyctl@master
         if: steps.check.outputs.ready == 'true'
-        uses: shuttle-hq/deploy-action@v2
-        with:
-          shuttle-api-key: ${{ secrets.SHUTTLE_API_KEY }}
-          project-id: ${{ secrets.SHUTTLE_PROJECT_ID }}
-          working-directory: "."
 
-  # Frontend deploy: intentionally left commented out.
+      # Deploys from the repo root: the Dockerfile (apps/api/Dockerfile, named
+      # in fly.toml) copies the workspace manifest and lockfile, so the build
+      # context must be the workspace root rather than apps/api.
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  # Frontend deploys through Vercel's own Git integration rather than a workflow
+  # step: Vercel builds on push to `main`, gives PRs preview deployments for
+  # free, and needs no tokens stored here. Set Root Directory to `apps/web` in
+  # Project Settings — Vercel has no vercel.json key for it.
   #
-  # Vercel's own Git integration (connect the repo in the Vercel dashboard, set
-  # Root Directory to apps/web) is the recommended path for Next.js and is what
-  # apps/web/vercel.json's `ignoreCommand` is designed for: Vercel's integration
-  # watches pushes itself and skips builds unrelated to apps/web, with no GitHub
-  # Actions workflow needed at all. Adding a second, GitHub-Actions-driven deploy
-  # here (e.g. via amondnet/vercel-action) would either race the Git integration's
-  # own deploy or require disabling that integration — extra moving parts for no
-  # benefit. If we ever need "deploy frontend only after backend CI passes on
-  # main" as a hard dependency, uncomment and adapt this using
-  # amondnet/vercel-action, guarded the same no-op-if-secret-missing way as the
-  # backend job above (VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID).
-  #
-  # deploy-frontend:
-  #   name: Deploy frontend to Vercel
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Check required secrets are configured
-  #       id: check
-  #       env:
-  #         VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-  #         VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  #         VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-  #       run: |
-  #         if [ -n "${VERCEL_TOKEN}" ] && [ -n "${VERCEL_ORG_ID}" ] && [ -n "${VERCEL_PROJECT_ID}" ]; then
-  #           echo "ready=true" >> "$GITHUB_OUTPUT"
-  #         else
-  #           echo "ready=false" >> "$GITHUB_OUTPUT"
-  #           echo "::warning::Vercel secrets are not set — skipping (also unnecessary if Vercel's Git integration is enabled)."
-  #         fi
-  #     - name: Deploy to Vercel
-  #       if: steps.check.outputs.ready == 'true'
-  #       uses: amondnet/vercel-action@v25
-  #       with:
-  #         vercel-token: ${{ secrets.VERCEL_TOKEN }}
-  #         vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-  #         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-  #         vercel-args: '--prod'
-  #         working-directory: apps/web
+  # If you ever want CI to own the deploy instead, add VERCEL_TOKEN,
+  # VERCEL_ORG_ID and VERCEL_PROJECT_ID as secrets and use amondnet/vercel-action.

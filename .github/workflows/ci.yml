@@ -48,7 +48,8 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'deny.toml'
-              - 'Shuttle.toml'
+              - 'fly.toml'
+              - 'apps/api/Dockerfile'
               - '.github/workflows/ci.yml'
             frontend:
               - 'apps/web/**'
