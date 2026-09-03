@@ -1,0 +1,36 @@
+# Shuttle project-local configuration.
+# Docs: https://docs.shuttle.dev/docs/project-configuration
+#       https://docs.shuttle.dev/docs/files
+#
+# This file MUST live at the cargo workspace root (not inside apps/api) — per
+# Shuttle's docs, "If Shuttle.toml or Secrets are used, those files should be
+# placed in the root of the workspace."
+#
+# Workspace/binary selection: as of the current cargo-shuttle (checked against
+# the `ProjectConfig` struct in shuttle-hq/shuttle's cargo-shuttle/src/config.rs,
+# and https://docs.shuttle.dev/docs/project-configuration), Shuttle.toml has NO
+# key for picking a workspace member or binary — there is no `name`, `bin`, or
+# `package` field here. Instead: "Shuttle supports cargo workspaces, but only
+# one Shuttle service per workspace. The first binary target using the
+# `#[shuttle_runtime::main]` macro will be targeted for local runs and
+# deployments." Today `apps/api` (crate name `api`) is the ONLY workspace
+# member, so this is unambiguous. If a second `#[shuttle_runtime::main]`
+# binary is ever added to this workspace, this comment is out of date and the
+# deploy setup needs to be revisited (e.g. splitting into separate Shuttle
+# projects/workspaces).
+#
+# The GitHub Actions deploy job (.github/workflows/deploy.yml) points
+# `working-directory` at the repo root (".") for this same reason, and passes
+# the Shuttle project id explicitly via `--id` (the `project-id` action
+# input), rather than relying on name-matching.
+
+[build]
+# No extra runtime assets needed yet (no static files/templates shipped
+# alongside the binary). Add patterns here if that changes, e.g.:
+# assets = ["apps/api/templates/*"]
+
+[deploy]
+# Fail the deploy instead of silently shipping local, uncommitted changes.
+# CI always deploys from a clean checkout, so this should never trigger there;
+# it's a safety net against accidental `shuttle deploy` from a dirty local tree.
+deny_dirty = true

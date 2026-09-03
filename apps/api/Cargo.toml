@@ -1,0 +1,56 @@
+[package]
+name = "api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# --- authkestra (see docs/decisions/0001-dependency-and-tls-baseline.md) ---
+authkestra-engine = { workspace = true, features = [
+    "token",
+    "session",
+    "memory",
+    "totp",
+    "webauthn",
+    "sql-sqlite",
+    "captcha",
+    "rustls-aws-lc-rs",
+] }
+authkestra-axum = { workspace = true, features = [
+    "macros",
+    "session",
+    "token",
+    "captcha",
+    "rustls-aws-lc-rs",
+] }
+authkestra-providers = { workspace = true, features = [
+    "github",
+    "google",
+    "discord",
+    "rustls-aws-lc-rs",
+] }
+
+# --- web stack ---
+axum = { version = "0.8.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-cookies = "0.11.0"
+tower_governor = "0.7"
+
+# --- support ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+serde_json = "1.0"

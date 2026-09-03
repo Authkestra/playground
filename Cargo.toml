@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["apps/api"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+repository = "https://github.com/Authkestra/playground"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Direct sub-crate deps, NOT the `authkestra` facade.
+#
+# The facade does not expose `webauthn`, `totp`, `captcha` or the store-backend
+# features — it pulls them in only as [dev-dependencies] for its own examples.
+# A downstream app that wants passkeys/TOTP/CAPTCHA must depend on the
+# sub-crates directly with their own feature names. See
+# docs/decisions/0001-dependency-and-tls-baseline.md.
+#
+# `default-features = false` at the workspace level is what lets a member crate
+# turn a sibling's defaults off; Cargo ignores it on an inherited dependency
+# unless the workspace entry sets it too.
+authkestra-engine = { version = "0.8.0", default-features = false }
+authkestra-axum = { version = "0.8.0", default-features = false }
+authkestra-providers = { version = "0.8.0", default-features = false }

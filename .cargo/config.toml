@@ -1,0 +1,5 @@
+# Generated TypeScript types land in the workspace package the frontend imports,
+# rather than ts-rs's default `apps/api/bindings/`. `relative = true` resolves
+# against this file's parent (the repo root), so it is correct in CI too.
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/api-types/generated", relative = true }

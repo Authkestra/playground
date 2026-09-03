@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Path filtering strategy: we deliberately use a `changes` job + dorny/paths-filter
+  # (rather than top-level `on.push.paths` / `on.pull_request.paths` triggers) plus
+  # `needs: changes` + `if:` on each real job.
+  #
+  # Why not plain `paths:` triggers? If you gate an entire workflow (or a required
+  # job) behind `paths:`, GitHub simply never creates that check run for a commit
+  # that doesn't touch those paths. If "backend" / "frontend" are configured as
+  # *required* status checks on the branch protection rule, a PR that only touches
+  # the other stack then has a required check stuck in "Expected — waiting for
+  # status to be reported" forever, and can never be merged.
+  #
+  # With `needs` + `if: needs.changes.outputs.X == 'true'`, the job still always
+  # runs (so the check always reports) but is marked `skipped` when its paths
+  # didn't change — and GitHub treats a skipped job as a passing/non-blocking
+  # required check. That gives us the speed benefit of path filtering without the
+  # "required check never shows up" trap.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'apps/api/**'
+              - 'packages/api-types/generated/**'
+              - '.cargo/config.toml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'deny.toml'
+              - 'Shuttle.toml'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'apps/web/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
+
+  backend:
+    name: Backend (Rust)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No MSRV is pinned upstream (framework CI uses dtolnay/rust-toolchain@stable
+      # too), so we mirror that rather than inventing a pin of our own.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --all-features
+
+      # `cargo test` is what regenerates the ts-rs bindings (each #[ts(export)]
+      # type emits an `export_bindings_*` test). So by this point the files on
+      # disk reflect the current Rust. If that differs from what is committed,
+      # someone changed a response shape without regenerating — which would ship
+      # a frontend typed against a contract the server no longer honours.
+      - name: Generated TypeScript types are up to date
+        run: |
+          if ! git diff --quiet -- packages/api-types/generated; then
+            echo "::error::Generated types are stale. Run 'cargo test -p api' and commit packages/api-types/generated."
+            git diff -- packages/api-types/generated
+            exit 1
+          fi
+          # A new type that was never committed shows up as untracked, not as a diff.
+          if [ -n "$(git ls-files --others --exclude-standard -- packages/api-types/generated)" ]; then
+            echo "::error::New generated types are not committed:"
+            git ls-files --others --exclude-standard -- packages/api-types/generated
+            exit 1
+          fi
+
+      # Prebuilt binary install (fast) rather than `cargo install`, which would
+      # compile cargo-llvm-cov from source on every cache miss.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # v0 coverage gate: the framework (marcjazz/authkestra) enforces
+      # --fail-under-lines 84, but this playground repo is brand new, so we
+      # start lower (50) and ratchet the threshold up as real test coverage is
+      # built out. Starting lower is explicitly allowed by the roadmap as long
+      # as it's an explicit, documented choice — this comment is that
+      # documentation. Raise this number as coverage improves; don't lower it.
+      - name: cargo llvm-cov
+        run: |
+          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info --fail-under-lines 50
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov.info
+          path: lcov.info
+          if-no-files-found: ignore
+
+      # Uses deny.toml at the repo root. Validates licenses, security advisories
+      # (RUSTSEC), banned/duplicate crates, and crate sources.
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+  frontend:
+    name: Frontend (Next.js)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # NOTE: assumes apps/web/package.json defines "typecheck", "lint" and
+      # "build" scripts (standard Next.js convention: `tsc --noEmit`, `next
+      # lint`/eslint, `next build`). `--filter ./apps/web` targets the app by
+      # path rather than by package name, so this doesn't need to know what
+      # apps/web's package.json calls itself.
+      - name: Typecheck
+        run: pnpm --filter ./apps/web run typecheck
+
+      - name: Lint
+        run: pnpm --filter ./apps/web run lint
+
+      - name: Build
+        run: pnpm --filter ./apps/web run build
