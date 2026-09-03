@@ -1,0 +1,310 @@
+{
+  "project": "Authkestra Playground + Starter Kit",
+  "scope_note": "This roadmap covers play.authkestra.com (the no-code auth playground) and the downloadable starter-kit generator ONLY. It is deliberately separate from, and subordinate to, the framework roadmap in authkestra's own docs/roadmap.md. Every deliverable here is scoped to capabilities already shipped in authkestra 0.8.0 — nothing here depends on GNAP, VC/OIDC4VP, BBS+, SSF/CAEP, ReBAC/ABAC, or PQC/ML-DSA, all of which are the framework's own future phases and explicitly out of scope for the playground.",
+  "labels": [
+    {"name": "area:api",         "color": "1d76db", "description": "Playground Rust backend (apps/api)"},
+    {"name": "area:web",         "color": "5319e7", "description": "Playground frontend (apps/web)"},
+    {"name": "area:starter-kit", "color": "0e8a16", "description": "Downloadable starter-kit generator"},
+    {"name": "area:infra",       "color": "b60205", "description": "Hosting, CI/CD, DNS, credentials, cost controls"},
+    {"name": "area:scenario",    "color": "fbca04", "description": "An individual auth capability demo"},
+    {"name": "area:docs",        "color": "c5def5", "description": "Docs, launch content, README"},
+    {"name": "type:feature",     "color": "a2eeef", "description": "New capability"},
+    {"name": "type:chore",       "color": "ededed", "description": "Setup, wiring, maintenance"},
+    {"name": "type:test",        "color": "d4c5f9", "description": "Tests and verification"},
+    {"name": "type:security",    "color": "d93f0b", "description": "Security or abuse-surface work"},
+    {"name": "blocked:external", "color": "e99695", "description": "Waiting on a third party (provider registration, upstream)"},
+    {"name": "good-first-issue", "color": "7057ff", "description": "Self-contained, good entry point for a contributor"}
+  ],
+  "phases": [
+    {
+      "key": "P0",
+      "title": "P0 — Foundations",
+      "goal": "Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet.",
+      "exit": "A trivial Axum endpoint deploys to Shuttle on merge, the Next.js frontend deploys to Vercel on merge, play.authkestra.com resolves through Cloudflare, and all six provider credential sets are registered and stored as secrets."
+    },
+    {
+      "key": "P1",
+      "title": "P1 — Playground core",
+      "goal": "The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows.",
+      "exit": "A visitor gets an isolated 12h demo session, can toggle a dummy scenario, sees a real config diff, and the endpoint is rate-limited with a working kill switch."
+    },
+    {
+      "key": "P2",
+      "title": "P2 — Scenarios",
+      "goal": "Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA).",
+      "exit": "Each scenario can be enabled, produces a meaningful diff, and completes a real flow — verified by integration tests covering happy path and the main failure paths."
+    },
+    {
+      "key": "P3",
+      "title": "P3 — Playground UI",
+      "goal": "The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing.",
+      "exit": "Full toggle → diff → test loop is usable on desktop and mobile, in light and dark, passes an a11y review, and meets the agreed Lighthouse budget in CI."
+    },
+    {
+      "key": "P4",
+      "title": "P4 — Downloadable starter kit",
+      "goal": "The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea.",
+      "exit": "Downloading a kit for any supported toggle combination yields a project that compiles and runs locally, whose behavior matches what was just demoed, verified by a CI compile matrix."
+    },
+    {
+      "key": "P5",
+      "title": "P5 — Launch hardening",
+      "goal": "Make the public surface safe, affordable, and measurable, then announce it.",
+      "exit": "Security review closed, abuse/load test passed with cost guardrails verified, conversion instrumentation live, launch content published."
+    },
+    {
+      "key": "P6",
+      "title": "P6 — Post-launch / wizard path",
+      "goal": "Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration.",
+      "exit": "Not scoped for v0. Revisit once P5 ships and there is real usage data."
+    }
+  ],
+  "issues": [
+    {
+      "title": "Scaffold playground monorepo (apps/api, apps/web, packages/api-types)",
+      "phase": "P0",
+      "labels": ["area:infra", "type:chore"],
+      "body": "Create the monorepo skeleton for the playground.\n\n```\napps/api/          # Rust (Axum) backend, deployed to Shuttle\napps/web/          # Next.js frontend, deployed to Vercel\npackages/api-types # TS types generated from the Rust API contract\ndocs/              # playground-specific docs\n```\n\n### Tasks\n- [ ] Workspace `Cargo.toml` with `apps/api` as a member\n- [ ] `apps/web` initialised with Next.js (App Router) + pnpm. Note: this is deliberately a different stack from the framework repo's `website/` (Astro + Starlight), so the two frontends will not share tooling or components — accepted tradeoff for Next.js's larger ecosystem\n- [ ] `packages/api-types` placeholder wired into `apps/web` tsconfig paths\n- [ ] Root README stating what this repo is and that the framework lives in `marcjazz/authkestra`\n- [ ] `.gitignore`, license headers consistent with the framework repo (MIT/Apache-2.0 dual)\n\n### Acceptance\n`cargo check -p api` and `pnpm --filter web build` both succeed from a clean clone."
+    },
+    {
+      "title": "Pin the authkestra dependency strategy and TLS feature choice",
+      "phase": "P0",
+      "labels": ["area:api", "type:chore"],
+      "body": "**This is a real trap and needs deciding before any scenario code is written.**\n\nThe `authkestra` facade crate does **not** expose `webauthn`, `totp`, `captcha`, `op`, `devsig`, or store-backend features — those exist only on `authkestra-engine` / `authkestra-axum` / `authkestra-store-sqlx`, and the facade pulls them in solely as `[dev-dependencies]` for its own examples. A downstream app that wants passkeys, TOTP or CAPTCHA must depend on those crates **directly** with their own feature names.\n\nSecond trap: the TLS backend is a mandatory either/or forwarded through every HTTPS-speaking crate. `rustls-aws-lc-rs` (the default) needs a C toolchain; `rustls-no-provider` requires the app to install a `rustls::CryptoProvider` before any HTTP client is constructed, or `reqwest` panics at construction. Cargo features being additive means one stray dependency can drag `aws-lc-rs` back in.\n\n### Tasks\n- [ ] Write the exact dependency block for `apps/api` (direct deps: `authkestra-engine`, `authkestra-axum`, `authkestra-providers`, `authkestra-store-sqlx` as needed) with explicit feature lists\n- [ ] Choose the TLS backend for both Shuttle builds and generated starter kits; document why\n- [ ] Verify with `cargo tree -i aws-lc-rs -e features` that the chosen backend is what actually ends up in the graph\n- [ ] Record the decision in `docs/decisions/` so the starter-kit generator emits the same thing\n\n### Acceptance\nA documented, verified dependency + feature baseline that the generator can emit verbatim."
+    },
+    {
+      "title": "Decide the session store: Redis vs Memory (generic SQL session storage no longer exists)",
+      "phase": "P0",
+      "labels": ["area:api", "area:infra", "type:chore"],
+      "body": "**Corrects an earlier planning assumption.** The framework's generic `SqlKvStore` was *deleted* in the Epic #289 storage rework — not deprecated. SQL storage is now scoped to two specific uses only:\n\n- `SqlxCredentialStore` (WebAuthn/TOTP credentials) — lives in `authkestra-engine`, gated by `sql-sqlite` / `sql-postgres` / `sql-mysql`\n- `SqlxOpStore` (OAuth/OIDC-provider tables) — the separate `authkestra-store-sqlx` crate\n\nThere is no \"put the session blob in Postgres\" primitive any more. Generic session KV is **Memory or Redis**.\n\n### Options\n- **Memory**: zero infra, but demo sessions die on every redeploy and can't scale past one instance\n- **Redis**: survives redeploys, scales, costs money and adds a dependency\n\nGiven the 12h TTL and that losing in-flight demo sessions on a deploy is a minor annoyance, Memory may be acceptable for v0 — but it must be a conscious decision, not a discovery in production.\n\n### Tasks\n- [ ] Decide Memory vs Redis for v0 (and note the migration path)\n- [ ] If Redis: pick the provider, wire the secret, confirm the cost fits the guardrails\n- [ ] Confirm `SqlxCredentialStore` + SQLite is what backs passkey/TOTP credentials regardless of the session choice\n- [ ] Document the choice and its redeploy behavior in the README\n\n### Acceptance\nDecision recorded, store wired, redeploy behavior documented and expected."
+    },
+    {
+      "title": "Set up Shuttle project and deploy-on-merge for apps/api",
+      "phase": "P0",
+      "labels": ["area:infra", "type:chore"],
+      "body": "Deploy the Rust backend to Shuttle from CI.\n\n### Tasks\n- [ ] Create the Shuttle project; add `Shuttle.toml` pointing at the `apps/api` workspace member\n- [ ] Confirm whether Shuttle's filesystem persists across redeploys (affects the SQLite credential store — losing demo credentials on deploy is acceptable given the 12h TTL, but confirm rather than assume)\n- [ ] GitHub Actions workflow: deploy on merge to `main`\n- [ ] Store all provider secrets via Shuttle secrets, never in the repo\n- [ ] Verify the C toolchain situation for the chosen TLS backend in Shuttle's build image\n\n### Acceptance\nA trivial `/health` endpoint is live on the Shuttle URL and redeploys automatically on merge."
+    },
+    {
+      "title": "Set up Vercel project and play.authkestra.com DNS through Cloudflare",
+      "phase": "P0",
+      "labels": ["area:infra", "type:chore"],
+      "body": "### Tasks\n- [ ] Vercel project with root directory `apps/web`, ignored-build-step so unrelated commits don't rebuild\n- [ ] `play.authkestra.com` DNS record; Cloudflare proxy enabled for free DDoS/bot mitigation\n- [ ] API subdomain (e.g. `api.play.authkestra.com`) CNAME'd to Shuttle, also Cloudflare-proxied\n- [ ] Preview deployments enabled for PRs\n- [ ] Grant the co-contributor admin on both Vercel and Shuttle (avoid a single point of failure)\n\n### Acceptance\nplay.authkestra.com serves the Next.js app over HTTPS; the API subdomain reaches Shuttle; both are Cloudflare-proxied."
+    },
+    {
+      "title": "Mirror the framework's CI quality bar in the playground repo",
+      "phase": "P0",
+      "labels": ["area:infra", "type:chore"],
+      "body": "The framework repo enforces a specific bar; the playground should not be visibly sloppier than the thing it advertises.\n\nFramework CI runs:\n```\ncargo fmt --all -- --check\ncargo clippy --workspace --all-features -- -D warnings\ncargo test --workspace --all-features\ncargo llvm-cov --workspace --all-features --lcov --output-path lcov.info --fail-under-lines 84\ncargo deny check\n```\n\n### Tasks\n- [ ] Port fmt/clippy/test/deny to the playground repo (coverage threshold can start lower but should be explicit)\n- [ ] Add `deny.toml` consistent with the framework's\n- [ ] Frontend CI: typecheck, lint, build\n- [ ] Note that no MSRV is pinned upstream (CI uses `dtolnay/rust-toolchain@stable`) — decide whether the playground pins one\n\n### Acceptance\nCI fails on formatting, clippy warnings, test failures, and advisory/license violations."
+    },
+    {
+      "title": "Register OAuth apps and captcha site keys for play.authkestra.com",
+      "phase": "P0",
+      "labels": ["area:infra", "blocked:external", "type:chore"],
+      "body": "Six credential sets are needed before the scenarios can work end-to-end.\n\n### Tasks\n- [ ] GitHub OAuth app + redirect URI\n- [ ] Google OAuth/OIDC client + redirect URI (note: consent screen verification may be required for a public app)\n- [ ] Discord OAuth app + redirect URI\n- [ ] Cloudflare Turnstile site key + secret\n- [ ] hCaptcha site key + secret\n- [ ] Google reCAPTCHA site key + secret\n- [ ] All secrets stored in Shuttle secrets / Vercel env vars; site keys (public) can live in frontend config\n- [ ] Redirect URIs registered for both production and preview domains, or a documented single-callback strategy\n\n### Acceptance\nEvery provider can complete a manual round-trip against the deployed environment."
+    },
+    {
+      "title": "Model the per-visitor demo session with a 12h TTL",
+      "phase": "P1",
+      "labels": ["area:api", "type:feature"],
+      "body": "Every visitor gets an isolated demo session. Toggles affect only that visitor — never global state, which would break the moment two people use the site at once.\n\n### Tasks\n- [ ] `DemoSession { id, created_at, expires_at, config }`, id in a signed/HttpOnly cookie\n- [ ] 12h TTL; lazy expiry-on-read (treat stale as absent) plus a `tokio` interval sweep — Shuttle runs a long-lived process, so no external cron is needed\n- [ ] `POST /session/reset` to start clean\n- [ ] Expiry also cleans up any WebAuthn credentials / TOTP secrets created during that session\n- [ ] Document what a visitor loses on redeploy (depends on the store decision)\n\n### Acceptance\nTwo concurrent visitors can hold different configurations simultaneously; expired sessions are unreachable and leave no credential rows behind."
+    },
+    {
+      "title": "Implement the ScenarioSpec abstraction (boolean and provider-select shapes)",
+      "phase": "P1",
+      "labels": ["area:api", "type:feature"],
+      "body": "Not every control is an on/off switch. Passkeys and TOTP are boolean; OAuth and bot protection are \"pick a provider\". Forcing everything into a boolean now means retrofitting later.\n\n### Tasks\n- [ ] `ScenarioSpec` describing id, human name, control shape (`Toggle` | `SelectOne { options }` | `SelectMany`), and dependencies\n- [ ] Uniform per-scenario endpoints: `POST /scenarios/:id/configure`, `GET /scenarios/:id/diff`, `POST /scenarios/:id/try`\n- [ ] Registry so adding a scenario is \"write one module\", not \"extend a conditional\"\n- [ ] Serialize the spec list for the frontend so the UI renders controls from data, not hardcoded markup\n\n### Acceptance\nA dummy scenario can be registered, configured, diffed and 'tried' without touching shared code paths."
+    },
+    {
+      "title": "Build the config-diff engine",
+      "phase": "P1",
+      "labels": ["area:api", "type:feature"],
+      "body": "\"See the diff\" is the core promise; the diff must be real, derived from actual configuration state rather than hand-written copy.\n\n### Tasks\n- [ ] Serialize `DemoConfig` before/after a change\n- [ ] Emit a structured diff (added/removed/changed) the frontend can render without re-deriving semantics\n- [ ] Include the human-meaningful consequences alongside raw config: which routes appear, which requirements change, which crates/features a real project would need\n- [ ] Snapshot tests so diff output doesn't drift silently\n\n### Acceptance\nToggling any scenario yields a diff that names the concrete configuration and dependency changes it implies."
+    },
+    {
+      "title": "Construct a per-session Engine from the visitor's config",
+      "phase": "P1",
+      "labels": ["area:api", "type:feature"],
+      "body": "The framework uses a typestate builder (`Authkestra::builder()`) where methods only exist once their dependencies are provided. Building one engine per session config, at runtime, needs care.\n\n### Tasks\n- [ ] Map `DemoConfig` to a constructed engine (cache per distinct config where practical rather than rebuilding per request)\n- [ ] Keep the host-app concerns (user/account records) owned by the playground — the framework deliberately has no user trait\n- [ ] Follow the framework's stateless-OAuth convention: `state`/`nonce` in encrypted cookies, never the database\n- [ ] `tracing` instrumentation on every handler and branch, matching the framework's definition of done\n\n### Acceptance\nEach session's flows execute against an engine built from that session's configuration, with no cross-session leakage."
+    },
+    {
+      "title": "Add rate limiting to all demo endpoints",
+      "phase": "P1",
+      "labels": ["area:api", "type:security"],
+      "body": "This is a public, unauthenticated surface that creates real WebAuthn credentials, real TOTP secrets, and makes real calls to third-party providers. It needs a front door.\n\n### Tasks\n- [ ] Per-IP and per-session token-bucket limits (`tower-governor`) on `configure` / `try` endpoints\n- [ ] Tighter limits on endpoints that hit third parties (OAuth, captcha siteverify) to protect provider quotas\n- [ ] Return clear 429s the UI can render as a friendly message\n- [ ] Load-test the limits before launch (see P5)\n\n### Acceptance\nScripted abuse of the try endpoints is throttled without degrading normal interactive use."
+    },
+    {
+      "title": "Add a kill switch for demo flows",
+      "phase": "P1",
+      "labels": ["area:api", "area:infra", "type:security"],
+      "body": "A way to disable live flows instantly, without a redeploy, if something is being abused or a provider quota is burning.\n\n### Tasks\n- [ ] Global `DEMO_ENABLED` flag plus per-scenario disable\n- [ ] Flag readable without a redeploy (env + runtime refresh, or a small admin endpoint behind a secret)\n- [ ] Frontend degrades gracefully to explainer-only mode when flows are disabled\n\n### Acceptance\nFlipping the switch stops all live flows within seconds and the site still reads as intentional rather than broken."
+    },
+    {
+      "title": "Generate TypeScript types from the Rust API contract",
+      "phase": "P1",
+      "labels": ["area:api", "area:web", "type:chore"],
+      "body": "Hand-maintained duplicate interfaces will drift. Generating them also makes a small, honest point about what typed Rust buys you.\n\n### Tasks\n- [ ] Pick the mechanism (`ts-rs`, or `utoipa` → OpenAPI → `openapi-typescript`)\n- [ ] Emit into `packages/api-types`\n- [ ] CI check that generated types are up to date (fail if regenerating produces a diff)\n\n### Acceptance\nChanging a Rust response shape without regenerating types fails CI."
+    },
+    {
+      "title": "Passkeys scenario (WebAuthn registration + authentication)",
+      "phase": "P2",
+      "labels": ["area:scenario", "area:api", "type:feature"],
+      "body": "The flagship demo. WebAuthn is shipped in `authkestra-engine::auth::webauthn` behind the `webauthn` feature (`webauthn-rs`), with signature-counter tracking for clone detection, and works as primary or step-up. `crates/authkestra/examples/axum_mfa_server.rs` and `crates/authkestra-engine/examples/totp_webauthn.rs` are the reference wiring.\n\n### Tasks\n- [ ] Registration ceremony end-to-end against a per-session ephemeral user\n- [ ] Authentication ceremony, including counter tracking\n- [ ] Credentials persisted via `SqlxCredentialStore` (SQLite), cleaned up on session expiry\n- [ ] Relying-party ID configured correctly for `play.authkestra.com` (and documented for preview domains)\n- [ ] Diff output naming the real crates/features a project would need (`authkestra-engine` with `webauthn`, not the facade)\n\n### Acceptance\nA visitor on a supported device registers and then authenticates with a passkey, and the diff accurately describes what changed."
+    },
+    {
+      "title": "Passkey capability detection and fallback UX",
+      "phase": "P2",
+      "labels": ["area:scenario", "area:web", "type:feature"],
+      "body": "A meaningful share of visitors cannot complete a WebAuthn ceremony — locked-down corporate machines, unusual browsers, no platform authenticator. A dead end there reads as \"this framework is broken\", which is the opposite of the point.\n\n### Tasks\n- [ ] Feature-detect platform authenticator availability before offering the flow\n- [ ] Explicit, friendly fallback state explaining why and offering the other scenarios\n- [ ] Handle mid-ceremony abort/timeout without leaving orphaned state\n- [ ] Verify against at least one deliberately unsupported environment\n\n### Acceptance\nAn unsupported visitor gets a clear explanation and a working alternative, never a spinner or a stack trace."
+    },
+    {
+      "title": "TOTP scenario with QR provisioning",
+      "phase": "P2",
+      "labels": ["area:scenario", "area:api", "type:feature"],
+      "body": "`TotpAuthMethod` is shipped in `authkestra-engine::auth::totp` behind the `totp` feature (`totp-rs`).\n\n### Tasks\n- [ ] Per-session secret generation and provisioning URI\n- [ ] QR code rendering (decide server-rendered vs client-rendered)\n- [ ] Verification endpoint with clear success/failure states and clock-skew tolerance\n- [ ] Secret stored via `SqlxCredentialStore`, destroyed on session expiry\n- [ ] Decide whether to offer an in-page code generator so visitors without an authenticator app can still try it\n\n### Acceptance\nA visitor scans the QR with a real authenticator app and completes verification; an invalid or stale code fails cleanly."
+    },
+    {
+      "title": "OAuth scenario across GitHub, Google and Discord",
+      "phase": "P2",
+      "labels": ["area:scenario", "area:api", "type:feature"],
+      "body": "Shipped as `authkestra-providers` with `github` / `google` / `discord` features. The provider files are thin endpoint config (~20-40 lines each) — the flow logic is the generic `OAuth2Flow` in the engine — so this is one implementation with three configurations, not three features. Google goes through `authkestra-oidc`. Reference examples: `axum_oauth2_github.rs`, `axum_oauth_stateless.rs`, `axum_oidc_google.rs`.\n\n### Tasks\n- [ ] Provider-select control wired to the three configured providers\n- [ ] Stateless variant demonstrated too (encrypted-cookie `state`/`nonce`, no session store) since it's a genuine selling point\n- [ ] Callback handling for all three, with clear errors on denial/cancel\n- [ ] Diff naming the exact feature flags per provider\n- [ ] Explicitly out of scope for v0: letting visitors supply their own client credentials (decided against — not worth the secret-handling exposure)\n\n### Acceptance\nAll three providers complete a real round trip and land the visitor in an authenticated demo session."
+    },
+    {
+      "title": "Bot-protection scenario (Turnstile, hCaptcha, reCAPTCHA)",
+      "phase": "P2",
+      "labels": ["area:scenario", "area:api", "type:feature"],
+      "body": "Shipped as a single `CaptchaVerifier` with a `CaptchaProvider` enum (`Turnstile`, `HCaptcha`, `ReCaptcha`) in `authkestra-engine::captcha` behind the `captcha` feature; each hits its real `siteverify` endpoint. The Axum adapter's `captcha` feature just forwards to the engine.\n\n### Tasks\n- [ ] Provider-select control across the three\n- [ ] Render the correct widget per provider on the frontend (each has its own script and site-key handling)\n- [ ] Show the verification result, including a deliberate failure path so the difference is visible\n- [ ] Diff explaining where the check sits in the request lifecycle\n\n### Acceptance\nEach of the three providers verifies a real token against its live siteverify endpoint, and a failed verification is demonstrable."
+    },
+    {
+      "title": "Scenario conformance tests",
+      "phase": "P2",
+      "labels": ["area:scenario", "type:test"],
+      "body": "Every scenario exposes the same three-endpoint contract, so it should be tested uniformly rather than ad hoc.\n\n### Tasks\n- [ ] Shared test harness driving configure → diff → try for every registered scenario\n- [ ] Happy path plus the main failure paths (denied OAuth, wrong TOTP code, failed captcha, aborted WebAuthn)\n- [ ] Session isolation test: two sessions with conflicting configs don't interfere\n- [ ] Expiry test: an expired session's credentials are gone\n\n### Acceptance\nAdding a scenario without wiring it into the harness fails CI."
+    },
+    {
+      "title": "Next.js app shell with minimal-JS explainer routes",
+      "phase": "P3",
+      "labels": ["area:web", "type:feature"],
+      "body": "Next.js App Router, chosen over Astro for ecosystem depth despite authkestra.com running Astro/Starlight (the two frontends stay separate stacks by decision).\n\nBe honest about the tradeoff this creates: Astro's islands ship literally zero JS on static routes, while Next.js App Router with React Server Components ships a small runtime even on server-rendered pages. \"Minimal JS\" is therefore the achievable target here, not \"zero\" — which makes the explicit perf budget below load-bearing rather than decorative.\n\n### Tasks\n- [ ] Next.js App Router project with design tokens visually consistent with authkestra.com (light + dark)\n- [ ] Explainer/marketing routes as server components with no unnecessary client boundaries\n- [ ] Playground route isolated so its client JS doesn't leak into explainer routes\n- [ ] Audit the client bundle per route and keep `use client` boundaries as deep as possible\n- [ ] Consistent header/footer linking back to docs and the GitHub repo\n\n### Acceptance\nExplainer routes ship only the framework's baseline runtime with no page-specific client JS; the playground route is the only place client-side interactivity is loaded."
+    },
+    {
+      "title": "Toggle panel component (renders from ScenarioSpec data)",
+      "phase": "P3",
+      "labels": ["area:web", "type:feature"],
+      "body": "### Tasks\n- [ ] Render controls from the backend's scenario spec, not hardcoded markup\n- [ ] Support boolean toggles and provider-select controls\n- [ ] Optimistic UI with rollback on API failure\n- [ ] Keyboard operable, correct ARIA roles and labels\n\n### Acceptance\nAdding a scenario server-side makes its control appear with no frontend change."
+    },
+    {
+      "title": "Diff viewer component",
+      "phase": "P3",
+      "labels": ["area:web", "type:feature"],
+      "body": "### Tasks\n- [ ] Render the structured diff (added/removed/changed) legibly, not as raw JSON\n- [ ] Show both the config change and its real-world consequence (routes, requirements, crate features)\n- [ ] Handle wide content without breaking page layout (own scroll container)\n- [ ] Readable in light and dark\n\n### Acceptance\nA visitor can tell what changed and why it matters without reading Rust."
+    },
+    {
+      "title": "Flow tester components for each scenario",
+      "phase": "P3",
+      "labels": ["area:web", "type:feature"],
+      "body": "The \"then test it\" half of the promise. Each scenario needs its own interaction surface.\n\n### Tasks\n- [ ] Passkey ceremony trigger + status, with the capability-detection fallback wired in\n- [ ] TOTP QR display and code entry\n- [ ] OAuth provider buttons and post-redirect return handling\n- [ ] Captcha widget mounting per provider\n- [ ] Uniform result panel (what was sent, what came back, what it proves)\n\n### Acceptance\nEvery v0 scenario is fully exercisable from the browser with clear success and failure feedback."
+    },
+    {
+      "title": "Set a performance budget and enforce it in CI",
+      "phase": "P3",
+      "labels": ["area:web", "area:infra", "type:test"],
+      "body": "\"Optimal performance from day one\" needs to be measured, or it silently degrades.\n\n### Tasks\n- [ ] Agree explicit budgets (LCP, CLS, INP, total JS on explainer vs playground routes)\n- [ ] Lighthouse CI (or equivalent) gate on PRs\n- [ ] Verify caching headers for static vs dynamic routes\n\n### Acceptance\nA regression past budget fails CI rather than being noticed after launch."
+    },
+    {
+      "title": "Accessibility pass on the auth flows",
+      "phase": "P3",
+      "labels": ["area:web", "type:test"],
+      "body": "Auth flows are exactly where a11y failures lock people out.\n\n### Tasks\n- [ ] Keyboard-only walkthrough of the full toggle → diff → test loop\n- [ ] Screen-reader labels for ceremony states and async results (live regions for \"waiting for your authenticator\")\n- [ ] Focus management across OAuth redirect returns\n- [ ] Colour contrast in both themes\n\n### Acceptance\nThe complete loop is operable keyboard-only and announces state changes to a screen reader."
+    },
+    {
+      "title": "Design the starter-kit template model (config → files + features)",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "type:feature"],
+      "body": "The download turns the visitor's `DemoConfig` into a real Cargo project. This issue is the design, before any templating code.\n\nGround it in the framework's own examples — `crates/authkestra/examples/` already contains 14 Axum scenarios (`axum_basic_setup`, `axum_oauth2_github`, `axum_oauth_stateless`, `axum_oidc_google`, `axum_mfa_server`, `axum_op_server_sqlx`, …) which are the closest thing to templates that exists today and are CI-compiled upstream.\n\n### Tasks\n- [ ] Decide the mechanism (cargo-generate-style parameterised tree, or bespoke assembly)\n- [ ] Map each scenario to the file fragments and Cargo features it contributes\n- [ ] Decide the composition rules when several scenarios are on at once\n- [ ] Pin versions from `Cargo.toml` / `workspace.package.version`, never from README prose (the upstream README is currently stale at 0.7 vs an actual 0.8.0)\n- [ ] Decide the framework target for v0: Axum only (Actix is second-tier upstream — no macro parity, several examples have no Actix counterpart)\n\n### Acceptance\nA written spec that maps any valid toggle combination to a definite file tree and feature set."
+    },
+    {
+      "title": "Build the base starter-kit template",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "type:feature"],
+      "body": "The always-present skeleton every generated project starts from.\n\n### Tasks\n- [ ] Axum service with the engine wired via the typestate builder\n- [ ] Correct direct dependencies and feature flags (per the P0 dependency decision — not via the facade)\n- [ ] Chosen TLS backend, with a note on the musl/`rustls-no-provider` caveat\n- [ ] Store wiring: `SqlxCredentialStore` + SQLite by default; session store per the P0 decision\n- [ ] `tracing` set up, matching upstream conventions\n- [ ] Sensible `.gitignore`, dual license, and a `justfile`/`Makefile` for the common commands\n\n### Acceptance\nThe base template compiles and runs with `cargo run` on a clean machine and serves a working endpoint."
+    },
+    {
+      "title": "Implement feature-gated template fragments per scenario",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "type:feature"],
+      "body": "### Tasks\n- [ ] Passkeys fragment (engine `webauthn`, credential store, both ceremonies, RP-ID config)\n- [ ] TOTP fragment (engine `totp`, provisioning + verification)\n- [ ] OAuth fragment (`authkestra-providers` with the selected provider features, callback routes, encrypted-cookie state)\n- [ ] Bot-protection fragment (engine `captcha`, selected provider, verification placement)\n- [ ] Fragments compose cleanly when multiple are selected (no duplicate routes, no conflicting state)\n\n### Acceptance\nEvery fragment, alone and in combination, produces a compiling project."
+    },
+    {
+      "title": "Generate a tailored README and .env.example per download",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "area:docs", "type:feature"],
+      "body": "A generated project whose README describes features you didn't pick is worse than no README.\n\n### Tasks\n- [ ] README generated from the selected config: what's included, how to run, what to configure\n- [ ] `.env.example` listing exactly the required secrets for the chosen providers (and nothing else)\n- [ ] Links back to the relevant authkestra docs pages and the upstream example each fragment derives from\n- [ ] Explicit note on which credentials the developer must register themselves\n\n### Acceptance\nA developer can go from unzip to a running, correctly configured service using only the generated README."
+    },
+    {
+      "title": "Add the zip download endpoint",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "area:api", "type:feature"],
+      "body": "### Tasks\n- [ ] `GET /starter-kit` generating the project from the current session config\n- [ ] Stream the archive rather than buffering large payloads\n- [ ] Rate-limit generation (it's the most expensive endpoint on the service)\n- [ ] Deterministic archive naming that reflects the selection\n- [ ] Never include secrets — `.env.example` only, with placeholders\n\n### Acceptance\nThe download matches the visitor's current configuration and contains no credentials."
+    },
+    {
+      "title": "CI compile matrix for generated projects",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "type:test"],
+      "body": "**The starter kit's credibility rests entirely on this.** A generated project that doesn't compile is worse than no starter kit at all.\n\nThe full combinatorial space (passkeys × TOTP × 3 OAuth providers × 3 captcha providers) is too large to build exhaustively on every push, so the matrix needs a deliberate strategy.\n\n### Tasks\n- [ ] Define a representative combination set (all-off, each-alone, all-on, plus one per provider)\n- [ ] CI job generating each combination and running `cargo check` (or `build`) on it\n- [ ] Nightly/scheduled job covering a wider matrix than the per-PR set\n- [ ] Fail loudly and specifically: report which combination broke\n- [ ] Pin how the matrix reacts to a new upstream authkestra release\n\n### Acceptance\nNo generated combination in the representative set can regress to non-compiling without CI failing."
+    },
+    {
+      "title": "Parity test: generated project behaves like the playground",
+      "phase": "P4",
+      "labels": ["area:starter-kit", "type:test"],
+      "body": "The implicit promise of the download is \"this is what you just used\". If they diverge, the demo becomes a lie.\n\n### Tasks\n- [ ] For each scenario, run the same flow assertions against a generated project and against the playground backend\n- [ ] Cover route shapes, required inputs, and success/failure responses\n- [ ] Document any deliberate differences (demo-only ephemerality, seeded users, etc.) in the generated README\n\n### Acceptance\nEach scenario passes the same behavioral assertions in both places, or the difference is explicitly documented."
+    },
+    {
+      "title": "Security review of the public demo surface",
+      "phase": "P5",
+      "labels": ["type:security", "area:api"],
+      "body": "A public playground for an auth framework is a uniquely embarrassing place to get owned.\n\n### Tasks\n- [ ] Cookie flags (HttpOnly, Secure, SameSite) and session-id entropy\n- [ ] CORS policy between the Vercel frontend and the Shuttle API\n- [ ] Secret handling review: nothing logged, nothing in the archive, nothing in client bundles beyond public site keys\n- [ ] Verify session isolation cannot be crossed by manipulating the session cookie\n- [ ] Confirm expired-session credential cleanup actually removes rows\n- [ ] Review error responses for information leakage\n\n### Acceptance\nReview completed with findings either fixed or explicitly accepted and recorded."
+    },
+    {
+      "title": "Abuse and load test with cost guardrails verified",
+      "phase": "P5",
+      "labels": ["type:test", "area:infra"],
+      "body": "### Tasks\n- [ ] Load test normal interactive traffic plus a scripted-abuse profile\n- [ ] Confirm rate limits hold and the service degrades rather than falls over\n- [ ] Verify billing alerts actually fire (test them, don't assume)\n- [ ] Confirm the kill switch works under load\n- [ ] Sanity-check third-party quota consumption (OAuth apps, captcha siteverify) under the abuse profile\n\n### Acceptance\nA hostile traffic profile produces throttling and alerts, not a surprise invoice or an outage."
+    },
+    {
+      "title": "Instrument conversion and usage",
+      "phase": "P5",
+      "labels": ["area:web", "type:feature"],
+      "body": "Without this there's no way to know whether the playground actually drives adoption, which is the entire point.\n\n### Tasks\n- [ ] Decide the metric that means success (repo stars, starter-kit downloads, docs click-through, crates.io pulls)\n- [ ] Privacy-respecting analytics (no third-party surveillance on an auth demo — it undercuts the message)\n- [ ] Track which scenarios get toggled, which flows complete, where visitors drop\n- [ ] Track starter-kit downloads by configuration — this doubles as product research for the wizard idea\n\n### Acceptance\nA weekly view of what visitors try, what they complete, and what they download."
+    },
+    {
+      "title": "Write launch content and announce",
+      "phase": "P5",
+      "labels": ["area:docs", "type:chore"],
+      "body": "### Tasks\n- [ ] Docs page on authkestra.com pointing at the playground (the site is Astro/Starlight, docs aren't CI-checked — link to real examples rather than inventing snippets)\n- [ ] Launch post explaining what it is and the Rust-adoption angle\n- [ ] Prepare for HN / r/rust: expect scrutiny of the generated code specifically\n- [ ] Confirm the kill switch, rate limits and alerts are live before posting\n- [ ] Have a plan for the first wave of feedback and issue triage\n\n### Acceptance\nPlayground announced with working links, live guardrails, and a triage plan."
+    },
+    {
+      "title": "Backlog: reserve a cratestack scenario slot",
+      "phase": "P6",
+      "labels": ["area:scenario", "type:feature"],
+      "body": "Deliberately out of v0. When cratestack is ready, it should slot into the existing `ScenarioSpec` registry and get its own playground section rather than needing architectural change.\n\n### Tasks\n- [ ] Confirm the scenario registry can host it without refactoring\n- [ ] Decide whether it earns its own nav section or sits alongside the auth scenarios\n- [ ] Extend the starter-kit generator with cratestack fragments"
+    },
+    {
+      "title": "Backlog: SeaORM and Diesel starter-kit variants",
+      "phase": "P6",
+      "labels": ["area:starter-kit", "type:feature"],
+      "body": "Upstream ships `authkestra-example-seaorm` and `authkestra-example-diesel` as compiled, conformance-tested example crates (not published libraries) — SeaORM is SQLite-only with no FKs; Diesel is sync via `spawn_blocking` with an r2d2 pool. Both pass the same `authkestra-store-testsuite`.\n\nOffering \"pick your data layer\" in the generator is a strong DX story, but it multiplies the compile matrix, so it waits until the sqlx path is proven.\n\n### Tasks\n- [ ] Evaluate the maintenance cost of three store paths in the matrix\n- [ ] Decide whether these become generator options or documentation only"
+    },
+    {
+      "title": "Backlog: push generated project to the visitor's GitHub repo",
+      "phase": "P6",
+      "labels": ["area:starter-kit", "type:feature"],
+      "body": "A zip is fine; \"create this as a repo in my account\" is the v0-style magic moment. Needs a GitHub App/OAuth scope, and careful thought about what permissions people will tolerate granting a demo site.\n\n### Tasks\n- [ ] Decide GitHub App vs OAuth app and the minimum scope\n- [ ] Handle failure modes (name collisions, revoked access, rate limits)\n- [ ] Keep the zip path as the no-auth fallback"
+    },
+    {
+      "title": "Backlog: ephemeral live-preview container per generated config",
+      "phase": "P6",
+      "labels": ["area:starter-kit", "area:infra", "type:feature"],
+      "body": "The real bridge to the wizard idea: rather than toggling a shared always-on instance, spin up a throwaway container running the visitor's exact generated project, then tear it down.\n\nThis is where Rust's compile times bite — a generated project is seconds-to-tens-of-seconds to build, not the sub-second hot reload that makes JS-oriented tools feel instant. Any serious attempt needs pre-warmed build containers and a shared dependency cache.\n\n### Tasks\n- [ ] Prototype build-time with a warm cargo cache to see whether the UX is viable at all\n- [ ] Decide orchestration, per-session limits, and teardown guarantees\n- [ ] Model the cost per preview before committing"
+    }
+  ]
+}
