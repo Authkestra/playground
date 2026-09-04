@@ -80,7 +80,8 @@ scenarios simply report themselves as not configured.
 | `ADMIN_TOKEN` | — | Enables `POST /admin/kill-switch`. **Unset means the endpoint is not mounted at all.** |
 | `OAUTH_STATE_KEY` | — | ≥32 bytes; keeps encrypted OAuth state valid across restarts |
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base for provider redirect URIs |
-| `TRUSTED_CLIENT_IP_HEADER` | `fly-client-ip` | Header carrying the true client IP. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. Use `cf-connecting-ip` behind Cloudflare; empty to disable. |
+| `TRUSTED_CLIENT_IP_HEADER` | `fly-client-ip` | Header carrying the true client IP. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. `cf-connecting-ip` behind Cloudflare; empty to fall back to `X-Forwarded-For`. |
+| `CLIENT_IP_XFF_POSITION` | `rightmost` | Which `X-Forwarded-For` entry to trust. `rightmost` is unforgeable; `leftmost` is correct only where the proxy overwrites the header. Settle it with `GET /admin/client-ip` rather than guessing. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
 | `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
 | `REDIS_PREFIX` | `ak_playground` | Key namespace, so deployments can share one Redis |

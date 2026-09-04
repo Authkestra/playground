@@ -56,15 +56,96 @@ use crate::settings::Settings;
 ///    rather than 500-ing the endpoint. Some platforms serve a bare `Router`
 ///    with no `ConnectInfo`, and a health probe without forwarding headers must
 ///    not take the endpoint down.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ClientIpKeyExtractor {
     trusted_header: Option<axum::http::HeaderName>,
+    xff_position: crate::settings::XffPosition,
+}
+
+impl Default for ClientIpKeyExtractor {
+    fn default() -> Self {
+        Self {
+            trusted_header: None,
+            xff_position: crate::settings::XffPosition::Rightmost,
+        }
+    }
 }
 
 impl ClientIpKeyExtractor {
-    pub fn new(trusted_header: Option<axum::http::HeaderName>) -> Self {
-        Self { trusted_header }
+    pub fn new(
+        trusted_header: Option<axum::http::HeaderName>,
+        xff_position: crate::settings::XffPosition,
+    ) -> Self {
+        Self {
+            trusted_header,
+            xff_position,
+        }
     }
+
+    /// The client IP this extractor would choose, and how it got there.
+    ///
+    /// Exposed so a deployment can be checked against reality rather than
+    /// against assumptions about the proxy in front — see the admin
+    /// `client-ip` endpoint.
+    pub fn explain<T>(&self, req: &axum::http::Request<T>) -> ClientIpExplanation {
+        let headers = req.headers();
+        let read = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        };
+        let xff = read("x-forwarded-for");
+
+        ClientIpExplanation {
+            trusted_header: self.trusted_header.as_ref().map(|h| h.as_str().to_string()),
+            trusted_header_value: self.trusted_header.as_ref().and_then(|h| read(h.as_str())),
+            x_forwarded_for: xff.clone(),
+            xff_leftmost: xff
+                .as_deref()
+                .and_then(|v| v.split(',').find_map(parse_ip))
+                .map(|ip| ip.to_string()),
+            xff_rightmost: xff
+                .as_deref()
+                .and_then(|v| v.rsplit(',').find_map(parse_ip))
+                .map(|ip| ip.to_string()),
+            cf_connecting_ip: read("cf-connecting-ip"),
+            true_client_ip: read("true-client-ip"),
+            x_real_ip: read("x-real-ip"),
+            peer: req
+                .extensions()
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|c| c.0.ip().to_string()),
+            xff_position: match self.xff_position {
+                crate::settings::XffPosition::Leftmost => "leftmost",
+                crate::settings::XffPosition::Rightmost => "rightmost",
+            }
+            .to_string(),
+            selected: {
+                use tower_governor::key_extractor::KeyExtractor as _;
+                self.extract(req)
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_else(|_| "<none>".to_string())
+            },
+        }
+    }
+}
+
+/// What the rate limiter sees, for diagnosing a real deployment.
+#[derive(Debug, serde::Serialize)]
+pub struct ClientIpExplanation {
+    pub trusted_header: Option<String>,
+    pub trusted_header_value: Option<String>,
+    pub x_forwarded_for: Option<String>,
+    pub xff_leftmost: Option<String>,
+    pub xff_rightmost: Option<String>,
+    pub cf_connecting_ip: Option<String>,
+    pub true_client_ip: Option<String>,
+    pub x_real_ip: Option<String>,
+    pub peer: Option<String>,
+    pub xff_position: String,
+    /// The key the limiter would actually bucket this request under.
+    pub selected: String,
 }
 
 /// The shared bucket for callers we cannot identify.
@@ -97,13 +178,16 @@ impl tower_governor::key_extractor::KeyExtractor for ClientIpKeyExtractor {
             }
         }
 
-        // Rightmost entry: written by the nearest proxy, not by the client.
-        if let Some(ip) = headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.rsplit(',').find_map(parse_ip))
-        {
-            return Ok(ip);
+        // Which end to trust depends on whether the proxy in front appends or
+        // overwrites; see `XffPosition`.
+        if let Some(raw) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            let found = match self.xff_position {
+                crate::settings::XffPosition::Rightmost => raw.rsplit(',').find_map(parse_ip),
+                crate::settings::XffPosition::Leftmost => raw.split(',').find_map(parse_ip),
+            };
+            if let Some(ip) = found {
+                return Ok(ip);
+            }
         }
 
         if let Some(peer) = req
@@ -254,7 +338,10 @@ pub fn build_router(state: AppState) -> Router {
     //
     // `SmartIpKeyExtractor` reads `X-Forwarded-For` / `X-Real-IP` before falling
     // back to the peer address, which is what we want behind Cloudflare.
-    let key_extractor = ClientIpKeyExtractor::new(settings.trusted_client_ip_header.clone());
+    let key_extractor = ClientIpKeyExtractor::new(
+        settings.trusted_client_ip_header.clone(),
+        settings.xff_position,
+    );
 
     let standard = {
         let mut b = GovernorConfigBuilder::default();
@@ -312,4 +399,162 @@ pub fn build_router(state: AppState) -> Router {
         .layer(CookieManagerLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod key_extractor_tests {
+    use super::*;
+    use axum::http::{HeaderName, Request};
+    use std::net::{IpAddr, SocketAddr};
+    use tower_governor::key_extractor::KeyExtractor;
+
+    fn fly() -> ClientIpKeyExtractor {
+        ClientIpKeyExtractor::new(
+            Some(HeaderName::from_static("fly-client-ip")),
+            crate::settings::XffPosition::Rightmost,
+        )
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// The bug this type exists to prevent: a proxy *appends* the peer it saw,
+    /// so a client that sends its own `X-Forwarded-For` controls the leftmost
+    /// entry. Keying on that would let anyone mint a fresh rate-limit bucket
+    /// per request just by varying a header.
+    #[test]
+    fn a_spoofed_forwarded_for_cannot_change_the_key() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
+            .header("fly-client-ip", "198.51.100.7")
+            .body(())
+            .unwrap();
+        assert_eq!(fly().extract(&req).unwrap(), ip("198.51.100.7"));
+    }
+
+    #[test]
+    fn two_requests_spoofing_different_values_share_one_bucket() {
+        let a = Request::builder()
+            .header("x-forwarded-for", "203.0.113.1, 198.51.100.7")
+            .header("fly-client-ip", "198.51.100.7")
+            .body(())
+            .unwrap();
+        let b = Request::builder()
+            .header("x-forwarded-for", "192.0.2.55, 198.51.100.7")
+            .header("fly-client-ip", "198.51.100.7")
+            .body(())
+            .unwrap();
+        let e = fly();
+        assert_eq!(
+            e.extract(&a).unwrap(),
+            e.extract(&b).unwrap(),
+            "a caller varying X-Forwarded-For must not escape its bucket"
+        );
+    }
+
+    /// Without a trusted header we fall back to XFF — but the *rightmost*
+    /// entry, which the nearest proxy wrote, not the client-supplied leftmost.
+    #[test]
+    fn falls_back_to_the_rightmost_forwarded_for_entry() {
+        let e = ClientIpKeyExtractor::new(None, crate::settings::XffPosition::Rightmost);
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
+            .body(())
+            .unwrap();
+        assert_eq!(e.extract(&req).unwrap(), ip("198.51.100.7"));
+    }
+
+    #[test]
+    fn uses_the_peer_address_when_reached_directly() {
+        let mut req = Request::builder().body(()).unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(SocketAddr::from((
+                [198, 51, 100, 9],
+                1234,
+            ))));
+        assert_eq!(
+            ClientIpKeyExtractor::new(None, crate::settings::XffPosition::Rightmost)
+                .extract(&req)
+                .unwrap(),
+            ip("198.51.100.9")
+        );
+    }
+
+    /// A health probe with no forwarding headers and no ConnectInfo must be
+    /// limited collectively, never rejected — erroring here 500s the endpoint.
+    #[test]
+    fn an_unidentifiable_caller_gets_the_shared_bucket_not_an_error() {
+        let req = Request::builder().body(()).unwrap();
+        assert_eq!(fly().extract(&req).unwrap(), UNIDENTIFIED_CLIENT);
+    }
+
+    #[test]
+    fn the_trusted_header_wins_over_forwarded_for() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.99")
+            .header("fly-client-ip", "192.0.2.1")
+            .body(())
+            .unwrap();
+        assert_eq!(fly().extract(&req).unwrap(), ip("192.0.2.1"));
+    }
+
+    #[test]
+    fn tolerates_an_ip_port_pair() {
+        let e = ClientIpKeyExtractor::new(None, crate::settings::XffPosition::Rightmost);
+        let req = Request::builder()
+            .header("x-forwarded-for", "198.51.100.7:51234")
+            .body(())
+            .unwrap();
+        assert_eq!(e.extract(&req).unwrap(), ip("198.51.100.7"));
+    }
+
+    /// Leftmost is correct only where the edge proxy overwrites the header.
+    /// Where it appends, reading it is a bypass — which is why it is opt-in.
+    #[test]
+    fn leftmost_position_reads_the_first_entry() {
+        let e = ClientIpKeyExtractor::new(None, crate::settings::XffPosition::Leftmost);
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
+            .body(())
+            .unwrap();
+        assert_eq!(e.extract(&req).unwrap(), ip("203.0.113.99"));
+    }
+
+    #[test]
+    fn the_default_position_is_the_unforgeable_one() {
+        let e = ClientIpKeyExtractor::default();
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
+            .body(())
+            .unwrap();
+        assert_eq!(
+            e.extract(&req).unwrap(),
+            ip("198.51.100.7"),
+            "the default must be the entry a client cannot forge"
+        );
+    }
+
+    /// The diagnostic has to report every candidate, or it cannot settle which
+    /// header a real deployment should trust.
+    #[test]
+    fn explain_reports_each_candidate_and_the_selection() {
+        let e = fly();
+        let req = Request::builder()
+            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
+            .header("fly-client-ip", "192.0.2.1")
+            .header("cf-connecting-ip", "192.0.2.9")
+            .body(())
+            .unwrap();
+
+        let x = e.explain(&req);
+        assert_eq!(x.xff_leftmost.as_deref(), Some("203.0.113.99"));
+        assert_eq!(x.xff_rightmost.as_deref(), Some("198.51.100.7"));
+        assert_eq!(x.cf_connecting_ip.as_deref(), Some("192.0.2.9"));
+        assert_eq!(x.trusted_header_value.as_deref(), Some("192.0.2.1"));
+        assert_eq!(
+            x.selected, "192.0.2.1",
+            "the trusted header must win over anything client-supplied"
+        );
+    }
 }

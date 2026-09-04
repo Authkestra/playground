@@ -38,6 +38,49 @@ impl RelyingParty {
     }
 }
 
+/// Which `X-Forwarded-For` entry holds the client IP.
+///
+/// This is a property of the proxy in front, and getting it wrong has real
+/// consequences either way, so it is configuration rather than a guess:
+///
+/// * `Rightmost` (default) — safe by construction. A proxy *appends* the peer
+///   it saw, so the last entry is the one it wrote and the client cannot forge
+///   it. If several proxies are chained, this is the nearest one's view, which
+///   may be an internal address — every caller then shares one rate-limit
+///   bucket. Coarse, never a bypass.
+/// * `Leftmost` — correct only where the edge proxy *overwrites* the header
+///   rather than appending to it (Render documents doing this). Where it does
+///   not, any caller can mint a fresh bucket per request by sending their own
+///   header, which is a complete rate-limit bypass.
+///
+/// Prefer setting `TRUSTED_CLIENT_IP_HEADER` over relying on either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XffPosition {
+    Rightmost,
+    Leftmost,
+}
+
+impl XffPosition {
+    pub fn from_env() -> Self {
+        match std::env::var("CLIENT_IP_XFF_POSITION")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "leftmost" | "left" | "first" => {
+                tracing::warn!(
+                    "CLIENT_IP_XFF_POSITION=leftmost: correct only if the proxy in front \
+                     OVERWRITES X-Forwarded-For. If it appends, callers can bypass rate \
+                     limiting by sending the header themselves."
+                );
+                XffPosition::Leftmost
+            }
+            _ => XffPosition::Rightmost,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub port: u16,
@@ -59,6 +102,8 @@ pub struct Settings {
     pub trusted_client_ip_header: Option<axum::http::HeaderName>,
     /// WebAuthn relying-party identity.
     pub relying_party: RelyingParty,
+    /// Which end of `X-Forwarded-For` to trust when no trusted header is set.
+    pub xff_position: XffPosition,
 }
 
 impl Settings {
@@ -126,6 +171,7 @@ impl Settings {
             allowed_origins,
             trusted_client_ip_header,
             relying_party: RelyingParty::from_env(),
+            xff_position: XffPosition::from_env(),
         }
     }
 }

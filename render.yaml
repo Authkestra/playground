@@ -19,7 +19,10 @@ services:
     plan: free
     region: frankfurt
     healthCheckPath: /health
-    autoDeploy: true
+    # `checksPass` rather than `commit`: only deploy when CI is green, so a
+    # build that fails fmt/clippy/tests/deny cannot reach production.
+    # (`autoDeploy` is deprecated in favour of this.)
+    autoDeployTrigger: checksPass
     envVars:
       - key: PORT
         value: "8000"
@@ -28,9 +31,21 @@ services:
         value: "true"
       - key: RUST_LOG
         value: "info,api=debug,authkestra=info"
-      # Render sets X-Forwarded-For and does not expose a trusted single-IP
-      # header, so the rate limiter falls back to the rightmost XFF entry.
-      # See the note in apps/api/src/lib.rs on why the rightmost, not leftmost.
+      # Client IP: DO NOT guess this. Render documents setting the *first*
+      # X-Forwarded-For entry to the real client IP, which would make
+      # `leftmost` correct — but reading the leftmost entry is a rate-limit
+      # bypass anywhere the proxy appends instead of overwriting, and Render
+      # also fronts traffic with Cloudflare (it forwards CF-Ray), so
+      # cf-connecting-ip may be the better source.
+      #
+      # Left at the safe default (rightmost, unforgeable). Once deployed, set
+      # ADMIN_TOKEN and check what actually arrives:
+      #   curl -H "Authorization: Bearer $ADMIN_TOKEN" https://<api>/admin/client-ip
+      # then set TRUSTED_CLIENT_IP_HEADER (preferred) or
+      # CLIENT_IP_XFF_POSITION from the answer.
+      #
+      # Cost of leaving it: every visitor shares one rate-limit bucket, so
+      # limits are coarse. It is never a bypass.
       - key: TRUSTED_CLIENT_IP_HEADER
         value: ""
       # Set these in the dashboard, not here:

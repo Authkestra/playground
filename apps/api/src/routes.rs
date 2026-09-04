@@ -294,11 +294,8 @@ async fn scenario_action(
 }
 
 #[tracing::instrument(skip_all)]
-async fn admin_kill_switch(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<AdminKillSwitchBody>,
-) -> Result<impl IntoResponse, ApiError> {
+/// Check the admin bearer token.
+fn authorize_admin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
     let expected = state
         .settings
         .admin_token
@@ -311,11 +308,18 @@ async fn admin_kill_switch(
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
 
-    // Length-independent comparison is overkill here, but the token guards the
-    // one control that can take the demo down.
     if presented.is_empty() || presented.as_bytes() != expected.as_bytes() {
         return Err(ApiError::Unauthorized);
     }
+    Ok(())
+}
+
+async fn admin_kill_switch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AdminKillSwitchBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    authorize_admin(&state, &headers)?;
 
     if let Some(enabled) = body.demo_enabled {
         state.kill_switch.set_demo_enabled(enabled);
@@ -331,6 +335,31 @@ async fn admin_kill_switch(
             "disabled_scenarios": state.kill_switch.disabled_scenarios(),
         })),
     ))
+}
+
+/// What the rate limiter sees for this request.
+///
+/// Which header carries the real client IP is a property of the proxy in front,
+/// and getting it wrong either lets callers bypass rate limiting or lumps every
+/// visitor into one bucket. Vendor documentation and reality do not always
+/// agree, so this reports what actually arrived — configure from the answer
+/// rather than from an assumption.
+///
+/// Behind `ADMIN_TOKEN`: it echoes request headers, which is not something to
+/// expose publicly.
+#[tracing::instrument(skip_all)]
+async fn admin_client_ip(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    req_headers: axum::extract::Request,
+) -> Result<impl IntoResponse, ApiError> {
+    authorize_admin(&state, &headers)?;
+
+    let extractor = crate::ClientIpKeyExtractor::new(
+        state.settings.trusted_client_ip_header.clone(),
+        state.settings.xff_position,
+    );
+    Ok(Json(extractor.explain(&req_headers)))
 }
 
 // -------------------------------------------------------------------- router
@@ -358,5 +387,7 @@ pub fn standard_router() -> Router<AppState> {
 
 /// Admin routes, mounted only when an admin token is configured.
 pub fn admin_router() -> Router<AppState> {
-    Router::new().route("/admin/kill-switch", post(admin_kill_switch))
+    Router::new()
+        .route("/admin/kill-switch", post(admin_kill_switch))
+        .route("/admin/client-ip", get(admin_client_ip))
 }

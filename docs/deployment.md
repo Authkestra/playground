@@ -90,8 +90,37 @@ every visitor re-registers.**
 | --- | --- |
 | `ADMIN_TOKEN` | Enables `POST /admin/kill-switch`. Unset means the route is not mounted at all — a missing secret must never mean an open switch. |
 | `OAUTH_STATE_KEY` | ≥32 bytes. Keeps encrypted OAuth state valid across restarts. |
-| `TRUSTED_CLIENT_IP_HEADER` | The header the proxy in front **overwrites**. `cf-connecting-ip` behind Cloudflare; empty to fall back to the rightmost `X-Forwarded-For`. Getting this wrong is a rate-limit bypass — see the note in `apps/api/src/lib.rs`. |
+| `TRUSTED_CLIENT_IP_HEADER` | The header the proxy in front **overwrites**. `cf-connecting-ip` behind Cloudflare. Empty falls back to `X-Forwarded-For`. |
+| `CLIENT_IP_XFF_POSITION` | `rightmost` (default, safe) or `leftmost`. See below — do not set this from guesswork. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | `GITHUB_`, `GOOGLE_`, `DISCORD_`. Absent credentials are not an error; the affected scenarios report themselves as not configured. |
+
+## Settling the client-IP question
+
+The rate limiter buckets by client IP, and which header carries it is a property
+of the proxy in front. Both wrong answers are real:
+
+- Read an entry the **client controls** → anyone bypasses rate limiting by
+  sending the header themselves. This already happened once and was fixed.
+- Read the **proxy's own** address → every visitor shares one bucket, so a
+  handful of abusive requests throttle everybody. Coarse, but never a bypass.
+
+The default is the second, safe case. Vendor documentation and reality do not
+always agree, so **check rather than guess**. With `ADMIN_TOKEN` set:
+
+```sh
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" https://<api>/admin/client-ip | jq
+```
+
+It reports every candidate header that actually arrived, what each strategy
+would select, and which one the limiter is using. Then set
+`TRUSTED_CLIENT_IP_HEADER` (preferred) or `CLIENT_IP_XFF_POSITION` from the
+answer.
+
+For Render specifically: Render documents setting the first `X-Forwarded-For`
+entry to the real client IP, which would make `leftmost` correct — but it also
+fronts traffic with Cloudflare, so `cf-connecting-ip` may be present and is the
+better source because Cloudflare strips client-supplied copies of it. The
+endpoint settles which.
 
 ## Verifying a deployment
 
