@@ -803,4 +803,155 @@ mod tests {
         assert!(!env.contains("CLIENT_ID"), "not read by this configuration");
         assert!(!env.contains("WEBAUTHN"), "not read by this configuration");
     }
+
+    use crate::scenario::ControlValue;
+
+    fn kit_with(scenarios: &[(&str, ControlValue)]) -> StarterKit {
+        let registry = ScenarioRegistry::with_providers(vec![
+            "github".to_string(),
+            "google".to_string(),
+            "discord".to_string(),
+        ]);
+        let mut config = DemoConfig::defaults_for(&registry);
+        for (id, value) in scenarios {
+            config.set(id, value.clone());
+        }
+        StarterKit::generate(&config, &registry)
+    }
+
+    fn on() -> ControlValue {
+        ControlValue::Toggle { enabled: true }
+    }
+
+    /// The rule from the spec: TOTP alone is the only way in, so it must be a
+    /// first factor. Alongside another method it is step-up, which is the
+    /// stronger design and almost certainly what was intended.
+    #[test]
+    fn totp_alone_is_a_first_factor() {
+        let kit = kit_with(&[("totp", on())]);
+        let main = contents(&kit, "src/main.rs");
+        assert!(main.contains(".with_totp("), "{main}");
+        assert!(!main.contains(".with_mfa_method("));
+
+        let readme = contents(&kit, "README.md");
+        assert!(
+            readme.contains("first factor"),
+            "the README must say which role was chosen"
+        );
+    }
+
+    #[test]
+    fn totp_beside_another_method_becomes_step_up() {
+        let kit = kit_with(&[("totp", on()), ("passkeys", on())]);
+        let main = contents(&kit, "src/main.rs");
+        assert!(main.contains(".with_mfa_method("), "{main}");
+        assert!(
+            !main.contains(".with_totp("),
+            "it should not also be registered as a first factor"
+        );
+
+        let readme = contents(&kit, "README.md");
+        assert!(readme.contains("step-up"), "the change must be explained");
+    }
+
+    /// Two credential-backed methods share one store, as in the framework's own
+    /// MFA example.
+    #[test]
+    fn the_credential_store_is_emitted_once_however_many_methods_want_it() {
+        let main = contents(
+            &kit_with(&[("totp", on()), ("passkeys", on())]),
+            "src/main.rs",
+        );
+        assert_eq!(
+            main.matches("SqlitePoolOptions::new()").count(),
+            1,
+            "the store should be built once and shared"
+        );
+        assert_eq!(main.matches(".migrate()").count(), 1);
+    }
+
+    #[test]
+    fn a_session_only_project_has_no_credential_store() {
+        let main = contents(&kit_with(&[]), "src/main.rs");
+        assert!(!main.contains("SqlxCredentialStore"));
+        assert!(!main.contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn selecting_providers_emits_their_dependency_and_secrets() {
+        let kit = kit_with(&[(
+            "oauth",
+            ControlValue::SelectMany {
+                selected: vec!["github".to_string(), "google".to_string()],
+            },
+        )]);
+        let cargo = contents(&kit, "Cargo.toml");
+        assert!(cargo.contains("authkestra-providers"), "{cargo}");
+        // Google is OIDC, so it needs a crate the others do not.
+        assert!(cargo.contains("authkestra-oidc"), "{cargo}");
+
+        let main = contents(&kit, "src/main.rs");
+        assert!(main.contains("GithubProvider::new("));
+        assert!(main.contains("GoogleProvider::new("));
+
+        let env = contents(&kit, ".env.example");
+        for expected in [
+            "GITHUB_CLIENT_ID",
+            "GITHUB_CLIENT_SECRET",
+            "GOOGLE_CLIENT_ID",
+        ] {
+            assert!(
+                env.contains(expected),
+                "{expected} missing from .env.example"
+            );
+        }
+        // A secret has no default, so starting without it fails loudly.
+        assert!(env.contains("GITHUB_CLIENT_SECRET=\n"), "{env}");
+    }
+
+    /// Upstream declares `urlencoding` behind the `discord` feature while using
+    /// it for every provider, so `features = ["github"]` fails to compile
+    /// inside the dependency.
+    #[test]
+    fn the_provider_crate_carries_the_feature_that_makes_it_compile() {
+        let kit = kit_with(&[(
+            "oauth",
+            ControlValue::SelectMany {
+                selected: vec!["github".to_string()],
+            },
+        )]);
+        let cargo = contents(&kit, "Cargo.toml");
+        let line = cargo
+            .lines()
+            .find(|l| l.starts_with("authkestra-providers"))
+            .expect("providers dependency");
+        assert!(
+            line.contains("\"discord\""),
+            "without this the generated project does not build: {line}"
+        );
+    }
+
+    /// Deterministic output keeps the download diffable and the zip cacheable.
+    #[test]
+    fn the_same_configuration_generates_identical_bytes() {
+        let a = kit_with(&[("totp", on()), ("passkeys", on())]);
+        let b = kit_with(&[("passkeys", on()), ("totp", on())]);
+        assert_eq!(
+            a.files, b.files,
+            "emission order must follow the registry, not the order of selection"
+        );
+    }
+
+    #[test]
+    fn sqlx_gets_an_async_runtime() {
+        let cargo = contents(&kit_with(&[("totp", on())]), "Cargo.toml");
+        let line = cargo
+            .lines()
+            .find(|l| l.starts_with("sqlx"))
+            .expect("sqlx dependency");
+        assert!(
+            line.contains("runtime-"),
+            "sqlx without a runtime does not build: {line}"
+        );
+    }
 }
