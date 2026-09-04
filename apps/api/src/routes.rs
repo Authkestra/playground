@@ -86,7 +86,13 @@ async fn resolve_session(state: &AppState, cookies: &Cookies) -> Result<DemoSess
         cookie.set_http_only(true);
         cookie.set_path("/");
         cookie.set_secure(state.settings.cookie_secure);
-        cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
+        // Cross-site deployments need `None`, or the browser never sends this
+        // back and every request looks like a new visitor. See CookieSameSite.
+        cookie.set_same_site(match state.settings.cookie_same_site {
+            crate::settings::CookieSameSite::Strict => tower_cookies::cookie::SameSite::Strict,
+            crate::settings::CookieSameSite::Lax => tower_cookies::cookie::SameSite::Lax,
+            crate::settings::CookieSameSite::None => tower_cookies::cookie::SameSite::None,
+        });
         cookie.set_max_age(tower_cookies::cookie::time::Duration::hours(
             state.settings.session_ttl_hours,
         ));

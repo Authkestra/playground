@@ -38,6 +38,62 @@ impl RelyingParty {
     }
 }
 
+/// `SameSite` policy for the demo-session cookie.
+///
+/// This is load-bearing for a cross-site deployment. `Lax` cookies are **not
+/// sent on cross-site fetches** — only on same-site requests and top-level
+/// navigations — so if the frontend and API are on different registrable
+/// domains (`*.vercel.app` and `*.onrender.com`, say), every API call arrives
+/// without a session and the visitor's configuration silently never persists.
+///
+/// `None` is required in that case, and browsers only accept it alongside
+/// `Secure`. Once both sides share a domain (`play.authkestra.com` and
+/// `api.play.authkestra.com` are same-site), `Lax` becomes correct again and is
+/// the stricter choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CookieSameSite {
+    Strict,
+    Lax,
+    None,
+}
+
+impl CookieSameSite {
+    /// Read from `COOKIE_SAMESITE`, defaulting by deployment shape.
+    ///
+    /// A `Secure` cookie implies a real deployment, which today means the API
+    /// is on a different site from the frontend — so the default there is
+    /// `None`. Locally both sides are `localhost` (ports do not affect
+    /// same-site), so `Lax` is both correct and stricter.
+    pub fn from_env(secure: bool) -> Self {
+        let chosen = match std::env::var("COOKIE_SAMESITE")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "strict" => Some(CookieSameSite::Strict),
+            "lax" => Some(CookieSameSite::Lax),
+            "none" => Some(CookieSameSite::None),
+            _ => None,
+        };
+
+        let value = chosen.unwrap_or(if secure {
+            CookieSameSite::None
+        } else {
+            CookieSameSite::Lax
+        });
+
+        if value == CookieSameSite::None && !secure {
+            tracing::error!(
+                "COOKIE_SAMESITE=none requires a Secure cookie; browsers reject the \
+                 combination and the session will not persist. Set COOKIE_SECURE=true."
+            );
+        }
+        tracing::info!(same_site = ?value, secure, "session cookie policy");
+        value
+    }
+}
+
 /// Which `X-Forwarded-For` entry holds the client IP.
 ///
 /// This is a property of the proxy in front, and getting it wrong has real
@@ -104,6 +160,8 @@ pub struct Settings {
     pub relying_party: RelyingParty,
     /// Which end of `X-Forwarded-For` to trust when no trusted header is set.
     pub xff_position: XffPosition,
+    /// `SameSite` for the demo-session cookie.
+    pub cookie_same_site: CookieSameSite,
 }
 
 impl Settings {
@@ -172,6 +230,7 @@ impl Settings {
             trusted_client_ip_header,
             relying_party: RelyingParty::from_env(),
             xff_position: XffPosition::from_env(),
+            cookie_same_site: CookieSameSite::from_env(cookie_secure),
         }
     }
 }

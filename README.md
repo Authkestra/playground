@@ -74,6 +74,7 @@ scenarios simply report themselves as not configured.
 | `PORT` | `8000` | API bind port |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS origins |
 | `COOKIE_SECURE` | `false` | Mark the session cookie `Secure` (set in production) |
+| `COOKIE_SAMESITE` | `none` when secure, else `lax` | **Load-bearing for a cross-site deployment.** `Lax` cookies are not sent on cross-site fetches, so if the frontend and API are on different registrable domains the session silently never persists. `None` requires `Secure`. Once both share a domain (`play.` and `api.play.`), `lax` is correct and stricter. |
 | `SESSION_TTL_HOURS` | `12` | Demo session lifetime |
 | `DEMO_ENABLED` | `true` | Global kill switch for live flows |
 | `DEMO_DISABLED_SCENARIOS` | — | Comma-separated scenario ids to disable |

@@ -70,6 +70,22 @@ demo session rides in an HttpOnly cookie, so the browser simply blocks the
 request and the site reads as "API unavailable". Origins are compared exactly:
 no trailing slash, scheme included.
 
+### Cross-site cookies
+
+If the frontend and API sit on **different registrable domains** — say
+`*.vercel.app` and `*.onrender.com` — the session cookie must be
+`SameSite=None`, which is the default whenever `COOKIE_SECURE=true`.
+
+`Lax` cookies are only sent on same-site requests and top-level navigations, so
+with `Lax` across sites every API call arrives without a session, gets a fresh
+one, and the visitor's configuration silently never persists. The visible
+symptom is a control that appears to do nothing: flip a toggle and "Try it"
+still reports it is switched off.
+
+Once both sides share a domain (`play.authkestra.com` and
+`api.play.authkestra.com` are same-site), set `COOKIE_SAMESITE=lax` — it is the
+stricter choice and removes the cross-site exposure entirely.
+
 ## 4. WebAuthn
 
 | Variable | Value |

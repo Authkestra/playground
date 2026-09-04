@@ -17,7 +17,7 @@ use crate::killswitch::KillSwitch;
 use crate::routes::AppState;
 use crate::scenario::ScenarioRegistry;
 use crate::session::{DemoSessionStore, DEFAULT_TTL_HOURS};
-use crate::settings::{RelyingParty, Settings, XffPosition};
+use crate::settings::{CookieSameSite, RelyingParty, Settings, XffPosition};
 use crate::store::{KeyValue, MemoryKv};
 
 /// Settings suitable for tests: plain HTTP, localhost relying party.
@@ -37,6 +37,7 @@ pub fn test_settings(admin_token: Option<&str>) -> Settings {
             name: "test".to_string(),
         },
         xff_position: XffPosition::Rightmost,
+        cookie_same_site: CookieSameSite::Lax,
     }
 }
 

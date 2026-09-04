@@ -144,6 +144,27 @@ export default function Playground() {
       setPendingIds((prev) => new Set(prev).add(id));
       setBanner(null);
 
+      // A previous "Try it" result described the OLD configuration, so it is
+      // stale the moment the control moves. Leaving it on screen made the
+      // toggle look broken: flipping it on still showed "turn it on first".
+      setTryResults((prev) => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+
+      // Move the control immediately and roll back if the server disagrees.
+      // Waiting for the round trip made the switch feel dead — and on a
+      // free-tier host that has spun down, the first interaction can take
+      // tens of seconds, which reads as nothing happening at all.
+      const previousConfig = config;
+      setConfig((prev) =>
+        prev
+          ? { ...prev, scenarios: { ...prev.scenarios, [id]: value } }
+          : prev,
+      );
+
       const result = await configureScenario(id, { value });
 
       setPendingIds((prev) => {
@@ -153,6 +174,9 @@ export default function Playground() {
       });
 
       if (!result.ok) {
+        // Put the control back where it was, so the UI never claims a change
+        // the server did not accept.
+        setConfig(previousConfig);
         switch (result.error.kind) {
           case "demo_disabled":
             setPhase("explainer");
@@ -169,13 +193,12 @@ export default function Playground() {
         return;
       }
 
+      // The server's copy is authoritative — it may normalise the value.
       setConfig(result.data.config);
       setDiff(result.data.diff);
-      setDiffScenarioName(
-        scenarios.find((s) => s.id === id)?.name ?? id,
-      );
+      setDiffScenarioName(scenarios.find((s) => s.id === id)?.name ?? id);
     },
-    [scenarios],
+    [scenarios, config],
   );
 
   const handleTry = useCallback(async (id: string) => {

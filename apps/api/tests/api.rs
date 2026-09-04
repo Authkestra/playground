@@ -660,3 +660,80 @@ async fn an_origin_not_on_the_list_is_not_echoed() {
         "an unlisted origin must not be granted access"
     );
 }
+
+/// Regression test for a cross-site session that silently never persisted.
+///
+/// `SameSite=Lax` is not sent on cross-site fetches, so with the frontend and
+/// API on different registrable domains every request arrived without a cookie,
+/// got a fresh session, and the visitor's toggles appeared to do nothing —
+/// `try` kept reporting "not configured" however many times they clicked.
+#[tokio::test]
+async fn a_secure_deployment_defaults_to_a_cross_site_capable_cookie() {
+    let settings = Settings {
+        cookie_secure: true,
+        cookie_same_site: api::settings::CookieSameSite::from_env(true),
+        ..test_settings(None)
+    };
+    let app = api::build_router(test_state_with_settings(KillSwitch::default(), settings));
+
+    let resp = app
+        .oneshot(req("GET", "/api/session").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let raw = resp
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    assert!(
+        raw.contains("SameSite=None"),
+        "a cross-site deployment needs SameSite=None or the cookie is never sent back: {raw}"
+    );
+    assert!(
+        raw.contains("Secure"),
+        "browsers reject SameSite=None without Secure: {raw}"
+    );
+    assert!(raw.contains("HttpOnly"), "{raw}");
+}
+
+#[tokio::test]
+async fn local_development_keeps_the_stricter_lax_policy() {
+    // Not secure => same-site localhost => Lax is correct and stricter.
+    let policy = api::settings::CookieSameSite::from_env(false);
+    assert_eq!(policy, api::settings::CookieSameSite::Lax);
+}
+
+/// The property the bug actually broke: a returning cookie must resume the
+/// same session rather than minting a new one.
+#[tokio::test]
+async fn a_returned_cookie_resumes_the_same_session() {
+    let app = app(KillSwitch::default(), None).await;
+
+    let first = app
+        .clone()
+        .oneshot(req("GET", "/api/session").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let cookie = session_cookie(&first).expect("cookie");
+    let first_id = body_json(first).await["id"].as_str().unwrap().to_string();
+
+    let second = app
+        .oneshot(
+            req("GET", "/api/session")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let second_id = body_json(second).await["id"].as_str().unwrap().to_string();
+
+    assert_eq!(
+        first_id, second_id,
+        "the same cookie must resume the same session, not create another"
+    );
+}

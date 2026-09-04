@@ -179,13 +179,20 @@ function ScenarioControl({
         aria-label={scenario.name}
         disabled={disabled}
         onClick={() => onChange({ kind: "toggle", enabled: !enabled })}
-        className={`relative h-6 w-11 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
           enabled ? "bg-slate-800" : "bg-slate-300"
         }`}
       >
+        {/*
+          Track is 44x24 and the knob 20, so the knob needs a 2px inset on both
+          sides: 2px off, and 44-20-2 = 22px on. `translate-x-5` (20px) left a
+          4px gap on the right against 2px on the left, which read as a
+          slightly crooked switch. The ring gives the white knob definition
+          against the light off-state track.
+        */}
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-            enabled ? "translate-x-5" : "translate-x-0.5"
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
+            enabled ? "translate-x-[22px]" : "translate-x-0.5"
           }`}
         />
       </button>
