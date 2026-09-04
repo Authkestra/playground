@@ -2,6 +2,42 @@
 
 use crate::session::DEFAULT_TTL_HOURS;
 
+/// WebAuthn relying-party identity.
+///
+/// The RP ID must be the site's registrable domain and the origin must match
+/// exactly what the browser sends, or every ceremony fails with an opaque
+/// browser-side error. Preview deployments therefore need their own origin.
+#[derive(Debug, Clone)]
+pub struct RelyingParty {
+    pub id: String,
+    pub origin: String,
+    pub name: String,
+}
+
+impl RelyingParty {
+    pub fn from_env() -> Self {
+        // Defaults suit local development; production sets both explicitly.
+        let origin = std::env::var("WEBAUTHN_ORIGIN")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let id = std::env::var("WEBAUTHN_RP_ID").unwrap_or_else(|_| {
+            // Derive the host from the origin so the two cannot drift apart by
+            // accident, which is the usual cause of a silent ceremony failure.
+            origin
+                .split("://")
+                .nth(1)
+                .and_then(|rest| rest.split('/').next())
+                .and_then(|host| host.split(':').next())
+                .unwrap_or("localhost")
+                .to_string()
+        });
+        let name = std::env::var("WEBAUTHN_RP_NAME")
+            .unwrap_or_else(|_| "Authkestra Playground".to_string());
+
+        tracing::info!(rp_id = %id, rp_origin = %origin, "WebAuthn relying party");
+        Self { id, origin, name }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub port: u16,
@@ -21,6 +57,8 @@ pub struct Settings {
     /// Cloudflare sits in front. Set to an empty string to disable and fall
     /// back to the rightmost `X-Forwarded-For` entry.
     pub trusted_client_ip_header: Option<axum::http::HeaderName>,
+    /// WebAuthn relying-party identity.
+    pub relying_party: RelyingParty,
 }
 
 impl Settings {
@@ -87,6 +125,7 @@ impl Settings {
             admin_token,
             allowed_origins,
             trusted_client_ip_header,
+            relying_party: RelyingParty::from_env(),
         }
     }
 }

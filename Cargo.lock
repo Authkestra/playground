@@ -65,6 +65,7 @@ dependencies = [
 name = "api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "authkestra-axum",
  "authkestra-engine",
  "authkestra-providers",
@@ -73,7 +74,9 @@ dependencies = [
  "http-body-util",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
+ "totp-rs",
  "tower",
  "tower-cookies",
  "tower-http",

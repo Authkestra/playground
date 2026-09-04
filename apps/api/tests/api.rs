@@ -29,11 +29,19 @@ fn settings(admin_token: Option<&str>) -> Settings {
         // Tests reach the router directly with no proxy in front, so they
         // identify callers by X-Forwarded-For rather than a trusted header.
         trusted_client_ip_header: None,
+        relying_party: api::settings::RelyingParty {
+            id: "localhost".to_string(),
+            origin: "http://localhost:3000".to_string(),
+            name: "test".to_string(),
+        },
     }
 }
 
-fn state_with(kill_switch: KillSwitch, admin_token: Option<&str>) -> AppState {
+async fn state_with(kill_switch: KillSwitch, admin_token: Option<&str>) -> AppState {
     let settings = Arc::new(settings(admin_token));
+    let pool = api::credentials::open_in_memory()
+        .await
+        .expect("in-memory credential store");
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
             ScenarioRegistry::with_builtins(),
@@ -43,11 +51,12 @@ fn state_with(kill_switch: KillSwitch, admin_token: Option<&str>) -> AppState {
         kill_switch: Arc::new(kill_switch),
         engines: Arc::new(EngineFactory::new(ProviderCredentials::default(), false)),
         settings,
+        pool,
     }
 }
 
-fn app(kill_switch: KillSwitch, admin_token: Option<&str>) -> axum::Router {
-    api::build_router(state_with(kill_switch, admin_token))
+async fn app(kill_switch: KillSwitch, admin_token: Option<&str>) -> axum::Router {
+    api::build_router(state_with(kill_switch, admin_token).await)
 }
 
 /// The rate limiter keys on client IP, so tests must present one.
@@ -74,6 +83,7 @@ fn session_cookie(resp: &axum::response::Response) -> Option<String> {
 #[tokio::test]
 async fn health_reports_status_and_kill_switch_state() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(req("GET", "/health").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -87,6 +97,7 @@ async fn health_reports_status_and_kill_switch_state() {
 #[tokio::test]
 async fn first_request_issues_an_http_only_session_cookie() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(req("GET", "/api/session").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -106,14 +117,17 @@ async fn first_request_issues_an_http_only_session_cookie() {
 #[tokio::test]
 async fn scenarios_render_from_data_with_both_control_shapes() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(req("GET", "/api/scenarios").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
     let json = body_json(resp).await;
     let specs = json.as_array().expect("array of specs");
-    assert_eq!(specs.len(), 2);
+    assert!(!specs.is_empty(), "the registry should expose scenarios");
 
+    // Asserted by capability rather than count, so registering a new scenario
+    // doesn't break an unrelated test.
     let kinds: BTreeSet<&str> = specs
         .iter()
         .map(|s| s["control"]["kind"].as_str().unwrap())
@@ -121,12 +135,28 @@ async fn scenarios_render_from_data_with_both_control_shapes() {
     assert!(kinds.contains("toggle"));
     assert!(kinds.contains("select_one"));
     assert!(specs.iter().all(|s| s["available"] == true));
+
+    // The real TOTP scenario is registered and advertises its ceremony steps,
+    // so the frontend can drive it from data.
+    let totp = specs
+        .iter()
+        .find(|s| s["id"] == "totp")
+        .expect("totp scenario registered");
+    let actions: BTreeSet<&str> = totp["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    assert!(actions.contains("provision"), "actions: {actions:?}");
+    assert!(actions.contains("verify"), "actions: {actions:?}");
 }
 
 /// P1's headline acceptance: configure a scenario, get back a real diff.
 #[tokio::test]
 async fn configuring_a_scenario_returns_config_and_a_real_diff() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("POST", "/api/scenarios/dummy_toggle/configure")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -156,7 +186,7 @@ async fn configuring_a_scenario_returns_config_and_a_real_diff() {
 
 #[tokio::test]
 async fn configuration_persists_across_requests_on_the_same_cookie() {
-    let app = app(KillSwitch::default(), None);
+    let app = app(KillSwitch::default(), None).await;
 
     let first = app
         .clone()
@@ -190,7 +220,7 @@ async fn configuration_persists_across_requests_on_the_same_cookie() {
 /// Two visitors must never see each other's configuration.
 #[tokio::test]
 async fn a_second_visitor_gets_an_independent_configuration() {
-    let app = app(KillSwitch::default(), None);
+    let app = app(KillSwitch::default(), None).await;
 
     let first = app
         .clone()
@@ -221,7 +251,7 @@ async fn a_second_visitor_gets_an_independent_configuration() {
 
 #[tokio::test]
 async fn reset_returns_the_visitor_to_defaults() {
-    let app = app(KillSwitch::default(), None);
+    let app = app(KillSwitch::default(), None).await;
 
     let configured = app
         .clone()
@@ -255,6 +285,7 @@ async fn reset_returns_the_visitor_to_defaults() {
 #[tokio::test]
 async fn an_unknown_scenario_is_a_404_not_a_panic() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("POST", "/api/scenarios/nope/configure")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -272,6 +303,7 @@ async fn an_unknown_scenario_is_a_404_not_a_panic() {
 async fn a_value_of_the_wrong_shape_is_rejected() {
     // A select_one value posted at a toggle control.
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("POST", "/api/scenarios/dummy_toggle/configure")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -290,6 +322,7 @@ async fn a_value_of_the_wrong_shape_is_rejected() {
 #[tokio::test]
 async fn an_unknown_option_is_rejected() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("POST", "/api/scenarios/dummy_provider/configure")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -306,7 +339,7 @@ async fn an_unknown_option_is_rejected() {
 
 #[tokio::test]
 async fn try_succeeds_once_the_scenario_is_configured() {
-    let app = app(KillSwitch::default(), None);
+    let app = app(KillSwitch::default(), None).await;
 
     let configured = app
         .clone()
@@ -338,6 +371,7 @@ async fn try_succeeds_once_the_scenario_is_configured() {
 #[tokio::test]
 async fn try_reports_not_configured_before_the_toggle_is_on() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("POST", "/api/scenarios/dummy_toggle/try")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -357,7 +391,7 @@ async fn try_reports_not_configured_before_the_toggle_is_on() {
 async fn the_kill_switch_stops_try_but_leaves_the_site_readable() {
     let ks = KillSwitch::default();
     ks.set_demo_enabled(false);
-    let app = app(ks, None);
+    let app = app(ks, None).await;
 
     let tried = app
         .clone()
@@ -403,7 +437,7 @@ async fn the_kill_switch_stops_try_but_leaves_the_site_readable() {
 async fn one_scenario_can_be_disabled_without_touching_the_others() {
     let ks = KillSwitch::default();
     ks.set_scenario_enabled("dummy_toggle", false);
-    let app = app(ks, None);
+    let app = app(ks, None).await;
 
     let specs = body_json(
         app.oneshot(req("GET", "/api/scenarios").body(Body::empty()).unwrap())
@@ -432,6 +466,7 @@ async fn one_scenario_can_be_disabled_without_touching_the_others() {
 #[tokio::test]
 async fn admin_routes_are_absent_when_no_token_is_configured() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("POST", "/admin/kill-switch")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -448,6 +483,7 @@ async fn admin_routes_are_absent_when_no_token_is_configured() {
 #[tokio::test]
 async fn admin_requires_the_bearer_token() {
     let resp = app(KillSwitch::default(), Some("s3cret"))
+        .await
         .oneshot(
             req("POST", "/admin/kill-switch")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -462,7 +498,7 @@ async fn admin_requires_the_bearer_token() {
 
 #[tokio::test]
 async fn admin_can_flip_the_switch_at_runtime() {
-    let state = state_with(KillSwitch::default(), Some("s3cret"));
+    let state = state_with(KillSwitch::default(), Some("s3cret")).await;
     let app = api::build_router(state.clone());
 
     let resp = app
@@ -496,7 +532,7 @@ async fn admin_can_flip_the_switch_at_runtime() {
 
 #[tokio::test]
 async fn abusing_the_try_endpoint_is_throttled_with_a_renderable_429() {
-    let app = app(KillSwitch::default(), None);
+    let app = app(KillSwitch::default(), None).await;
 
     let mut statuses = Vec::new();
     let mut throttled_body = None;
@@ -538,7 +574,7 @@ async fn abusing_the_try_endpoint_is_throttled_with_a_renderable_429() {
 
 #[tokio::test]
 async fn normal_interactive_use_is_not_throttled() {
-    let app = app(KillSwitch::default(), None);
+    let app = app(KillSwitch::default(), None).await;
 
     // A handful of ordinary reads from one visitor must all succeed.
     for i in 0..10 {
@@ -569,6 +605,7 @@ async fn normal_interactive_use_is_not_throttled() {
 #[tokio::test]
 async fn a_request_with_no_forwarding_header_and_no_connect_info_still_works() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -597,7 +634,7 @@ async fn an_allowed_origin_is_echoed_back() {
         allowed_origins: vec!["https://example.test".to_string()],
         ..settings(None)
     };
-    let mut st = state_with(KillSwitch::default(), None);
+    let mut st = state_with(KillSwitch::default(), None).await;
     st.settings = Arc::new(settings);
 
     let resp = api::build_router(st)
@@ -636,6 +673,7 @@ async fn a_trailing_slash_in_the_allow_list_still_matches() {
 #[tokio::test]
 async fn an_origin_not_on_the_list_is_not_echoed() {
     let resp = app(KillSwitch::default(), None)
+        .await
         .oneshot(
             req("GET", "/api/session")
                 .header(header::ORIGIN, "https://evil.test")

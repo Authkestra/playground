@@ -6,13 +6,15 @@
 //! and are deleted once the real scenarios land in P2.
 
 use super::{
-    Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioOption,
-    TryOutcome, TryResult,
+    Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioContext,
+    ScenarioOption, TryOutcome, TryResult,
 };
+use crate::error::ApiError;
 
 /// A boolean control, shaped like the eventual passkeys / TOTP scenarios.
 pub struct DummyToggleScenario;
 
+#[async_trait::async_trait]
 impl Scenario for DummyToggleScenario {
     fn id(&self) -> &'static str {
         "dummy_toggle"
@@ -49,18 +51,17 @@ impl Scenario for DummyToggleScenario {
         }
     }
 
-    fn try_run(&self, value: &ControlValue) -> TryResult {
-        if !value.is_active() {
-            return TryResult {
+    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
+        if !ctx.value.is_active() {
+            return Ok(TryResult {
                 outcome: TryOutcome::NotConfigured,
                 detail: "Turn the example toggle on first.".to_string(),
-            };
+            });
         }
-        TryResult {
+        Ok(TryResult {
             outcome: TryOutcome::Ok,
-            detail: "The example toggle is on. Real flows arrive with the P2 scenarios."
-                .to_string(),
-        }
+            detail: "The example toggle is on.".to_string(),
+        })
     }
 }
 
@@ -78,6 +79,7 @@ impl DummyProviderScenario {
     }
 }
 
+#[async_trait::async_trait]
 impl Scenario for DummyProviderScenario {
     fn id(&self) -> &'static str {
         "dummy_provider"
@@ -121,8 +123,8 @@ impl Scenario for DummyProviderScenario {
         }
     }
 
-    fn try_run(&self, value: &ControlValue) -> TryResult {
-        match value {
+    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
+        Ok(match ctx.value {
             ControlValue::SelectOne {
                 selected: Some(provider),
             } => TryResult {
@@ -136,6 +138,6 @@ impl Scenario for DummyProviderScenario {
                 outcome: TryOutcome::NotConfigured,
                 detail: "Pick a provider first.".to_string(),
             },
-        }
+        })
     }
 }

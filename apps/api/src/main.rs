@@ -17,7 +17,10 @@ async fn main() {
         )
         .init();
 
-    let state = state_from_env();
+    let state = match state_from_env().await {
+        Ok(s) => s,
+        Err(e) => panic!("failed to initialise application state: {e}"),
+    };
 
     tracing::info!(
         scenarios = ?state.sessions.registry().ids(),

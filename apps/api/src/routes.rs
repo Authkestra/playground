@@ -18,7 +18,7 @@ use crate::diff::{self, ConfigDiff};
 use crate::engine::EngineFactory;
 use crate::error::ApiError;
 use crate::killswitch::KillSwitch;
-use crate::scenario::{ControlValue, ScenarioSpec, TryResult};
+use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec, TryResult};
 use crate::session::{DemoSession, DemoSessionStore, DemoSessionView, COOKIE_NAME};
 use crate::settings::Settings;
 
@@ -28,6 +28,8 @@ pub struct AppState {
     pub kill_switch: Arc<KillSwitch>,
     pub engines: Arc<EngineFactory>,
     pub settings: Arc<Settings>,
+    /// Pool backing the credential store scenarios enrol into.
+    pub pool: sqlx::SqlitePool,
 }
 
 // ---------------------------------------------------------------- wire types
@@ -105,6 +107,7 @@ fn specs_for(state: &AppState) -> Vec<ScenarioSpec> {
             control: s.control(),
             depends_on: s.depends_on(),
             available: state.kill_switch.scenario_enabled(s.id()),
+            actions: s.actions().iter().map(|a| a.to_string()).collect(),
         })
         .collect()
 }
@@ -223,11 +226,58 @@ async fn try_scenario(
         .cloned()
         .unwrap_or_else(|| scenario.default_value());
 
-    // The engine this visitor's config implies. v0's scenarios do not drive it
-    // yet, but building it here keeps the per-session path exercised.
+    // The engine this visitor's config implies.
     let _engine = state.engines.engine_for(&session.config);
 
-    Ok(Json(scenario.try_run(&value)))
+    let ctx = ScenarioContext {
+        session_id: session.id,
+        value: &value,
+        pool: &state.pool,
+        relying_party: &state.settings.relying_party,
+    };
+    Ok(Json(scenario.try_run(&ctx).await?))
+}
+
+/// One step of a scenario's ceremony.
+///
+/// Generic on purpose: registration and verification are multi-round-trip, and
+/// giving each scenario its own routes would put a per-scenario branch back
+/// into the HTTP layer. Scenarios declare the steps they accept via
+/// `ScenarioSpec::actions`, so the frontend discovers them from data.
+#[tracing::instrument(skip_all, fields(scenario = %id, action = %action))]
+async fn scenario_action(
+    State(state): State<AppState>,
+    cookies: Cookies,
+    Path((id, action)): Path<(String, String)>,
+    body: Option<Json<serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let registry = state.sessions.registry();
+    let scenario = registry
+        .get(&id)
+        .ok_or_else(|| ApiError::UnknownScenario(id.clone()))?;
+
+    // Ceremonies create credentials and can reach third parties, so they are
+    // gated by the kill switch exactly like `try`.
+    if !state.kill_switch.scenario_enabled(&id) {
+        return Err(ApiError::DemoDisabled);
+    }
+
+    let session = resolve_session(&state, &cookies);
+    let value = session
+        .config
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| scenario.default_value());
+
+    let ctx = ScenarioContext {
+        session_id: session.id,
+        value: &value,
+        pool: &state.pool,
+        relying_party: &state.settings.relying_party,
+    };
+
+    let payload = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
+    Ok(Json(scenario.action(&action, payload, &ctx).await?))
 }
 
 #[tracing::instrument(skip_all)]
@@ -275,7 +325,11 @@ async fn admin_kill_switch(
 /// Routes that hit third parties or create credentials, and so carry the
 /// tighter rate limit.
 pub fn sensitive_router() -> Router<AppState> {
-    Router::new().route("/api/scenarios/{id}/try", post(try_scenario))
+    Router::new()
+        .route("/api/scenarios/{id}/try", post(try_scenario))
+        // Ceremony steps create credentials and call third parties, so they
+        // belong on the tighter bucket alongside `try`.
+        .route("/api/scenarios/{id}/action/{action}", post(scenario_action))
 }
 
 /// Everything else.

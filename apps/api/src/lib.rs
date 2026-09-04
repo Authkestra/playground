@@ -7,6 +7,7 @@
 //! Exposed as a library so integration tests can build the same router the
 //! binary serves.
 
+pub mod credentials;
 pub mod demo_config;
 pub mod diff;
 pub mod engine;
@@ -32,7 +33,7 @@ use crate::engine::{EngineFactory, ProviderCredentials};
 use crate::killswitch::KillSwitch;
 use crate::routes::AppState;
 use crate::scenario::ScenarioRegistry;
-use crate::session::{DemoSessionStore, NoopJanitor};
+use crate::session::DemoSessionStore;
 use crate::settings::Settings;
 
 /// Client-IP key extractor for the rate limiter.
@@ -131,27 +132,34 @@ const SENSITIVE_REPLENISH_SECS: u64 = 5;
 const SENSITIVE_BURST: u32 = 10;
 
 /// Build application state from the environment.
-pub fn state_from_env() -> AppState {
+///
+/// Async because the credential store is opened and migrated here: a scenario
+/// that cannot persist a credential is broken, so failing at boot is better
+/// than failing on a visitor's first ceremony.
+pub async fn state_from_env() -> Result<AppState, sqlx::Error> {
     let settings = Arc::new(Settings::from_env());
     let kill_switch = Arc::new(KillSwitch::from_env());
     let registry = ScenarioRegistry::with_builtins();
 
+    let pool = crate::credentials::open().await?;
+
     let sessions = Arc::new(DemoSessionStore::new(
         registry,
         settings.session_ttl_hours,
-        Arc::new(NoopJanitor),
+        crate::credentials::janitor(pool.clone()),
     ));
     let engines = Arc::new(EngineFactory::new(
         ProviderCredentials::from_env(),
         settings.cookie_secure,
     ));
 
-    AppState {
+    Ok(AppState {
         sessions,
         kill_switch,
         engines,
         settings,
-    }
+        pool,
+    })
 }
 
 /// The 429 body, matching the shape documented in `docs/api-contract.md` so the

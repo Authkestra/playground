@@ -10,12 +10,18 @@
 //! needs a new `match` arm.
 
 pub mod dummy;
+pub mod totp;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use ts_rs::TS;
+use uuid::Uuid;
+
+use crate::credentials::Credentials;
+use crate::error::ApiError;
 
 /// A selectable option for `SelectOne` / `SelectMany` controls.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -117,6 +123,9 @@ pub struct ScenarioSpec {
     /// the control as unavailable rather than hiding it, so the page still
     /// reads as intentional.
     pub available: bool,
+    /// Ceremony steps this scenario accepts at
+    /// `POST /api/scenarios/:id/action/:action`.
+    pub actions: Vec<String>,
 }
 
 /// A crate + feature set a real project would need for the current config.
@@ -208,10 +217,37 @@ pub struct TryResult {
     pub detail: String,
 }
 
+/// Everything a scenario needs to do real work for one visitor.
+///
+/// The "user" a scenario enrols credentials against is the demo session itself,
+/// so the session id is the user id. That is what makes expiry cleanup simple:
+/// deleting the session's credentials is a single delete by user id.
+pub struct ScenarioContext<'a> {
+    pub session_id: Uuid,
+    /// The visitor's current value for this scenario.
+    pub value: &'a ControlValue,
+    pub pool: &'a sqlx::SqlitePool,
+    /// Relying-party settings for WebAuthn ceremonies.
+    pub relying_party: &'a crate::settings::RelyingParty,
+}
+
+impl ScenarioContext<'_> {
+    /// The credential owner id. Scoped to the session, never to a person.
+    pub fn user_id(&self) -> String {
+        self.session_id.to_string()
+    }
+
+    /// A credential store bound to this request.
+    pub fn credentials(&self) -> Credentials {
+        crate::credentials::store(self.pool)
+    }
+}
+
 /// One playground scenario.
 ///
 /// Implementors are registered once and driven entirely through this trait, so
 /// the HTTP layer never grows a per-scenario branch.
+#[async_trait::async_trait]
 pub trait Scenario: Send + Sync {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
@@ -257,9 +293,37 @@ pub trait Scenario: Send + Sync {
     /// Returns empty consequences when the scenario is not active.
     fn consequences(&self, value: &ControlValue) -> Consequences;
 
-    /// Exercise the scenario. In v0 this reports configuration state; live
-    /// flows land with the individual scenarios in P2.
-    fn try_run(&self, value: &ControlValue) -> TryResult;
+    /// Exercise the scenario without running a full ceremony — used by the
+    /// `try` endpoint to report readiness.
+    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError>;
+
+    /// Handle one step of a multi-step ceremony.
+    ///
+    /// Registration and authentication are several round-trips, which the
+    /// uniform configure/diff/try contract does not cover. Rather than giving
+    /// each scenario its own routes — which would put a per-scenario branch
+    /// back in the HTTP layer — every step arrives here through
+    /// `POST /api/scenarios/:id/action/:action`.
+    ///
+    /// The default rejects everything, so a scenario without ceremonies need
+    /// not implement it.
+    async fn action(
+        &self,
+        _action: &str,
+        _body: Value,
+        _ctx: &ScenarioContext<'_>,
+    ) -> Result<Value, ApiError> {
+        Err(ApiError::UnknownAction {
+            scenario: self.id().to_string(),
+            action: _action.to_string(),
+        })
+    }
+
+    /// Actions this scenario understands, advertised to the frontend so the UI
+    /// can be built from data rather than hardcoded per scenario.
+    fn actions(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 /// Registry of every known scenario.
@@ -283,6 +347,10 @@ impl ScenarioRegistry {
     /// the codebase has to change to accommodate them.
     pub fn with_builtins() -> Self {
         let mut r = Self::new();
+        r.register(Arc::new(totp::TotpScenario));
+        // Placeholders covering control shapes no real scenario uses yet.
+        // `dummy_provider` goes when the OAuth scenario lands; `dummy_toggle`
+        // stays only as long as tests depend on a zero-dependency toggle.
         r.register(Arc::new(dummy::DummyToggleScenario));
         r.register(Arc::new(dummy::DummyProviderScenario));
         r

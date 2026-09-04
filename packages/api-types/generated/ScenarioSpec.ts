@@ -14,4 +14,9 @@ depends_on: Array<string>,
  * the control as unavailable rather than hiding it, so the page still
  * reads as intentional.
  */
-available: boolean, };
+available: boolean, 
+/**
+ * Ceremony steps this scenario accepts at
+ * `POST /api/scenarios/:id/action/:action`.
+ */
+actions: Array<string>, };

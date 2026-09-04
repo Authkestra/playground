@@ -20,6 +20,8 @@ export type { DiffKind } from "./generated/DiffKind";
 export type { HealthResponse } from "./generated/HealthResponse";
 export type { ScenarioOption } from "./generated/ScenarioOption";
 export type { ScenarioSpec } from "./generated/ScenarioSpec";
+export type { TotpProvision } from "./generated/TotpProvision";
+export type { TotpVerification } from "./generated/TotpVerification";
 export type { TryBody } from "./generated/TryBody";
 export type { TryOutcome } from "./generated/TryOutcome";
 export type { TryResult } from "./generated/TryResult";

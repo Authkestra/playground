@@ -16,6 +16,14 @@ pub enum ApiError {
     /// The demo session expired or never existed.
     SessionGone,
     Unauthorized,
+    /// A ceremony step the scenario does not define.
+    UnknownAction {
+        scenario: String,
+        action: String,
+    },
+    /// The scenario itself failed. Distinct from a flow *rejecting* input —
+    /// a wrong TOTP code is a normal result, not this.
+    Scenario(String),
 }
 
 impl ApiError {
@@ -43,6 +51,16 @@ impl ApiError {
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
                 "Missing or incorrect admin token.".to_string(),
+            ),
+            ApiError::UnknownAction { scenario, action } => (
+                StatusCode::NOT_FOUND,
+                "unknown_action",
+                format!("Scenario `{scenario}` has no action `{action}`."),
+            ),
+            ApiError::Scenario(detail) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "scenario_failed",
+                detail.clone(),
             ),
         }
     }
