@@ -78,7 +78,7 @@ fn build_state(
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
             kv.clone(),
-            ScenarioRegistry::with_providers(configured),
+            ScenarioRegistry::for_tests(configured),
             settings.session_ttl_hours,
             creds.clone(),
         )),

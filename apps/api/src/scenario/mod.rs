@@ -360,20 +360,32 @@ impl ScenarioRegistry {
     ///
     /// P2 adds passkeys / TOTP / OAuth / bot-protection here; nothing else in
     /// the codebase has to change to accommodate them.
+    /// The registry with no OAuth providers configured.
     pub fn with_builtins() -> Self {
         Self::with_providers(Vec::new())
     }
 
-    /// The registry, with the OAuth scenario offering only the providers this
-    /// deployment actually has credentials for.
+    /// The scenarios a visitor is offered.
+    ///
+    /// The OAuth control only lists providers this deployment has credentials
+    /// for, so it can never offer a dead end.
     pub fn with_providers(configured_providers: Vec<String>) -> Self {
         let mut r = Self::new();
         r.register(Arc::new(passkeys::PasskeysScenario));
         r.register(Arc::new(oauth::OAuthScenario::new(configured_providers)));
         r.register(Arc::new(totp::TotpScenario));
-        // Placeholders covering control shapes no real scenario uses yet.
-        // `dummy_provider` goes when the OAuth scenario lands; `dummy_toggle`
-        // stays only as long as tests depend on a zero-dependency toggle.
+        r
+    }
+
+    /// As [`Self::with_providers`], plus the placeholder scenarios.
+    ///
+    /// The placeholders are deliberately **not** shipped: with passkeys, OAuth
+    /// and TOTP all real, "Example toggle" showing up as a selectable sign-in
+    /// method is just confusing. They stay useful in tests precisely because
+    /// they carry no real behaviour — a test that needs "some toggle" should not
+    /// depend on what TOTP happens to do.
+    pub fn for_tests(configured_providers: Vec<String>) -> Self {
+        let mut r = Self::with_providers(configured_providers);
         r.register(Arc::new(dummy::DummyToggleScenario));
         r.register(Arc::new(dummy::DummyProviderScenario));
         r

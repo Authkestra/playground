@@ -16,13 +16,17 @@ import {
   getScenarios,
   getSession,
   resetSession,
-  tryScenario,
 } from "@/lib/api";
+import { clearOAuthReturnParams, readOAuthReturn, type OAuthReturn } from "@/lib/oauth";
 import SessionBar from "@/components/SessionBar";
-import ScenarioPanel, { type TryResultState } from "@/components/ScenarioPanel";
-import DiffViewer from "@/components/DiffViewer";
+import ScenarioPanel from "@/components/ScenarioPanel";
+import StepIndicator from "@/components/StepIndicator";
+import StepChooseMethods from "@/components/StepChooseMethods";
+import StepSignIn from "@/components/StepSignIn";
+import StepDownload from "@/components/StepDownload";
 
 type Phase = "loading" | "unavailable" | "explainer" | "ready";
+type Step = 1 | 2 | 3;
 
 export default function Playground() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -34,9 +38,16 @@ export default function Playground() {
   const [diffScenarioName, setDiffScenarioName] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
-  const [tryingIds, setTryingIds] = useState<Set<string>>(new Set());
-  const [tryResults, setTryResults] = useState<Record<string, TryResultState>>({});
   const [resetting, setResetting] = useState(false);
+
+  const [step, setStep] = useState<Step>(1);
+  const [maxReached, setMaxReached] = useState<Step>(1);
+  const [oauthReturn, setOauthReturn] = useState<OAuthReturn | null>(null);
+
+  const goToStep = useCallback((next: Step) => {
+    setStep(next);
+    setMaxReached((prev) => (next > prev ? next : prev));
+  }, []);
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -103,7 +114,18 @@ export default function Playground() {
     setSession(sessionResult.data);
     setConfig(sessionResult.data.config);
     setPhase("ready");
-  }, []);
+
+    // The browser may just have navigated back from an OAuth provider — the
+    // outcome arrives as query params on this very load. Read them, land the
+    // visitor on step 2 to see it, then scrub the URL so a reload or a
+    // shared link doesn't replay the same result.
+    const parsedOauthReturn = readOAuthReturn(window.location.search);
+    if (parsedOauthReturn) {
+      setOauthReturn(parsedOauthReturn);
+      clearOAuthReturnParams();
+      goToStep(2);
+    }
+  }, [goToStep]);
 
   useEffect(() => {
     void load();
@@ -136,23 +158,15 @@ export default function Playground() {
     setConfig(result.data.config);
     setDiff(null);
     setDiffScenarioName(null);
-    setTryResults({});
+    setOauthReturn(null);
+    setStep(1);
+    setMaxReached(1);
   }, []);
 
   const handleChange = useCallback(
     async (id: string, value: ControlValue) => {
       setPendingIds((prev) => new Set(prev).add(id));
       setBanner(null);
-
-      // A previous "Try it" result described the OLD configuration, so it is
-      // stale the moment the control moves. Leaving it on screen made the
-      // toggle look broken: flipping it on still showed "turn it on first".
-      setTryResults((prev) => {
-        if (!(id in prev)) return prev;
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
 
       // Move the control immediately and roll back if the server disagrees.
       // Waiting for the round trip made the switch feel dead — and on a
@@ -201,49 +215,14 @@ export default function Playground() {
     [scenarios, config],
   );
 
-  const handleTry = useCallback(async (id: string) => {
-    setTryingIds((prev) => new Set(prev).add(id));
-    setBanner(null);
-
-    const result = await tryScenario(id, {});
-
-    setTryingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-
-    if (!result.ok) {
-      const error = result.error;
-      switch (error.kind) {
-        case "demo_disabled":
-          setPhase("explainer");
-          return;
-        case "unavailable":
-          setBanner("The API became unavailable while trying this scenario.");
-          return;
-        case "rate_limited":
-          setBanner(error.detail);
-          return;
-        default: {
-          const message = `Could not try this scenario: ${error.detail}`;
-          setTryResults((prev) => ({
-            ...prev,
-            [id]: { outcome: "error", detail: message },
-          }));
-          return;
-        }
-      }
-    }
-
-    setTryResults((prev) => ({ ...prev, [id]: result.data }));
-  }, []);
-
   if (phase === "loading") {
     return (
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
         <Header />
-        <p className="text-sm text-slate-400">Loading playground…</p>
+        <p className="text-sm text-slate-400">
+          Loading playground… The API runs on a free tier and can take up to a minute to wake
+          up on its first request.
+        </p>
       </main>
     );
   }
@@ -295,9 +274,6 @@ export default function Playground() {
             disabled
             disabledReason="Controls are disabled while the demo is switched off."
             onChange={() => {}}
-            onTry={() => {}}
-            tryingIds={tryingIds}
-            tryResults={tryResults}
           />
         </section>
       </main>
@@ -305,7 +281,7 @@ export default function Playground() {
   }
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
+    <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
       <Header />
       {banner && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
@@ -317,30 +293,34 @@ export default function Playground() {
         onReset={() => void handleReset()}
         resetting={resetting}
       />
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Scenarios
-        </h2>
-        <ScenarioPanel
+
+      <StepIndicator current={step} maxReached={maxReached} onNavigate={goToStep} />
+
+      {step === 1 && (
+        <StepChooseMethods
           scenarios={scenarios}
           config={config}
           pendingIds={pendingIds}
-          disabled={false}
           onChange={(id, value) => void handleChange(id, value)}
-          onTry={(id) => void handleTry(id)}
-          tryingIds={tryingIds}
-          tryResults={tryResults}
-          onDemoDisabled={() => setPhase("explainer")}
+          diff={diff}
+          diffScenarioName={diffScenarioName}
+          onContinue={() => goToStep(2)}
         />
-      </section>
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Config diff{diffScenarioName ? ` — ${diffScenarioName}` : ""}
-        </h2>
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <DiffViewer diff={diff} />
-        </div>
-      </section>
+      )}
+
+      {step === 2 && (
+        <StepSignIn
+          scenarios={scenarios}
+          config={config}
+          oauthReturn={oauthReturn}
+          onDismissOauthReturn={() => setOauthReturn(null)}
+          onDemoDisabled={() => setPhase("explainer")}
+          onBack={() => goToStep(1)}
+          onContinue={() => goToStep(3)}
+        />
+      )}
+
+      {step === 3 && <StepDownload onBack={() => goToStep(2)} />}
     </main>
   );
 }

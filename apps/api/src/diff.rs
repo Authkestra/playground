@@ -110,7 +110,7 @@ mod tests {
     use crate::scenario::ControlValue;
 
     fn registry() -> ScenarioRegistry {
-        ScenarioRegistry::with_builtins()
+        ScenarioRegistry::for_tests(Vec::new())
     }
 
     #[test]

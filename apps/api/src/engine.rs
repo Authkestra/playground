@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn equal_configs_share_one_cached_engine() {
         let f = factory();
-        let r = ScenarioRegistry::with_builtins();
+        let r = ScenarioRegistry::for_tests(Vec::new());
         let cfg = DemoConfig::defaults_for(&r);
 
         let _a = f.engine_for(&cfg);
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn different_configs_get_different_engines() {
         let f = factory();
-        let r = ScenarioRegistry::with_builtins();
+        let r = ScenarioRegistry::for_tests(Vec::new());
         let a = DemoConfig::defaults_for(&r);
         let mut b = a.clone();
         b.set("dummy_toggle", ControlValue::Toggle { enabled: true });
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn fingerprint_is_stable_and_order_independent() {
-        let r = ScenarioRegistry::with_builtins();
+        let r = ScenarioRegistry::for_tests(Vec::new());
         let mut a = DemoConfig::defaults_for(&r);
         let mut b = DemoConfig::default();
         // Insert the same pairs in the opposite order.

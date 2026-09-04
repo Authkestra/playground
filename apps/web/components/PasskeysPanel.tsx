@@ -8,6 +8,8 @@ interface Props {
   scenarioId: string;
   /** Bubble up: the demo-wide kill switch flipped mid-ceremony. */
   onDemoDisabled: () => void;
+  /** Called after every register/authenticate round trip, so a host (e.g. the flow log) can refetch. */
+  onAction?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +202,7 @@ function describeWebAuthnError(err: unknown): string {
   }
 }
 
-export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
+export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: Props) {
   const [capability, setCapability] = useState<Capability>("checking");
   const [unsupportedReason, setUnsupportedReason] = useState<UnsupportedReason | null>(null);
 
@@ -307,8 +309,9 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
       setRegisterResult(finishResult.data);
     } finally {
       setRegistering(false);
+      onAction?.();
     }
-  }, [scenarioId, onDemoDisabled]);
+  }, [scenarioId, onDemoDisabled, onAction]);
 
   const handleAuthenticate = useCallback(async () => {
     setAuthenticating(true);
@@ -357,8 +360,9 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
       setAuthResult(finishResult.data);
     } finally {
       setAuthenticating(false);
+      onAction?.();
     }
-  }, [scenarioId, onDemoDisabled]);
+  }, [scenarioId, onDemoDisabled, onAction]);
 
   if (capability === "checking") {
     return <p className="text-xs text-slate-400">Checking passkey support in this browser…</p>;

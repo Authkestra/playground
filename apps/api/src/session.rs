@@ -188,7 +188,7 @@ mod tests {
         let credentials = KvCredentialStore::new(kv.clone(), Duration::from_secs(3600));
         DemoSessionStore::new(
             kv,
-            ScenarioRegistry::with_builtins(),
+            ScenarioRegistry::for_tests(Vec::new()),
             DEFAULT_TTL_HOURS,
             credentials,
         )
@@ -252,7 +252,7 @@ mod tests {
         // through the hour-based constructor, so write directly.
         let s = DemoSessionStore {
             kv: kv.clone(),
-            registry: ScenarioRegistry::with_builtins(),
+            registry: ScenarioRegistry::for_tests(Vec::new()),
             ttl: Duration::from_millis(30),
             credentials,
         };

@@ -31,14 +31,18 @@ interface Props {
   disabled: boolean;
   disabledReason?: string;
   onChange: (id: string, value: ControlValue) => void;
-  onTry: (id: string) => void;
-  tryingIds: Set<string>;
-  tryResults: Record<string, TryResultState>;
+  onTry?: (id: string) => void;
+  tryingIds?: Set<string>;
+  tryResults?: Record<string, TryResultState>;
   onDemoDisabled?: () => void;
+  /** Show the per-scenario ceremony UI (TOTP/passkeys) inline. Defaults to true. */
+  showActionPanels?: boolean;
+  /** Show the debug "Try it" button/result. Defaults to true. */
+  showTryButton?: boolean;
 }
 
-function isSatisfied(config: DemoConfig | null, dependencyId: string): boolean {
-  const value = config?.scenarios[dependencyId];
+/** Whether a control's current value counts as "the visitor turned this on". */
+export function isControlValueActive(value: ControlValue | undefined): boolean {
   if (!value) return false;
   switch (value.kind) {
     case "toggle":
@@ -52,6 +56,10 @@ function isSatisfied(config: DemoConfig | null, dependencyId: string): boolean {
   }
 }
 
+function isSatisfied(config: DemoConfig | null, dependencyId: string): boolean {
+  return isControlValueActive(config?.scenarios[dependencyId]);
+}
+
 export default function ScenarioPanel({
   scenarios,
   config,
@@ -60,9 +68,11 @@ export default function ScenarioPanel({
   disabledReason,
   onChange,
   onTry,
-  tryingIds,
-  tryResults,
+  tryingIds = new Set(),
+  tryResults = {},
   onDemoDisabled,
+  showActionPanels = true,
+  showTryButton = true,
 }: Props) {
   if (scenarios.length === 0) {
     return <p className="text-sm text-slate-400">No scenarios published yet.</p>;
@@ -83,7 +93,8 @@ export default function ScenarioPanel({
           disabled || !scenario.available || unmetDeps.length > 0 || isPending;
         const tryResult = tryResults[scenario.id];
         const actions = scenario.actions ?? [];
-        const ActionPanel = actions.length > 0 ? ACTION_PANELS[scenario.id] : undefined;
+        const ActionPanel =
+          showActionPanels && actions.length > 0 ? ACTION_PANELS[scenario.id] : undefined;
         const showActionPanel =
           ActionPanel &&
           !disabled &&
@@ -121,25 +132,27 @@ export default function ScenarioPanel({
               </div>
             </div>
 
-            <div className="mt-3 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => onTry(scenario.id)}
-                disabled={disabled || !scenario.available || tryingIds.has(scenario.id)}
-                className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {tryingIds.has(scenario.id) ? "Trying…" : "Try it"}
-              </button>
-              {tryResult && (
-                <span
-                  className={`text-xs ${
-                    tryResult.outcome === "ok" ? "text-emerald-600" : "text-amber-600"
-                  }`}
+            {showTryButton && (
+              <div className="mt-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onTry?.(scenario.id)}
+                  disabled={disabled || !scenario.available || tryingIds.has(scenario.id)}
+                  className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {tryResult.detail}
-                </span>
-              )}
-            </div>
+                  {tryingIds.has(scenario.id) ? "Trying…" : "Try it"}
+                </button>
+                {tryResult && (
+                  <span
+                    className={`text-xs ${
+                      tryResult.outcome === "ok" ? "text-emerald-600" : "text-amber-600"
+                    }`}
+                  >
+                    {tryResult.detail}
+                  </span>
+                )}
+              </div>
+            )}
 
             {showActionPanel && ActionPanel && (
               <div className="mt-4 border-t border-slate-100 pt-4">

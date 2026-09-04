@@ -9,6 +9,8 @@ interface Props {
   scenarioId: string;
   /** Bubble up: the demo-wide kill switch flipped mid-ceremony. */
   onDemoDisabled: () => void;
+  /** Called after every provision/verify round trip, so a host (e.g. the flow log) can refetch. */
+  onAction?: () => void;
 }
 
 function normalizeCode(raw: string): string {
@@ -17,7 +19,7 @@ function normalizeCode(raw: string): string {
   return raw.replace(/[\s-]/g, "").replace(/\D/g, "").slice(0, 6);
 }
 
-export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
+export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Props) {
   const [provision, setProvision] = useState<TotpProvision | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
     const result = await scenarioAction<TotpProvision>(scenarioId, "provision", {});
 
     setProvisioning(false);
+    onAction?.();
 
     if (!result.ok) {
       switch (result.error.kind) {
@@ -78,7 +81,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
     }
 
     setProvision(result.data);
-  }, [scenarioId, onDemoDisabled]);
+  }, [scenarioId, onDemoDisabled, onAction]);
 
   const handleVerify = useCallback(async () => {
     if (code.length !== 6 || verifying) return;
@@ -89,6 +92,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
     const result = await scenarioAction<TotpVerification>(scenarioId, "verify", { code });
 
     setVerifying(false);
+    onAction?.();
 
     if (!result.ok) {
       switch (result.error.kind) {
@@ -109,7 +113,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
 
     // verified: false is a normal outcome, not an error — render it inline.
     setVerifyResult(result.data);
-  }, [scenarioId, code, verifying, onDemoDisabled]);
+  }, [scenarioId, code, verifying, onDemoDisabled, onAction]);
 
   return (
     <div className="flex flex-col gap-4">

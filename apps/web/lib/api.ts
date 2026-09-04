@@ -3,6 +3,7 @@ import type {
   ConfigureBody,
   ConfigureResponse,
   DemoSessionView,
+  FlowEvent,
   HealthResponse,
   ScenarioSpec,
   TryBody,
@@ -97,6 +98,14 @@ export function resetSession(): Promise<ApiResult<DemoSessionView>> {
 
 export function getScenarios(): Promise<ApiResult<ScenarioSpec[]>> {
   return request<ScenarioSpec[]>("/api/scenarios");
+}
+
+/**
+ * The flow log: what the engine actually did for this visitor, oldest first.
+ * See docs/api-contract.md#the-flow-log.
+ */
+export function getSessionEvents(): Promise<ApiResult<FlowEvent[]>> {
+  return request<FlowEvent[]>("/api/session/events");
 }
 
 export function configureScenario(

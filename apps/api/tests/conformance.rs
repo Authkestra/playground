@@ -105,7 +105,7 @@ fn registered() -> Vec<(String, ControlShape, Vec<String>)> {
 
 /// The same registry the test state is built with, so control options line up.
 fn test_registry() -> ScenarioRegistry {
-    ScenarioRegistry::with_providers(vec![
+    ScenarioRegistry::for_tests(vec![
         "discord".to_string(),
         "github".to_string(),
         "google".to_string(),
@@ -613,6 +613,28 @@ async fn resetting_leaves_no_credentials_behind_for_any_scenario() {
             credentials.count(&user_id, cred_type).await.unwrap(),
             0,
             "{cred_type} credentials survived a session reset"
+        );
+    }
+}
+
+/// The placeholders are test fixtures, not product.
+///
+/// With passkeys, OAuth and TOTP all real, "Example toggle" appearing as a
+/// selectable sign-in method is just confusing — and the wizard renders its
+/// method list generically from the registry, so anything registered shows up.
+#[tokio::test]
+async fn the_shipped_registry_offers_no_placeholder_scenarios() {
+    let shipped = ScenarioRegistry::with_providers(vec!["github".to_string()]);
+    let ids: Vec<&str> = shipped.iter().map(|s| s.id()).collect();
+
+    assert!(
+        !ids.iter().any(|id| id.starts_with("dummy_")),
+        "placeholder scenarios must not be offered to visitors: {ids:?}"
+    );
+    for expected in ["passkeys", "oauth", "totp"] {
+        assert!(
+            ids.contains(&expected),
+            "{expected} should be shipped: {ids:?}"
         );
     }
 }
