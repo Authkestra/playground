@@ -125,6 +125,20 @@ visitor's config, and a second machine would serve different configs depending
 on which one a visitor reached. Don't relax these without moving the session
 store to Redis.
 
+### Vercel builds showing as "cancelled"
+
+`apps/web/vercel.json` sets an `ignoreCommand` so backend-only commits don't
+rebuild the frontend. Vercel's semantics are inverted from the obvious reading:
+**exit 0 means skip the build**, exit 1 means proceed — and `git diff --quiet`
+exits 0 when nothing changed. So a commit touching only `apps/api/` correctly
+produces a **cancelled** Vercel build. That is the healthy outcome, not a
+failure.
+
+The one case where it bites is a project's *first* import, when there is no
+prior deployment to fall back on: if that commit didn't touch `apps/web` or
+`packages/`, you get no deployment at all. Hit **Redeploy** in the Vercel
+dashboard once; every later commit behaves correctly.
+
 Secrets go in with `fly secrets set`; the app reads plain env vars either way.
 The Fly app, Vercel project, DNS and provider credentials still need creating —
 see the open P0 issues for the exact steps and secret names.
