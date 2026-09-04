@@ -325,8 +325,8 @@ export default function Playground() {
   );
 }
 
-/** Where the framework itself lives. */
-const AUTHKESTRA_REPO = "https://github.com/marcjazz/authkestra";
+/** The framework's own site, which links back here. */
+const AUTHKESTRA_SITE = "https://authkestra.com";
 
 function Header() {
   return (
@@ -342,7 +342,7 @@ function Header() {
         framework — the playground exists to send people there.
       */}
       <a
-        href={AUTHKESTRA_REPO}
+        href={AUTHKESTRA_SITE}
         target="_blank"
         rel="noreferrer"
         className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
