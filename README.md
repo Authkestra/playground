@@ -205,9 +205,11 @@ Two ways out:
   once a deployment exists.
 - Or push any commit touching `apps/web/` or `packages/`.
 
-Secrets go in with `fly secrets set`; the app reads plain env vars either way.
-The Fly app, Vercel project, DNS and provider credentials still need creating —
-see the open P0 issues for the exact steps and secret names.
+See [`docs/deployment.md`](docs/deployment.md) for the full procedure. The short
+version: the API needs a Redis (`REDIS_URL`) and any container host; the
+frontend needs Vercel with root directory `apps/web`; and the API's
+`ALLOWED_ORIGINS` and the frontend's `NEXT_PUBLIC_API_BASE_URL` must name each
+other exactly.
 
 ## CI
 

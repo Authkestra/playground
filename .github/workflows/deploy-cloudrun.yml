@@ -1,0 +1,86 @@
+# Optional: deploy to Google Cloud Run instead of Render.
+#
+# Cloud Run scales to zero like Render's free plan but cold-starts a small Rust
+# binary in about a second rather than ~50, which matters for something people
+# click on expecting it to work. The trade-off is that GCP requires a billing
+# account even to use the free tier.
+#
+# Disabled by default (workflow_dispatch only) so it cannot fire half-configured.
+# To enable: add the secrets below, then add a `push: branches: [main]` trigger.
+name: Deploy (Cloud Run)
+
+on:
+  workflow_dispatch:
+
+env:
+  SERVICE: authkestra-playground-api
+  REGION: europe-west1
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for Workload Identity Federation, which is preferable to
+      # storing a long-lived service-account JSON key as a secret.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets are configured
+        id: check
+        env:
+          WIF: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          if [ -n "$WIF" ] && [ -n "$SA" ] && [ -n "$PROJECT" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Cloud Run deploy skipped: set GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT and GCP_PROJECT_ID."
+          fi
+
+      - uses: google-github-actions/auth@v2
+        if: steps.check.outputs.ready == 'true'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.check.outputs.ready == 'true'
+
+      # Source deploys build with Cloud Build, which honours the Dockerfile.
+      # `--min-instances=0` is the point of using this at all.
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "$REGION" \
+            --source . \
+            --allow-unauthenticated \
+            --port 8000 \
+            --min-instances 0 \
+            --max-instances 2 \
+            --memory 512Mi \
+            --set-env-vars "COOKIE_SECURE=true,RUST_LOG=info\,api=debug" \
+            --set-secrets "REDIS_URL=redis-url:latest,ADMIN_TOKEN=admin-token:latest,OAUTH_STATE_KEY=oauth-state-key:latest"
+
+      # A green deploy does not mean the service is serving — a process that
+      # exits at boot still reports success.
+      - name: Smoke test
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" --region "$REGION" \
+            --format 'value(status.url)')
+          echo "service URL: $URL"
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /tmp/h.json -w '%{http_code}' --max-time 15 "$URL/health" || true)
+            if [ "$code" = "200" ]; then cat /tmp/h.json; exit 0; fi
+            echo "attempt $attempt: HTTP ${code:-000}"; sleep 10
+          done
+          echo "::error::Deploy reported success but $URL/health never returned 200."
+          exit 1

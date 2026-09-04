@@ -1,0 +1,54 @@
+# Render blueprint for the playground API.
+#
+# Render is the card-free option: connect this repo in the dashboard ("New +" ->
+# "Blueprint") and it builds the Dockerfile and redeploys on every push to main,
+# with no CI secrets stored here.
+#
+# The free plan spins the service down after inactivity. That used to be
+# disqualifying — demo sessions lived in process memory — but all state is in
+# Redis now (docs/decisions/0004), so a spin-down costs a cold start and
+# nothing else. Visitors keep their configuration across it.
+services:
+  - type: web
+    name: authkestra-playground-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    # Built from the repo root: the Dockerfile copies the workspace manifest
+    # and lockfile, so the build context must be the workspace root.
+    dockerContext: .
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+      # Served over HTTPS by Render's proxy.
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: RUST_LOG
+        value: "info,api=debug,authkestra=info"
+      # Render sets X-Forwarded-For and does not expose a trusted single-IP
+      # header, so the rate limiter falls back to the rightmost XFF entry.
+      # See the note in apps/api/src/lib.rs on why the rightmost, not leftmost.
+      - key: TRUSTED_CLIENT_IP_HEADER
+        value: ""
+      # Set these in the dashboard, not here:
+      #   REDIS_URL        rediss://... from your Redis provider
+      #   ALLOWED_ORIGINS  the frontend origin(s), no trailing slash
+      #   WEBAUTHN_ORIGIN  the frontend origin
+      #   WEBAUTHN_RP_ID   the frontend's domain
+      #   ADMIN_TOKEN      long random string, enables the kill switch
+      #   OAUTH_STATE_KEY  >=32 bytes
+      - key: REDIS_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: WEBAUTHN_ORIGIN
+        sync: false
+      - key: WEBAUTHN_RP_ID
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: OAUTH_STATE_KEY
+        sync: false

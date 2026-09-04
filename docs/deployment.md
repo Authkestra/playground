@@ -1,0 +1,109 @@
+# Deploying the playground
+
+The API is a stateless container. All state lives in Redis with a TTL
+(`docs/decisions/0004-stateless-service-on-redis.md`), so the host may scale to
+zero, recycle instances, or run several — none of it loses a visitor's work.
+
+That means the only hard requirement is **a Redis instance**. The compute is
+interchangeable.
+
+## 1. Redis
+
+Any Redis reachable over TLS works. Free tiers that need no card:
+
+- **Upstash** — create a database, copy the `rediss://` connection string.
+- **Redis Cloud** free tier — same idea.
+
+Set `REDIS_URL` to that string. `rediss://` (two s's) selects TLS; the service
+logs which transport it negotiated at boot.
+
+> `REDIS_URL` unset falls back to an in-process store so `cargo run` needs no
+> infrastructure. It is logged as a warning and **must not** be used with more
+> than one instance — visitors would get inconsistent state with no other
+> symptom.
+
+The service connects and `PING`s at boot, so a bad URL fails immediately rather
+than on a visitor's first request.
+
+## 2. Compute
+
+### Render (no card required)
+
+`render.yaml` is a blueprint: in the dashboard choose **New + → Blueprint**,
+point it at this repo, and it builds `apps/api/Dockerfile` and redeploys on
+every push to `main`. No CI secrets are stored here.
+
+Set the `sync: false` variables in the dashboard (see the file for the list).
+
+**Cost of the free plan:** the service spins down after inactivity and takes
+roughly 50 seconds to come back. Visitors keep their configuration across it —
+that is what statelessness bought — but the first click after a quiet period is
+slow. For something people are invited to try, that is the main argument for the
+alternative below.
+
+### Cloud Run (better cold start, needs billing enabled)
+
+`.github/workflows/deploy-cloudrun.yml` deploys with Workload Identity
+Federation rather than a stored service-account key. It is `workflow_dispatch`
+only until its three secrets exist, so it cannot fire half-configured.
+
+Cold start for this binary is about a second rather than ~50. GCP's free tier is
+genuinely free at demo scale, but it requires a billing account on file.
+
+### Fly.io
+
+`fly.toml` still works and the container is unchanged; Fly now requires a card.
+The single-instance and no-autostop notes in that file are historical — they
+were load-bearing only while state lived in process memory.
+
+## 3. Frontend
+
+Vercel, root directory `apps/web`. Two settings have to agree with the API:
+
+| Where | Variable | Value |
+| --- | --- | --- |
+| Vercel | `NEXT_PUBLIC_API_BASE_URL` | the API's origin |
+| API | `ALLOWED_ORIGINS` | the frontend's origin(s), comma-separated |
+
+**A mismatch does not raise an error.** CORS here is credentialed, because the
+demo session rides in an HttpOnly cookie, so the browser simply blocks the
+request and the site reads as "API unavailable". Origins are compared exactly:
+no trailing slash, scheme included.
+
+## 4. WebAuthn
+
+| Variable | Value |
+| --- | --- |
+| `WEBAUTHN_ORIGIN` | the **frontend's** origin, exactly as the browser sends it |
+| `WEBAUTHN_RP_ID` | the frontend's domain (derived from the origin if unset) |
+
+The ceremony runs in the browser at the page's origin, so the relying party is
+the *frontend*, not the API. Pointing it at the API host is the usual cause of a
+ceremony failing with a deliberately vague browser-side error.
+
+A passkey is bound to the RP ID that created it, so **changing domains means
+every visitor re-registers.**
+
+## 5. Everything else
+
+| Variable | Why |
+| --- | --- |
+| `ADMIN_TOKEN` | Enables `POST /admin/kill-switch`. Unset means the route is not mounted at all — a missing secret must never mean an open switch. |
+| `OAUTH_STATE_KEY` | ≥32 bytes. Keeps encrypted OAuth state valid across restarts. |
+| `TRUSTED_CLIENT_IP_HEADER` | The header the proxy in front **overwrites**. `cf-connecting-ip` behind Cloudflare; empty to fall back to the rightmost `X-Forwarded-For`. Getting this wrong is a rate-limit bypass — see the note in `apps/api/src/lib.rs`. |
+| `<PROVIDER>_CLIENT_ID` / `_SECRET` | `GITHUB_`, `GOOGLE_`, `DISCORD_`. Absent credentials are not an error; the affected scenarios report themselves as not configured. |
+
+## Verifying a deployment
+
+```sh
+curl -s https://<api>/health
+# {"status":"ok","version":"...","demo_enabled":true}
+
+# CORS must echo the frontend origin, or the browser blocks everything:
+curl -sD - -o /dev/null -H "Origin: https://<frontend>" https://<api>/api/session \
+  | grep -i access-control-allow-origin
+```
+
+A green deploy is not proof of a working service — a process that exits at boot
+still reports success, which is how a broken container shipped once. Both deploy
+workflows smoke-test `/health` and fail the job if it never answers.
