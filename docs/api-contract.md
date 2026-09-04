@@ -12,6 +12,7 @@ regenerating (CI enforces this — see P0 "Mirror the framework's CI quality bar
 | GET    | `/health`                     | —               | `HealthResponse`  |
 | GET    | `/api/session`                | —               | `DemoSessionView` |
 | POST   | `/api/session/reset`          | —               | `DemoSessionView` |
+| GET    | `/api/session/events`         | —               | `FlowEvent[]`     |
 | GET    | `/api/scenarios`              | —               | `ScenarioSpec[]`  |
 | POST   | `/api/scenarios/:id/configure`| `ConfigureBody` | `ConfigureResponse` |
 | GET    | `/api/scenarios/:id/diff`     | —               | `ConfigDiff`      |
@@ -20,6 +21,29 @@ regenerating (CI enforces this — see P0 "Mirror the framework's CI quality bar
 
 The demo session id travels in an HttpOnly cookie (`ak_demo`). Every endpoint under
 `/api` lazily materialises a session if the cookie is absent or stale.
+
+## The flow log
+
+`GET /api/session/events` returns what the engine actually did for this visitor,
+oldest first — a challenge issued, a signature verified, a counter advanced.
+It is written for the visitor rather than for us: each entry names the step and
+explains why it mattered. Server-side tracing stays separate.
+
+`level` distinguishes outcomes that look similar but are not:
+
+| Level | Meaning |
+| --- | --- |
+| `info` | Something progressed |
+| `success` | A step completed |
+| `rejected` | Refused for an ordinary reason — a wrong code, a cancelled prompt. **Not a fault**, and must not render like one. |
+| `failed` | Something went wrong server-side |
+
+`facts` is always present (possibly empty) and holds values worth showing
+verbatim — a counter moving, an algorithm chosen. **Never secrets**; a test
+asserts the TOTP secret never appears in it.
+
+The log is capped per session and expires with it, so nothing has to clean it
+up. `POST /api/session/reset` clears it.
 
 ## Ceremony actions
 

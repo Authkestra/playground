@@ -233,9 +233,16 @@ pub struct ScenarioContext<'a> {
     pub relying_party: &'a crate::settings::RelyingParty,
     /// Short-lived state for multi-round-trip ceremonies.
     pub ceremonies: &'a crate::ceremony::CeremonyStore,
+    /// The visitor-facing flow log. Scenarios narrate their steps here.
+    pub events: &'a crate::events::EventLog,
 }
 
 impl ScenarioContext<'_> {
+    /// Narrate a step of this flow for the visitor.
+    pub async fn record(&self, step: crate::events::Step) {
+        self.events.record(self.session_id, step.build()).await;
+    }
+
     /// The credential owner id. Scoped to the session, never to a person.
     pub fn user_id(&self) -> String {
         self.session_id.to_string()

@@ -36,6 +36,7 @@ use super::{
 };
 use crate::ceremony::CeremonyKind;
 use crate::error::ApiError;
+use crate::events::Step;
 use crate::settings::RelyingParty;
 
 pub struct PasskeysScenario;
@@ -218,6 +219,17 @@ impl Scenario for PasskeysScenario {
                     .await?;
 
                 tracing::info!(session_id = %ctx.session_id, "passkey registration started");
+                ctx.record(
+                    Step::info("passkeys", "challenge issued")
+                        .detail(
+                            "A random challenge was generated and held server-side. Your \
+                             authenticator must sign exactly this value, which is what stops \
+                             a captured response being replayed later.",
+                        )
+                        .fact("relying party", ctx.relying_party.id.clone())
+                        .fact("answerable for", "5 minutes, once"),
+                )
+                .await;
                 serde_json::to_value(challenge).map_err(|e| ApiError::Scenario(e.to_string()))
             }
 
@@ -242,6 +254,17 @@ impl Scenario for PasskeysScenario {
                 match method.finish_register(&user_id, credential, state).await {
                     Ok(_) => {
                         tracing::info!(session_id = %ctx.session_id, "passkey registered");
+                        ctx.record(
+                            Step::success("passkeys", "passkey registered")
+                                .detail(
+                                    "The attestation verified against the challenge, and the \
+                                     public key was stored. The private key never left your \
+                                     device — this server could not use it even if it wanted \
+                                     to.",
+                                )
+                                .fact("stored", "public key + signature counter"),
+                        )
+                        .await;
                         let count = stored_passkeys(ctx).await?.len() as u32;
                         serde_json::to_value(PasskeyEnrolment {
                             enrolled: true,
@@ -253,6 +276,12 @@ impl Scenario for PasskeysScenario {
                     // demo (wrong device, cancelled prompt), not a server fault.
                     Err(e) => {
                         tracing::debug!(session_id = %ctx.session_id, error = %e, "passkey registration rejected");
+                        ctx.record(Step::rejected("passkeys", "registration rejected").detail(
+                            "The attestation did not verify against the issued challenge. \
+                             That happens if the prompt was cancelled, the challenge expired, \
+                             or the response was for a different origin.",
+                        ))
+                        .await;
                         Err(ApiError::CeremonyRejected(
                             "That registration could not be verified. Try again.".to_string(),
                         ))
@@ -282,6 +311,15 @@ impl Scenario for PasskeysScenario {
                     .await?;
 
                 tracing::info!(session_id = %ctx.session_id, "passkey authentication started");
+                ctx.record(
+                    Step::info("passkeys", "sign-in challenge issued")
+                        .detail(
+                            "A fresh challenge was issued, listing the credentials enrolled \
+                             for this session so your device knows which key to use.",
+                        )
+                        .fact("credentials offered", passkeys.len().to_string()),
+                )
+                .await;
                 serde_json::to_value(challenge).map_err(|e| ApiError::Scenario(e.to_string()))
             }
 
@@ -323,6 +361,16 @@ impl Scenario for PasskeysScenario {
                         // the honest number to show.
                         let counter = persisted_counter(ctx).await;
                         tracing::info!(session_id = %ctx.session_id, "passkey authentication verified");
+                        let mut step = Step::success("passkeys", "signature verified").detail(
+                            "Your authenticator signed the challenge with the private key, and \
+                             the signature checked out against the stored public key. The \
+                             engine then advanced the signature counter — a counter that fails \
+                             to move is how a cloned authenticator is spotted.",
+                        );
+                        if let Some(counter) = counter {
+                            step = step.fact("signature counter", counter.to_string());
+                        }
+                        ctx.record(step).await;
                         serde_json::to_value(PasskeyAuthResult {
                             verified: true,
                             detail: "Signature verified. The engine also advanced this \
@@ -335,6 +383,12 @@ impl Scenario for PasskeysScenario {
                     }
                     Err(e) => {
                         tracing::debug!(session_id = %ctx.session_id, error = %e, "passkey authentication rejected");
+                        ctx.record(Step::rejected("passkeys", "signature rejected").detail(
+                            "The signature did not verify. Either the challenge had already \
+                             been answered, or the response did not come from a key enrolled \
+                             for this session.",
+                        ))
+                        .await;
                         serde_json::to_value(PasskeyAuthResult {
                             verified: false,
                             detail: "That passkey could not be verified.".to_string(),

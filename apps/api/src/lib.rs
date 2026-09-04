@@ -13,6 +13,7 @@ pub mod demo_config;
 pub mod diff;
 pub mod engine;
 pub mod error;
+pub mod events;
 pub mod killswitch;
 pub mod oauth_routes;
 pub mod routes;
@@ -314,12 +315,11 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
 
     let kv = open_state_store().await?;
 
-    // Credentials share the session's lifetime, so they expire with it. That is
-    // the entire cleanup story — nothing runs on a timer.
-    let credentials = crate::credentials::KvCredentialStore::new(
-        kv.clone(),
-        std::time::Duration::from_secs((settings.session_ttl_hours.max(1) as u64) * 3600),
-    );
+    // Credentials and the flow log share the session's lifetime, so they expire
+    // with it. That is the entire cleanup story — nothing runs on a timer.
+    let session_ttl =
+        std::time::Duration::from_secs((settings.session_ttl_hours.max(1) as u64) * 3600);
+    let credentials = crate::credentials::KvCredentialStore::new(kv.clone(), session_ttl);
 
     let sessions = Arc::new(DemoSessionStore::new(
         kv.clone(),
@@ -338,7 +338,8 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         engines,
         settings,
         credentials: Arc::new(credentials),
-        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv)),
+        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
+        events: Arc::new(crate::events::EventLog::new(kv, session_ttl)),
     })
 }
 

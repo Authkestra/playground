@@ -56,6 +56,24 @@ pub trait KeyValue: Send + Sync {
 
     /// Delete every key under `prefix`. Returns how many were removed.
     async fn delete_with_prefix(&self, prefix: &str) -> Result<u64, StoreError>;
+
+    /// Append to a capped list, oldest entries dropped past `cap`.
+    ///
+    /// A distinct operation rather than read-modify-write on a JSON array,
+    /// because two concurrent requests doing that would each read the same list
+    /// and one would overwrite the other's entry. For a flow log that means
+    /// silently losing exactly the events that happen close together, which are
+    /// the interesting ones.
+    async fn append_capped(
+        &self,
+        key: &str,
+        value: &str,
+        cap: usize,
+        ttl: Duration,
+    ) -> Result<(), StoreError>;
+
+    /// Read a list written by [`KeyValue::append_capped`], oldest first.
+    async fn list(&self, key: &str) -> Result<Vec<String>, StoreError>;
 }
 
 /// Read a JSON value from the store.
@@ -181,6 +199,41 @@ impl KeyValue for RedisKv {
             .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
+    async fn append_capped(
+        &self,
+        key: &str,
+        value: &str,
+        cap: usize,
+        ttl: Duration,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.conn().await?;
+        let full = self.full(key);
+        // One pipeline, so the list can never be left uncapped or without a
+        // TTL by a failure between commands.
+        redis::pipe()
+            .atomic()
+            .rpush(&full, value)
+            .ignore()
+            .cmd("LTRIM")
+            .arg(&full)
+            .arg(-(cap as i64))
+            .arg(-1)
+            .ignore()
+            .expire(&full, ttl.as_secs().max(1) as i64)
+            .ignore()
+            .query_async::<()>(&mut conn)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))
+    }
+
+    async fn list(&self, key: &str) -> Result<Vec<String>, StoreError> {
+        use redis::AsyncCommands;
+        let mut conn = self.conn().await?;
+        conn.lrange(self.full(key), 0, -1)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))
+    }
+
     async fn values_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
         use redis::AsyncCommands;
         let keys = self.scan(prefix).await?;
@@ -284,6 +337,54 @@ impl KeyValue for MemoryKv {
             .map(|e| e.value))
     }
 
+    async fn append_capped(
+        &self,
+        key: &str,
+        value: &str,
+        cap: usize,
+        ttl: Duration,
+    ) -> Result<(), StoreError> {
+        let expires_at = self.now()
+            + chrono::Duration::from_std(ttl)
+                .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
+
+        // A single write lock makes read-append-write atomic here, matching the
+        // Redis pipeline's guarantee.
+        let mut guard = self.entries.write().expect("memory store poisoned");
+        let mut items: Vec<String> = guard
+            .get(key)
+            .filter(|e| self.now() < e.expires_at)
+            .and_then(|e| serde_json::from_str(&e.value).ok())
+            .unwrap_or_default();
+
+        items.push(value.to_string());
+        if items.len() > cap {
+            let excess = items.len() - cap;
+            items.drain(0..excess);
+        }
+
+        let encoded =
+            serde_json::to_string(&items).map_err(|e| StoreError::Decode(e.to_string()))?;
+        guard.insert(
+            key.to_string(),
+            Entry {
+                value: encoded,
+                expires_at,
+            },
+        );
+        Ok(())
+    }
+
+    async fn list(&self, key: &str) -> Result<Vec<String>, StoreError> {
+        let now = self.now();
+        let guard = self.entries.read().expect("memory store poisoned");
+        Ok(guard
+            .get(key)
+            .filter(|e| now < e.expires_at)
+            .and_then(|e| serde_json::from_str(&e.value).ok())
+            .unwrap_or_default())
+    }
+
     async fn values_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
         let now = self.now();
         let guard = self.entries.read().expect("memory store poisoned");
@@ -334,6 +435,19 @@ mod tests {
         assert!(kv.delete("a").await.unwrap());
         assert!(!kv.delete("a").await.unwrap(), "second delete is a no-op");
         assert_eq!(kv.get("a").await.unwrap(), None);
+
+        // capped list: oldest dropped, order preserved
+        for i in 1..=5 {
+            kv.append_capped("log", &format!("e{i}"), 3, ttl)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            kv.list("log").await.unwrap(),
+            vec!["e3".to_string(), "e4".to_string(), "e5".to_string()],
+            "a capped list keeps the newest entries, oldest first"
+        );
+        assert!(kv.list("no-such-list").await.unwrap().is_empty());
 
         // prefix operations must not touch neighbours
         kv.set("cred:s1:totp:x", "1", ttl).await.unwrap();

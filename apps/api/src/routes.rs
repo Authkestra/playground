@@ -32,6 +32,8 @@ pub struct AppState {
     pub credentials: Arc<crate::credentials::KvCredentialStore>,
     /// In-flight ceremony state (WebAuthn challenges).
     pub ceremonies: Arc<crate::ceremony::CeremonyStore>,
+    /// The visitor-facing flow log.
+    pub events: Arc<crate::events::EventLog>,
 }
 
 // ---------------------------------------------------------------- wire types
@@ -147,9 +149,20 @@ async fn reset_session(
 ) -> Result<Json<DemoSessionView>, ApiError> {
     let session = resolve_session(&state, &cookies).await?;
     let fresh = state.sessions.reset(session.id).await?;
-    // Ceremonies belong to the state the visitor just discarded.
+    // Ceremonies and the flow log belong to the state the visitor discarded.
     let _ = state.ceremonies.clear_session(session.id).await;
+    let _ = state.events.clear(session.id).await;
     Ok(Json(fresh.view()))
+}
+
+/// The visitor's flow log: what the engine actually did, in order.
+#[tracing::instrument(skip_all)]
+async fn session_events(
+    State(state): State<AppState>,
+    cookies: Cookies,
+) -> Result<Json<Vec<crate::events::FlowEvent>>, ApiError> {
+    let session = resolve_session(&state, &cookies).await?;
+    Ok(Json(state.events.read(session.id).await?))
 }
 
 #[tracing::instrument(skip_all)]
@@ -252,6 +265,7 @@ async fn try_scenario(
         credentials: &state.credentials,
         relying_party: &state.settings.relying_party,
         ceremonies: &state.ceremonies,
+        events: &state.events,
     };
     Ok(Json(scenario.try_run(&ctx).await?))
 }
@@ -293,6 +307,7 @@ async fn scenario_action(
         credentials: &state.credentials,
         relying_party: &state.settings.relying_party,
         ceremonies: &state.ceremonies,
+        events: &state.events,
     };
 
     let payload = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
@@ -386,6 +401,7 @@ pub fn standard_router() -> Router<AppState> {
         .route("/health", get(health))
         .route("/api/session", get(get_session))
         .route("/api/session/reset", post(reset_session))
+        .route("/api/session/events", get(session_events))
         .route("/api/scenarios", get(list_scenarios))
         .route("/api/scenarios/{id}/configure", post(configure_scenario))
         .route("/api/scenarios/{id}/diff", get(scenario_diff))

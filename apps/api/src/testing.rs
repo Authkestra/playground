@@ -86,7 +86,8 @@ fn build_state(
         engines: Arc::new(EngineFactory::new(credentials, false)),
         settings,
         credentials: Arc::new(creds),
-        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv)),
+        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
+        events: Arc::new(crate::events::EventLog::new(kv, ttl)),
     }
 }
 

@@ -398,3 +398,142 @@ async fn credentials_expire_on_their_own_without_anything_sweeping() {
         "the store's TTL should have dropped it with no sweeper involved"
     );
 }
+
+/// The flow log is the thing a playground can show that docs cannot, so it has
+/// to actually narrate what happened — in order, and readably.
+#[tokio::test]
+async fn the_flow_log_narrates_a_real_totp_attempt() {
+    let app = api::build_router(state().await);
+    let cookie = enable_totp(&app).await;
+
+    // Nothing has happened yet.
+    let empty = events(&app, &cookie).await;
+    assert!(empty.is_empty(), "a fresh session has no flow log");
+
+    let (secret, _) = provision(&app, &cookie).await;
+    verify(&app, &cookie, "12345").await; // malformed
+    verify(&app, &cookie, "000000").await; // wrong
+    let code = code_for(&secret);
+    verify(&app, &cookie, &code).await; // correct
+    verify(&app, &cookie, &code).await; // replayed
+
+    let log = events(&app, &cookie).await;
+    let steps: Vec<&str> = log.iter().map(|e| e["step"].as_str().unwrap()).collect();
+
+    assert_eq!(
+        steps,
+        vec![
+            "secret generated",
+            "malformed code",
+            "code rejected",
+            "code verified",
+            "code rejected",
+        ],
+        "the log should read as the sequence of what happened"
+    );
+
+    let levels: Vec<&str> = log.iter().map(|e| e["level"].as_str().unwrap()).collect();
+    assert_eq!(
+        levels,
+        vec!["info", "rejected", "rejected", "success", "rejected"],
+        "a wrong code is `rejected`, not `failed` — it is a normal outcome"
+    );
+
+    // Every entry explains itself, and the useful facts are surfaced.
+    for e in &log {
+        assert!(
+            e["detail"].as_str().is_some_and(|d| d.len() > 20),
+            "each step needs a readable explanation: {e}"
+        );
+        assert!(e["scenario"] == "totp");
+        assert!(e["at"].as_str().is_some());
+    }
+
+    let generated = &log[0];
+    let facts: Vec<&str> = generated["facts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["name"].as_str().unwrap())
+        .collect();
+    assert!(facts.contains(&"algorithm"), "{facts:?}");
+    assert!(facts.contains(&"period"), "{facts:?}");
+}
+
+/// A secret must never appear in something shown to the visitor.
+#[tokio::test]
+async fn the_flow_log_never_contains_the_secret() {
+    let app = api::build_router(state().await);
+    let cookie = enable_totp(&app).await;
+    let (secret, _) = provision(&app, &cookie).await;
+    verify(&app, &cookie, &code_for(&secret)).await;
+
+    let raw = serde_json::to_string(&events(&app, &cookie).await).unwrap();
+    assert!(
+        !raw.contains(&secret),
+        "the shared secret leaked into the visitor-facing flow log"
+    );
+}
+
+#[tokio::test]
+async fn resetting_clears_the_flow_log() {
+    let st = state().await;
+    let sessions = st.sessions.clone();
+    let app = api::build_router(st);
+    let cookie = enable_totp(&app).await;
+    provision(&app, &cookie).await;
+    assert!(!events(&app, &cookie).await.is_empty());
+
+    let session_id: uuid::Uuid = cookie.trim_start_matches("ak_demo=").parse().unwrap();
+    sessions.reset(session_id).await.unwrap();
+    // Reset through the store clears credentials; the route also clears events.
+    let resp = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/session/reset")
+                .header(header::COOKIE, &cookie)
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    assert!(
+        events(&app, &cookie).await.is_empty(),
+        "a reset should leave a clean slate"
+    );
+}
+
+/// One visitor must never read another's flow log.
+#[tokio::test]
+async fn flow_logs_are_per_visitor() {
+    let app = api::build_router(state().await);
+    let cookie_a = enable_totp(&app).await;
+    provision(&app, &cookie_a).await;
+
+    let cookie_b = enable_totp(&app).await;
+    assert_ne!(cookie_a, cookie_b);
+
+    assert!(!events(&app, &cookie_a).await.is_empty());
+    assert!(events(&app, &cookie_b).await.is_empty());
+}
+
+async fn events(app: &axum::Router, cookie: &str) -> Vec<Value> {
+    let resp = app
+        .clone()
+        .oneshot(
+            req("GET", "/api/session/events")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    body_json(resp)
+        .await
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}

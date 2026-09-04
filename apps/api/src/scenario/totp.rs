@@ -26,6 +26,7 @@ use super::{
     TryOutcome, TryResult,
 };
 use crate::error::ApiError;
+use crate::events::Step;
 
 /// Shown in the authenticator app next to the code.
 const ISSUER: &str = "Authkestra Playground";
@@ -160,6 +161,18 @@ impl Scenario for TotpScenario {
                     .map_err(|e| ApiError::Scenario(e.to_string()))?;
 
                 tracing::info!(session_id = %ctx.session_id, "TOTP secret provisioned");
+                ctx.record(
+                    Step::info("totp", "secret generated")
+                        .detail(
+                            "A shared secret was generated for this session and stored as a \
+                             credential. The QR code encodes it as an otpauth:// URI — the \
+                             secret itself never leaves your browser and this server.",
+                        )
+                        .fact("algorithm", "SHA1")
+                        .fact("digits", "6")
+                        .fact("period", "30s"),
+                )
+                .await;
                 Ok(serde_json::to_value(TotpProvision { secret, uri })
                     .expect("provision serialises"))
             }
@@ -171,6 +184,15 @@ impl Scenario for TotpScenario {
                 let code = body.code.trim().replace(' ', "");
 
                 if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                    ctx.record(
+                        Step::rejected("totp", "malformed code")
+                            .detail(
+                                "Rejected before any cryptography: a TOTP code is always six \
+                                 digits, so there is nothing to verify.",
+                            )
+                            .fact("received length", code.len().to_string()),
+                    )
+                    .await;
                     return Ok(serde_json::to_value(TotpVerification {
                         verified: false,
                         detail: "A TOTP code is six digits.".to_string(),
@@ -188,6 +210,17 @@ impl Scenario for TotpScenario {
                 Ok(match result {
                     Ok(_) => {
                         tracing::info!(session_id = %ctx.session_id, "TOTP code verified");
+                        ctx.record(
+                            Step::success("totp", "code verified")
+                                .detail(
+                                    "The engine derived the expected code from the stored \
+                                     secret and the current time step, and it matched. The \
+                                     step was then recorded so the same code cannot be \
+                                     replayed.",
+                                )
+                                .fact("clock skew allowed", "±1 step (30s)"),
+                        )
+                        .await;
                         serde_json::to_value(TotpVerification {
                             verified: true,
                             detail: "Code accepted. The engine verified it against the enrolled secret."
@@ -198,6 +231,16 @@ impl Scenario for TotpScenario {
                     // server error — it must render as a normal result.
                     Err(e) => {
                         tracing::debug!(session_id = %ctx.session_id, error = %e, "TOTP verification failed");
+                        ctx.record(
+                            Step::rejected("totp", "code rejected")
+                                .detail(
+                                    "The code did not match the expected value for any \
+                                     allowed time step — or it was already used. Reusing a \
+                                     code is refused on purpose: that is what stops someone \
+                                     replaying one they observed.",
+                                ),
+                        )
+                        .await;
                         serde_json::to_value(TotpVerification {
                             verified: false,
                             detail: "That code was rejected. Codes expire every 30 seconds, and \
