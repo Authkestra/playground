@@ -86,6 +86,20 @@ Once both sides share a domain (`play.authkestra.com` and
 `api.play.authkestra.com` are same-site), set `COOKIE_SAMESITE=lax` — it is the
 stricter choice and removes the cross-site exposure entirely.
 
+### Checklist for moving to play.authkestra.com
+
+Four settings change together, and three of them fail *silently* if missed:
+
+| Setting | New value | If you forget |
+| --- | --- | --- |
+| `ALLOWED_ORIGINS` (API) | `https://play.authkestra.com` | Browser blocks every request; site reads as "API unavailable" |
+| `NEXT_PUBLIC_API_BASE_URL` (Vercel) | the API's new origin | Frontend calls the old host |
+| `WEBAUTHN_ORIGIN` / `WEBAUTHN_RP_ID` (API) | `https://play.authkestra.com` / `play.authkestra.com` | Ceremonies fail with a vague browser error — **and every existing passkey stops working, because a passkey is bound to the RP ID that created it** |
+| `COOKIE_SAMESITE` (API) | `lax` | Nothing breaks; you just keep the looser cross-site cookie |
+
+`OAUTH_REDIRECT_BASE` only changes if the *API* host moves; the callback URIs
+registered with each provider must match it exactly.
+
 ## 4. WebAuthn
 
 | Variable | Value |

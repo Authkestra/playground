@@ -75,13 +75,13 @@ export default function ScenarioPanel({
   showTryButton = true,
 }: Props) {
   if (scenarios.length === 0) {
-    return <p className="text-sm text-slate-400">No scenarios published yet.</p>;
+    return <p className="text-sm text-slate-500">No scenarios published yet.</p>;
   }
 
   return (
     <div className="flex flex-col gap-4">
       {disabled && disabledReason && (
-        <p className="text-xs text-slate-500">{disabledReason}</p>
+        <p className="text-xs text-slate-400">{disabledReason}</p>
       )}
       {scenarios.map((scenario) => {
         const value = config?.scenarios[scenario.id];
@@ -105,19 +105,19 @@ export default function ScenarioPanel({
         return (
           <div
             key={scenario.id}
-            className="rounded-lg border border-slate-200 bg-white p-4"
+            className="rounded-lg border border-slate-800 bg-slate-900 p-4"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="font-medium text-slate-800">{scenario.name}</h3>
-                <p className="text-sm text-slate-500">{scenario.summary}</p>
+                <h3 className="font-medium text-slate-100">{scenario.name}</h3>
+                <p className="text-sm text-slate-400">{scenario.summary}</p>
                 {!scenario.available && (
-                  <p className="mt-1 text-xs text-amber-600">
+                  <p className="mt-1 text-xs text-amber-400">
                     Disabled by kill switch.
                   </p>
                 )}
                 {scenario.available && unmetDeps.length > 0 && (
-                  <p className="mt-1 text-xs text-amber-600">
+                  <p className="mt-1 text-xs text-amber-400">
                     Requires: {unmetDeps.join(", ")}
                   </p>
                 )}
@@ -138,14 +138,14 @@ export default function ScenarioPanel({
                   type="button"
                   onClick={() => onTry?.(scenario.id)}
                   disabled={disabled || !scenario.available || tryingIds.has(scenario.id)}
-                  className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {tryingIds.has(scenario.id) ? "Trying…" : "Try it"}
                 </button>
                 {tryResult && (
                   <span
                     className={`text-xs ${
-                      tryResult.outcome === "ok" ? "text-emerald-600" : "text-amber-600"
+                      tryResult.outcome === "ok" ? "text-emerald-400" : "text-amber-400"
                     }`}
                   >
                     {tryResult.detail}
@@ -155,7 +155,7 @@ export default function ScenarioPanel({
             )}
 
             {showActionPanel && ActionPanel && (
-              <div className="mt-4 border-t border-slate-100 pt-4">
+              <div className="mt-4 border-t border-slate-800 pt-4">
                 <ActionPanel
                   scenarioId={scenario.id}
                   onDemoDisabled={onDemoDisabled ?? (() => {})}
@@ -192,8 +192,8 @@ function ScenarioControl({
         aria-label={scenario.name}
         disabled={disabled}
         onClick={() => onChange({ kind: "toggle", enabled: !enabled })}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-          enabled ? "bg-slate-800" : "bg-slate-300"
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+          enabled ? "bg-slate-200" : "bg-slate-700"
         }`}
       >
         {/*
@@ -204,7 +204,7 @@ function ScenarioControl({
           against the light off-state track.
         */}
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-slate-900 shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
             enabled ? "translate-x-[22px]" : "translate-x-0.5"
           }`}
         />
@@ -219,7 +219,7 @@ function ScenarioControl({
         {control.options.map((option) => (
           <label
             key={option.id}
-            className="flex items-center gap-2 text-sm text-slate-600"
+            className="flex items-center gap-2 text-sm text-slate-300"
           >
             <input
               type="radio"
@@ -244,7 +244,7 @@ function ScenarioControl({
         return (
           <label
             key={option.id}
-            className="flex items-center gap-2 text-sm text-slate-600"
+            className="flex items-center gap-2 text-sm text-slate-300"
           >
             <input
               type="checkbox"

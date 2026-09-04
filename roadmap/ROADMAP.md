@@ -9,12 +9,12 @@
 | `P0` | Foundations | 7 | Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet. |
 | `P1` | Playground core | 7 | The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows. |
 | `P2` | Scenarios | 6 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
-| `P3` | Playground UI | 6 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
-| `P4` | Downloadable starter kit | 7 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
+| `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
+| `P4` | Downloadable starter kit | 8 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
 | `P6` | Post-launch / wizard path | 4 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**41 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**45 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -483,6 +483,62 @@ Auth flows are exactly where a11y failures lock people out.
 ### Acceptance
 The complete loop is operable keyboard-only and announces state changes to a screen reader.
 
+#### Restructure the playground as a 3-step wizard
+
+`area:web` `type:feature`
+
+The playground is a wizard rather than a single panel, because the visitor's journey has three distinct questions: what do I want, what does it feel like, and how do I get it.
+
+1. **Choose sign-in methods** — any combination (Google *and* GitHub *and* passkeys *and* TOTP). OAuth is therefore `SelectMany`, not `SelectOne`: two providers is not twice one provider's configuration.
+2. **A real sign-in page** — assembled from what was chosen, beside the flow log, so the visitor sees both the surface and the machinery.
+3. **Download** — the generated project (P4).
+
+### Tasks
+- [x] Step indicator with back-navigation to completed steps only
+- [x] Step 1 renders methods generically from `ScenarioSpec`, including `SelectMany`
+- [x] Step 2 assembles a genuine-looking sign-in page from the chosen methods
+- [x] OAuth started as a top-level navigation, with the return read from the query string and cleared via `history.replaceState`
+- [x] Placeholder scenarios removed from the shipped registry — the wizard lists whatever is registered, so a leftover fixture became product
+- [ ] Step 3 wired to the generator once P4 lands
+
+### Acceptance
+A visitor picks several methods, sees a sign-in page built from exactly those, and can reach the download step.
+
+#### Visitor-facing flow log
+
+`area:api` `area:web` `type:feature`
+
+The thing a playground can show that documentation cannot: what the engine actually did, in order, for *this* attempt. A challenge issued and held server-side, a code checked against the stored secret, a signature verified and a counter advanced 4 → 5.
+
+Written for the visitor, not for us. Server-side `tracing` keeps the detail that would only confuse someone learning the flow.
+
+### Tasks
+- [x] `GET /api/session/events` returning `FlowEvent[]`, oldest first
+- [x] `level` separates outcomes that look alike: a wrong code is `rejected`, not `failed`. A playground that renders an expected refusal as an error teaches the wrong thing.
+- [x] `facts` for values worth showing verbatim (algorithm, period, signature counter) — never secrets, asserted by test
+- [x] Capped per session and expiring with it, so nothing has to clean it up
+- [x] Recording is infallible for the caller — a flow must never fail because its narration could not be written
+- [x] `append_capped`/`list` in the store rather than read-modify-write, which would drop concurrent events
+- [ ] Narrate the OAuth flow too, once a real round trip is possible (#7)
+
+### Acceptance
+A visitor completes and fails a flow, and the log reads as a sequence they can learn from.
+
+#### Dark theme, matching the framework's site
+
+`area:web` `type:chore`
+
+The framework's own site is dark; the playground should not look like a different product.
+
+### Tasks
+- [ ] Dark palette applied across the wizard, panels, diff viewer and flow log
+- [ ] Contrast checked against WCAG AA for body text and the flow log's level colours — amber-on-dark and green-on-dark are the easy ones to get wrong
+- [ ] Focus rings still visible against the dark background
+- [ ] `color-scheme: dark` set so form controls and scrollbars follow
+
+### Acceptance
+The playground reads as part of the same product as the framework's site, and text and state colours stay legible.
+
 ---
 
 ## P4 — Downloadable starter kit
@@ -602,6 +658,22 @@ The implicit promise of the download is "this is what you just used". If they di
 
 ### Acceptance
 Each scenario passes the same behavioral assertions in both places, or the difference is explicitly documented.
+
+#### Ask for a GitHub star on download, without gating on it
+
+`area:web` `type:feature`
+
+Originally scoped as a gate: prove you starred `marcjazz/authkestra` before downloading.
+
+**Decided against gating.** A star gate is trivially bypassed (star, download, unstar), puts a friction point on the critical path, and a minority of developers react badly to it. The download stays open; the ask stays.
+
+### Tasks
+- [ ] Star button / link on the download step, clearly optional
+- [ ] Never a condition of the download, and never presented as one
+- [ ] Optional: if the visitor already signed in with GitHub for the OAuth scenario, use that token to show whether they have starred it — as a nicety, not a check
+
+### Acceptance
+The download works for everyone; the ask is visible and honest.
 
 ---
 

@@ -219,7 +219,7 @@ export default function Playground() {
     return (
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
         <Header />
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-500">
           Loading playground… The API runs on a free tier and can take up to a minute to wake
           up on its first request.
         </p>
@@ -231,18 +231,18 @@ export default function Playground() {
     return (
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
         <Header />
-        <div className="rounded-lg border border-slate-200 bg-white p-6 text-center">
-          <h2 className="font-medium text-slate-700">API unavailable</h2>
-          <p className="mt-2 text-sm text-slate-500">
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6 text-center">
+          <h2 className="font-medium text-slate-200">API unavailable</h2>
+          <p className="mt-2 text-sm text-slate-400">
             The playground couldn&apos;t reach the API at{" "}
             <code className="font-mono">{API_BASE}</code>. Start the backend and
             reload this page.
           </p>
-          {banner && <p className="mt-2 text-sm text-amber-600">{banner}</p>}
+          {banner && <p className="mt-2 text-sm text-amber-400">{banner}</p>}
           <button
             type="button"
             onClick={() => void load()}
-            className="mt-4 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            className="mt-4 rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
           >
             Retry
           </button>
@@ -255,16 +255,16 @@ export default function Playground() {
     return (
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
         <Header />
-        <div className="rounded-lg border border-slate-200 bg-white p-6">
-          <h2 className="font-medium text-slate-700">Demo currently disabled</h2>
-          <p className="mt-2 text-sm text-slate-500">
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6">
+          <h2 className="font-medium text-slate-200">Demo currently disabled</h2>
+          <p className="mt-2 text-sm text-slate-400">
             The live playground is switched off right now, so controls below are
             shown for reference only. This is expected behaviour, not an error —
             check back later to try the flows interactively.
           </p>
         </div>
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
             Scenarios
           </h2>
           <ScenarioPanel
@@ -284,7 +284,7 @@ export default function Playground() {
     <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
       <Header />
       {banner && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300">
           {banner}
         </div>
       )}
@@ -325,13 +325,32 @@ export default function Playground() {
   );
 }
 
+/** Where the framework itself lives. */
+const AUTHKESTRA_REPO = "https://github.com/marcjazz/authkestra";
+
 function Header() {
   return (
-    <header>
-      <h1 className="text-2xl font-semibold text-slate-800">Authkestra Playground</h1>
-      <p className="text-sm text-slate-500">
-        Toggle auth features, see the config diff, and try the flows live.
-      </p>
+    <header className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-100">Authkestra Playground</h1>
+        <p className="text-sm text-slate-400">
+          Choose your sign-in methods, see the config diff, and try the flows live.
+        </p>
+      </div>
+      {/*
+        A visitor who likes what they see should not have to go hunting for the
+        framework — the playground exists to send people there.
+      */}
+      <a
+        href={AUTHKESTRA_REPO}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+      >
+        authkestra docs
+        <span aria-hidden="true">→</span>
+        <span className="sr-only">(opens in a new tab)</span>
+      </a>
     </header>
   );
 }

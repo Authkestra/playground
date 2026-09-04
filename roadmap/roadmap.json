@@ -217,6 +217,24 @@
       "body": "Auth flows are exactly where a11y failures lock people out.\n\n### Tasks\n- [ ] Keyboard-only walkthrough of the full toggle → diff → test loop\n- [ ] Screen-reader labels for ceremony states and async results (live regions for \"waiting for your authenticator\")\n- [ ] Focus management across OAuth redirect returns\n- [ ] Colour contrast in both themes\n\n### Acceptance\nThe complete loop is operable keyboard-only and announces state changes to a screen reader."
     },
     {
+      "phase": "P3",
+      "title": "Restructure the playground as a 3-step wizard",
+      "labels": ["area:web", "type:feature"],
+      "body": "The playground is a wizard rather than a single panel, because the visitor's journey has three distinct questions: what do I want, what does it feel like, and how do I get it.\n\n1. **Choose sign-in methods** — any combination (Google *and* GitHub *and* passkeys *and* TOTP). OAuth is therefore `SelectMany`, not `SelectOne`: two providers is not twice one provider's configuration.\n2. **A real sign-in page** — assembled from what was chosen, beside the flow log, so the visitor sees both the surface and the machinery.\n3. **Download** — the generated project (P4).\n\n### Tasks\n- [x] Step indicator with back-navigation to completed steps only\n- [x] Step 1 renders methods generically from `ScenarioSpec`, including `SelectMany`\n- [x] Step 2 assembles a genuine-looking sign-in page from the chosen methods\n- [x] OAuth started as a top-level navigation, with the return read from the query string and cleared via `history.replaceState`\n- [x] Placeholder scenarios removed from the shipped registry — the wizard lists whatever is registered, so a leftover fixture became product\n- [ ] Step 3 wired to the generator once P4 lands\n\n### Acceptance\nA visitor picks several methods, sees a sign-in page built from exactly those, and can reach the download step."
+    },
+    {
+      "phase": "P3",
+      "title": "Visitor-facing flow log",
+      "labels": ["area:api", "area:web", "type:feature"],
+      "body": "The thing a playground can show that documentation cannot: what the engine actually did, in order, for *this* attempt. A challenge issued and held server-side, a code checked against the stored secret, a signature verified and a counter advanced 4 → 5.\n\nWritten for the visitor, not for us. Server-side `tracing` keeps the detail that would only confuse someone learning the flow.\n\n### Tasks\n- [x] `GET /api/session/events` returning `FlowEvent[]`, oldest first\n- [x] `level` separates outcomes that look alike: a wrong code is `rejected`, not `failed`. A playground that renders an expected refusal as an error teaches the wrong thing.\n- [x] `facts` for values worth showing verbatim (algorithm, period, signature counter) — never secrets, asserted by test\n- [x] Capped per session and expiring with it, so nothing has to clean it up\n- [x] Recording is infallible for the caller — a flow must never fail because its narration could not be written\n- [x] `append_capped`/`list` in the store rather than read-modify-write, which would drop concurrent events\n- [ ] Narrate the OAuth flow too, once a real round trip is possible (#7)\n\n### Acceptance\nA visitor completes and fails a flow, and the log reads as a sequence they can learn from."
+    },
+    {
+      "phase": "P3",
+      "title": "Dark theme, matching the framework's site",
+      "labels": ["area:web", "type:chore"],
+      "body": "The framework's own site is dark; the playground should not look like a different product.\n\n### Tasks\n- [ ] Dark palette applied across the wizard, panels, diff viewer and flow log\n- [ ] Contrast checked against WCAG AA for body text and the flow log's level colours — amber-on-dark and green-on-dark are the easy ones to get wrong\n- [ ] Focus rings still visible against the dark background\n- [ ] `color-scheme: dark` set so form controls and scrollbars follow\n\n### Acceptance\nThe playground reads as part of the same product as the framework's site, and text and state colours stay legible."
+    },
+    {
       "title": "Design the starter-kit template model (config → files + features)",
       "phase": "P4",
       "labels": ["area:starter-kit", "type:feature"],
@@ -257,6 +275,12 @@
       "phase": "P4",
       "labels": ["area:starter-kit", "type:test"],
       "body": "The implicit promise of the download is \"this is what you just used\". If they diverge, the demo becomes a lie.\n\n### Tasks\n- [ ] For each scenario, run the same flow assertions against a generated project and against the playground backend\n- [ ] Cover route shapes, required inputs, and success/failure responses\n- [ ] Document any deliberate differences (demo-only ephemerality, seeded users, etc.) in the generated README\n\n### Acceptance\nEach scenario passes the same behavioral assertions in both places, or the difference is explicitly documented."
+    },
+    {
+      "phase": "P4",
+      "title": "Ask for a GitHub star on download, without gating on it",
+      "labels": ["area:web", "type:feature"],
+      "body": "Originally scoped as a gate: prove you starred `marcjazz/authkestra` before downloading.\n\n**Decided against gating.** A star gate is trivially bypassed (star, download, unstar), puts a friction point on the critical path, and a minority of developers react badly to it. The download stays open; the ask stays.\n\n### Tasks\n- [ ] Star button / link on the download step, clearly optional\n- [ ] Never a condition of the download, and never presented as one\n- [ ] Optional: if the visitor already signed in with GitHub for the OAuth scenario, use that token to show whether they have starred it — as a nicety, not a check\n\n### Acceptance\nThe download works for everyone; the ask is visible and honest."
     },
     {
       "title": "Security review of the public demo surface",

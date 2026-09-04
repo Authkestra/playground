@@ -19,14 +19,17 @@ interface Props {
   onContinue: () => void;
 }
 
+// Brand-ish surfaces, so these carry light text regardless of the dark theme.
+// A blanket light->dark recolour got this wrong once: it turned white label
+// text dark, leaving near-black text on a near-black GitHub button.
 const PROVIDER_STYLES: Record<string, string> = {
-  github: "bg-slate-900 text-white hover:bg-black",
-  google: "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-  discord: "bg-indigo-600 text-white hover:bg-indigo-500",
+  github: "bg-slate-100 text-slate-900 hover:bg-white",
+  google: "border border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700",
+  discord: "bg-indigo-500 text-white hover:bg-indigo-400",
 };
 
 const PROVIDER_FALLBACK_STYLE =
-  "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
+  "border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800";
 
 export default function StepSignIn({
   scenarios,
@@ -97,26 +100,26 @@ export default function StepSignIn({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-800">Sign in</h2>
-        <p className="text-sm text-slate-500">
+        <h2 className="text-lg font-semibold text-slate-100">Sign in</h2>
+        <p className="text-sm text-slate-400">
           A real sign-in screen assembled from what you chose in step 1, and a live log of
           what the engine is doing on the right.
         </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-        <div className="rounded-lg border border-slate-200 bg-white p-6">
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6">
           {oauthReturn && (
             <OAuthReturnBanner result={oauthReturn} onDismiss={onDismissOauthReturn} />
           )}
 
           {!hasAnyMethod ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-400">
               No sign-in method is turned on yet.{" "}
               <button
                 type="button"
                 onClick={onBack}
-                className="font-medium text-slate-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 rounded"
+                className="font-medium text-slate-200 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded"
               >
                 Go back to step 1
               </button>{" "}
@@ -125,10 +128,10 @@ export default function StepSignIn({
           ) : (
             <div className="mx-auto flex max-w-sm flex-col gap-5">
               <div className="text-center">
-                <h3 className="text-base font-semibold text-slate-800">
+                <h3 className="text-base font-semibold text-slate-100">
                   Sign in to Authkestra
                 </h3>
-                <p className="text-sm text-slate-500">Choose how you&apos;d like to continue.</p>
+                <p className="text-sm text-slate-400">Choose how you&apos;d like to continue.</p>
               </div>
 
               {oauthAvailable && (
@@ -140,16 +143,16 @@ export default function StepSignIn({
                       onClick={() => {
                         window.location.href = loginUrl(option.id, oauthMode);
                       }}
-                      className={`flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 ${
+                      className={`flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
                         PROVIDER_STYLES[option.id] ?? PROVIDER_FALLBACK_STYLE
                       }`}
                     >
                       Continue with {option.label}
                     </button>
                   ))}
-                  <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-400">
+                  <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-500">
                     <span>Identity mode:</span>
-                    <div className="inline-flex rounded-md border border-slate-200 p-0.5">
+                    <div className="inline-flex rounded-md border border-slate-800 p-0.5">
                       <ModeButton
                         label="Session"
                         active={oauthMode === "session"}
@@ -168,8 +171,8 @@ export default function StepSignIn({
               {oauthAvailable && (passkeysActive || totpActive) && <Divider />}
 
               {passkeysActive && (
-                <div className="rounded-md border border-slate-100 p-4">
-                  <h4 className="mb-2 text-sm font-medium text-slate-700">Passkey</h4>
+                <div className="rounded-md border border-slate-800 p-4">
+                  <h4 className="mb-2 text-sm font-medium text-slate-200">Passkey</h4>
                   <PasskeysPanel
                     scenarioId="passkeys"
                     onDemoDisabled={onDemoDisabled}
@@ -181,8 +184,8 @@ export default function StepSignIn({
               {passkeysActive && totpActive && <Divider />}
 
               {totpActive && (
-                <div className="rounded-md border border-slate-100 p-4">
-                  <h4 className="mb-2 text-sm font-medium text-slate-700">Authenticator app</h4>
+                <div className="rounded-md border border-slate-800 p-4">
+                  <h4 className="mb-2 text-sm font-medium text-slate-200">Authenticator app</h4>
                   <TotpPanel
                     scenarioId="totp"
                     onDemoDisabled={onDemoDisabled}
@@ -203,14 +206,14 @@ export default function StepSignIn({
         <button
           type="button"
           onClick={onBack}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
+          className="rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
         >
           Back
         </button>
         <button
           type="button"
           onClick={onContinue}
-          className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
+          className="rounded-md bg-slate-200 px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
         >
           Continue
         </button>
@@ -233,8 +236,8 @@ function ModeButton({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`rounded px-2 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 ${
-        active ? "bg-slate-800 text-white" : "text-slate-500 hover:bg-slate-100"
+      className={`rounded px-2 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
+        active ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:bg-slate-800"
       }`}
     >
       {label}
@@ -244,10 +247,10 @@ function ModeButton({
 
 function Divider() {
   return (
-    <div className="flex items-center gap-3 text-xs text-slate-400">
-      <div className="h-px flex-1 bg-slate-200" />
+    <div className="flex items-center gap-3 text-xs text-slate-500">
+      <div className="h-px flex-1 bg-slate-700" />
       or
-      <div className="h-px flex-1 bg-slate-200" />
+      <div className="h-px flex-1 bg-slate-700" />
     </div>
   );
 }
@@ -273,10 +276,10 @@ function OAuthReturnBanner({
   onDismiss: () => void;
 }) {
   const styles: Record<OAuthReturn["status"], string> = {
-    success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
     // Cancelling at the provider is an ordinary outcome — calm amber, not red.
-    denied: "border-amber-200 bg-amber-50 text-amber-700",
-    error: "border-red-200 bg-red-50 text-red-700",
+    denied: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    error: "border-red-500/30 bg-red-500/10 text-red-300",
   };
 
   let message: string;

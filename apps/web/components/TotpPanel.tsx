@@ -118,7 +118,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <p className="text-xs text-amber-600">
+        <p className="text-xs text-amber-400">
           Running setup again replaces the current secret — any authenticator
           app that already scanned the old QR code or secret will stop
           working.
@@ -127,7 +127,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
           type="button"
           onClick={() => void handleProvision()}
           disabled={provisioning}
-          className="mt-2 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-2 rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {provisioning
             ? "Setting up…"
@@ -137,11 +137,11 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
         </button>
       </div>
 
-      {banner && <p className="text-xs text-amber-600">{banner}</p>}
+      {banner && <p className="text-xs text-amber-400">{banner}</p>}
 
       {provision && (
-        <div className="flex flex-col gap-3 rounded-md border border-slate-100 bg-slate-50 p-3 sm:flex-row sm:items-start">
-          <div className="flex h-[220px] w-[220px] shrink-0 items-center justify-center rounded bg-white">
+        <div className="flex flex-col gap-3 rounded-md border border-slate-800 bg-slate-900 p-3 sm:flex-row sm:items-start">
+          <div className="flex h-[220px] w-[220px] shrink-0 items-center justify-center rounded bg-slate-900">
             {qrDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- data URL, not an app asset
               <img
@@ -151,16 +151,16 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
                 height={220}
               />
             ) : qrError ? (
-              <span className="p-2 text-center text-xs text-amber-600">{qrError}</span>
+              <span className="p-2 text-center text-xs text-amber-400">{qrError}</span>
             ) : (
-              <span className="text-xs text-slate-400">Rendering…</span>
+              <span className="text-xs text-slate-500">Rendering…</span>
             )}
           </div>
           <div className="flex flex-1 flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">
+            <span className="text-xs font-medium text-slate-300">
               Can&apos;t scan? Enter this secret manually:
             </span>
-            <code className="select-all break-all rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
+            <code className="select-all break-all rounded border border-slate-800 bg-slate-900 px-2 py-1 text-xs text-slate-200">
               {provision.secret}
             </code>
           </div>
@@ -175,7 +175,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
           }}
           className="flex flex-col gap-2"
         >
-          <label className="text-xs font-medium text-slate-600" htmlFor={`${scenarioId}-code`}>
+          <label className="text-xs font-medium text-slate-300" htmlFor={`${scenarioId}-code`}>
             Enter the 6-digit code from your authenticator app
           </label>
           <div className="flex items-center gap-2">
@@ -187,12 +187,12 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
               placeholder="123456"
               value={code}
               onChange={(e) => setCode(normalizeCode(e.target.value))}
-              className="w-32 rounded-md border border-slate-300 px-2 py-1 text-sm font-mono tracking-widest text-slate-800 focus:border-slate-500 focus:outline-none"
+              className="w-32 rounded-md border border-slate-700 px-2 py-1 text-sm font-mono tracking-widest text-slate-100 focus:border-slate-500 focus:outline-none"
             />
             <button
               type="submit"
               disabled={verifying || code.length !== 6}
-              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {verifying ? "Verifying…" : "Verify"}
             </button>
@@ -201,7 +201,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
           {verifyResult && (
             <p
               className={`flex items-center gap-1.5 text-xs ${
-                verifyResult.verified ? "text-emerald-600" : "text-slate-600"
+                verifyResult.verified ? "text-emerald-400" : "text-slate-300"
               }`}
             >
               <span aria-hidden="true">{verifyResult.verified ? "✓" : "•"}</span>

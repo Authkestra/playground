@@ -28,8 +28,8 @@ export default function StepChooseMethods({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-800">Choose sign-in methods</h2>
-        <p className="text-sm text-slate-500">
+        <h2 className="text-lg font-semibold text-slate-100">Choose sign-in methods</h2>
+        <p className="text-sm text-slate-400">
           Pick any combination — GitHub, Google, passkeys, an authenticator app, or all of
           them. Every change below shows exactly how it reshapes the config.
         </p>
@@ -46,10 +46,10 @@ export default function StepChooseMethods({
       />
 
       <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
           Config diff{diffScenarioName ? ` — ${diffScenarioName}` : ""}
         </h3>
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
           <DiffViewer diff={diff} />
         </div>
       </section>
@@ -59,12 +59,12 @@ export default function StepChooseMethods({
           type="button"
           onClick={onContinue}
           disabled={!anyActive}
-          className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="rounded-md bg-slate-200 px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           Continue
         </button>
         {!anyActive && (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-400">
             Turn on at least one sign-in method above to continue.
           </p>
         )}

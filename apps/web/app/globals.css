@@ -2,8 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  The playground is dark to match the framework's own site. `color-scheme` is
+  what makes the browser's own chrome follow — form controls, scrollbars and
+  the flash of background before CSS applies. Without it a dark page still
+  renders light native checkboxes and a white scrollbar.
+*/
+:root {
+  color-scheme: dark;
+}
+
 html,
 body {
   padding: 0;
   margin: 0;
+  background-color: rgb(2 6 23); /* slate-950 */
+}
+
+/* Native controls inherit the accent, so checkboxes and radios in the method
+   picker match the rest of the UI rather than the OS default blue. */
+:root {
+  accent-color: rgb(226 232 240); /* slate-200 */
 }

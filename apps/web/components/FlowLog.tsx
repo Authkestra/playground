@@ -11,16 +11,16 @@ interface Props {
 }
 
 const LEVEL_STYLES: Record<EventLevel, string> = {
-  info: "border-slate-200 bg-slate-50",
-  success: "border-emerald-200 bg-emerald-50",
+  info: "border-slate-800 bg-slate-900",
+  success: "border-emerald-500/30 bg-emerald-500/10",
   // A rejected credential is an ordinary outcome (a wrong code, a cancelled
   // prompt) — amber, deliberately not red, so it never reads as a fault.
-  rejected: "border-amber-200 bg-amber-50",
-  failed: "border-red-200 bg-red-50",
+  rejected: "border-amber-500/30 bg-amber-500/10",
+  failed: "border-red-500/30 bg-red-500/10",
 };
 
 const LEVEL_DOT: Record<EventLevel, string> = {
-  info: "bg-slate-400",
+  info: "bg-slate-600",
   success: "bg-emerald-500",
   rejected: "bg-amber-500",
   failed: "bg-red-500",
@@ -50,23 +50,23 @@ export default function FlowLog({ events, loading, error }: Props) {
   }, [events.length]);
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-4 py-3">
-        <h3 className="font-medium text-slate-800">Flow log</h3>
-        <p className="text-xs text-slate-500">
+    <div className="flex h-full flex-col rounded-lg border border-slate-800 bg-slate-900">
+      <div className="border-b border-slate-800 px-4 py-3">
+        <h3 className="font-medium text-slate-100">Flow log</h3>
+        <p className="text-xs text-slate-400">
           What the engine actually did for this visitor, as it happens.
         </p>
       </div>
 
       {error && (
-        <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+        <p className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-300">
           {error}
         </p>
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4" style={{ maxHeight: 480 }}>
         {events.length === 0 ? (
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-slate-500">
             {loading
               ? "Loading the flow log…"
               : "Nothing yet — actions you take on the left (signing in, verifying a code, registering a passkey) will appear here as they happen."}
@@ -84,20 +84,20 @@ export default function FlowLog({ events, loading, error }: Props) {
                       aria-hidden="true"
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEVEL_DOT[event.level]}`}
                     />
-                    <span className="text-sm font-medium text-slate-800">{event.step}</span>
+                    <span className="text-sm font-medium text-slate-100">{event.step}</span>
                     <span className="sr-only">({LEVEL_LABEL[event.level]})</span>
                   </div>
-                  <span className="shrink-0 text-xs text-slate-400" title={event.at}>
+                  <span className="shrink-0 text-xs text-slate-500" title={event.at}>
                     {formatRelativeTime(event.at)}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-slate-600">{event.detail}</p>
+                <p className="mt-1 text-xs text-slate-300">{event.detail}</p>
                 {event.facts.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {event.facts.map((fact, j) => (
                       <span
                         key={`${fact.name}-${j}`}
-                        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-600"
+                        className="rounded border border-slate-800 bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] text-slate-300"
                       >
                         {fact.name}: {fact.value}
                       </span>

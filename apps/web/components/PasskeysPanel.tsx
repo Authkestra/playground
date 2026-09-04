@@ -365,13 +365,13 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
   }, [scenarioId, onDemoDisabled, onAction]);
 
   if (capability === "checking") {
-    return <p className="text-xs text-slate-400">Checking passkey support in this browser…</p>;
+    return <p className="text-xs text-slate-500">Checking passkey support in this browser…</p>;
   }
 
   if (capability === "unsupported") {
     return (
-      <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-        <p className="text-xs text-slate-600">
+      <div className="rounded-md border border-slate-800 bg-slate-900 p-3">
+        <p className="text-xs text-slate-300">
           {unsupportedReason ? UNSUPPORTED_MESSAGES[unsupportedReason] : UNSUPPORTED_MESSAGES["no-webauthn"]}
         </p>
       </div>
@@ -381,7 +381,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-400">
           Registers a passkey with this browser&apos;s platform authenticator.
         </p>
         <div>
@@ -389,18 +389,18 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
             type="button"
             onClick={() => void handleRegister()}
             disabled={registering}
-            className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {registering ? "Registering…" : "Register a passkey"}
           </button>
         </div>
         {registerBanner && (
-          <p className="flex items-center gap-1.5 text-xs text-amber-600">
+          <p className="flex items-center gap-1.5 text-xs text-amber-400">
             {registerBanner}
           </p>
         )}
         {registerResult && (
-          <p className="flex items-center gap-1.5 text-xs text-emerald-600">
+          <p className="flex items-center gap-1.5 text-xs text-emerald-400">
             <span aria-hidden="true">✓</span>
             Passkey registered. This browser now has {registerResult.count}{" "}
             passkey{registerResult.count === 1 ? "" : "s"} enrolled.
@@ -408,8 +408,8 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
         )}
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-        <p className="text-xs text-slate-500">
+      <div className="flex flex-col gap-2 border-t border-slate-800 pt-4">
+        <p className="text-xs text-slate-400">
           Authenticates using a previously registered passkey.
         </p>
         <div>
@@ -417,18 +417,18 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
             type="button"
             onClick={() => void handleAuthenticate()}
             disabled={authenticating}
-            className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {authenticating ? "Authenticating…" : "Authenticate with a passkey"}
           </button>
         </div>
         {authBanner && (
-          <p className="flex items-center gap-1.5 text-xs text-amber-600">{authBanner}</p>
+          <p className="flex items-center gap-1.5 text-xs text-amber-400">{authBanner}</p>
         )}
         {authResult && (
           <div
             className={`flex flex-col gap-1 text-xs ${
-              authResult.verified ? "text-emerald-600" : "text-slate-600"
+              authResult.verified ? "text-emerald-400" : "text-slate-300"
             }`}
           >
             <p className="flex items-center gap-1.5">
@@ -436,7 +436,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
               {authResult.detail}
             </p>
             {authResult.counter !== null && (
-              <p className="text-slate-400">
+              <p className="text-slate-500">
                 Signature counter: {authResult.counter}. A counter that fails to
                 advance between authentications is how cloned authenticators are
                 detected.
