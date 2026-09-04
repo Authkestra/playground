@@ -3,6 +3,7 @@
 import type { ComponentType } from "react";
 import type { ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-types";
 import TotpPanel from "@/components/TotpPanel";
+import PasskeysPanel from "@/components/PasskeysPanel";
 
 export interface TryResultState {
   outcome: string;
@@ -20,6 +21,7 @@ interface ActionPanelProps {
 // an extra panel.
 const ACTION_PANELS: Record<string, ComponentType<ActionPanelProps>> = {
   totp: TotpPanel,
+  passkeys: PasskeysPanel,
 };
 
 interface Props {
