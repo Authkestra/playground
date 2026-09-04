@@ -56,12 +56,13 @@ interface AuthenticateStartResponse {
  * we translate the alphabet back and restore padding to a multiple of 4
  * before decoding.
  */
-function base64UrlToBuffer(value: string): Uint8Array {
+function base64UrlToBuffer(value: string): Uint8Array<ArrayBuffer> {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
   const padLength = (4 - (base64.length % 4)) % 4;
   const padded = base64 + "=".repeat(padLength);
   const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
