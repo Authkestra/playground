@@ -10,6 +10,11 @@ use api::{build_router, state_from_env};
 
 #[tokio::main]
 async fn main() {
+    // Before anything that might build a TLS client — the engine's provider
+    // clients and the Redis connection both do. See the function's docs for
+    // why this cannot be settled by Cargo features alone.
+    api::install_crypto_provider();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

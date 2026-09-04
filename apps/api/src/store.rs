@@ -438,3 +438,42 @@ mod tests {
         assert_eq!(kv.get("k").await.unwrap(), None);
     }
 }
+
+#[cfg(test)]
+mod tls_tests {
+
+    /// Regression test for a startup panic.
+    ///
+    /// `redis`'s `tls-rustls` feature hardcodes `rustls/ring` while the engine
+    /// brings `rustls/aws-lc-rs`; with both enabled, rustls refuses to pick a
+    /// provider and panics the first time a TLS config is built. That is at
+    /// boot for a `rediss://` URL, so the service never starts.
+    ///
+    /// The whole suite previously used plaintext `redis://`, so no TLS client
+    /// was ever constructed and nothing caught it. This connects to a
+    /// `rediss://` address that is closed: the point is that it must fail with
+    /// a connection *error* rather than a panic.
+    #[tokio::test]
+    async fn a_tls_redis_url_does_not_panic_on_provider_ambiguity() {
+        crate::install_crypto_provider();
+
+        let client = redis::Client::open("rediss://127.0.0.1:1").expect("client opens");
+
+        // Port 1 is closed, so this must return Err. Reaching this assertion at
+        // all is the test: without an installed provider, building the TLS
+        // config panics instead.
+        let result = client.get_multiplexed_async_connection().await;
+        assert!(
+            result.is_err(),
+            "expected a connection error against a closed port"
+        );
+    }
+
+    /// Installing twice must not blow up — `main` installs, and so does
+    /// `open_state_store`.
+    #[tokio::test]
+    async fn installing_the_provider_is_idempotent() {
+        crate::install_crypto_provider();
+        crate::install_crypto_provider();
+    }
+}

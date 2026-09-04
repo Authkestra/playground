@@ -214,6 +214,40 @@ const STANDARD_BURST: u32 = 30;
 const SENSITIVE_REPLENISH_SECS: u64 = 5;
 const SENSITIVE_BURST: u32 = 10;
 
+/// Choose the rustls crypto provider for this process.
+///
+/// Two dependencies disagree about which provider to use, and both are out of
+/// our hands: `redis`'s `tls-rustls` feature hardcodes `rustls/ring`, while
+/// `authkestra-engine`'s `rustls-aws-lc-rs` pulls `rustls/aws-lc-rs` through
+/// reqwest. Cargo features being additive, the one `rustls` in the graph gets
+/// both — and rustls will not guess between them. Without this call the process
+/// panics the first time it builds a TLS connection, which in practice means
+/// the first `rediss://` connection at boot.
+///
+/// `aws-lc-rs` is chosen to match the framework's own default
+/// (`docs/decisions/0001-dependency-and-tls-baseline.md`), so only one provider
+/// is actually exercised at runtime.
+///
+/// Idempotent: installing twice is not an error worth surfacing, so a second
+/// call is ignored. **Must run before any TLS client is constructed** — that
+/// includes the engine's provider clients, so it belongs at the very top of
+/// `main`.
+pub fn install_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .is_err()
+        {
+            // Already installed by something else; that is fine, and any
+            // provider is better than the ambiguity that panics.
+            tracing::debug!("a rustls crypto provider was already installed");
+        } else {
+            tracing::debug!("installed the aws-lc-rs rustls crypto provider");
+        }
+    });
+}
+
 /// Open the state backend named by `REDIS_URL`.
 ///
 /// Falls back to an in-process store when unset, so `cargo run` works with no
