@@ -61,6 +61,29 @@ impl OAuthMode {
     }
 }
 
+/// The providers a control value selects.
+///
+/// `SelectOne` is still tolerated so a config stored before this control became
+/// multi-select still reads sensibly rather than silently becoming empty.
+fn selected_providers(value: &ControlValue) -> Vec<String> {
+    match value {
+        ControlValue::SelectMany { selected } => selected.clone(),
+        ControlValue::SelectOne {
+            selected: Some(one),
+        } => vec![one.clone()],
+        _ => Vec::new(),
+    }
+}
+
+/// "a", "a and b", "a, b and c" — read out in prose rather than as a list.
+fn join_human(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// The scenario.
 ///
 /// Holds the configured provider list so the control only offers providers that
@@ -108,42 +131,59 @@ impl Scenario for OAuthScenario {
     }
 
     fn control(&self) -> ControlShape {
-        ControlShape::SelectOne {
+        // SelectMany, not SelectOne: real applications offer several providers
+        // side by side, and a visitor comparing them wants to see the combined
+        // consequences — two providers is not twice one provider's config.
+        ControlShape::SelectMany {
             options: self.options(),
         }
     }
 
     fn default_value(&self) -> ControlValue {
-        ControlValue::SelectOne { selected: None }
+        ControlValue::SelectMany {
+            selected: Vec::new(),
+        }
     }
 
     fn consequences(&self, value: &ControlValue) -> Consequences {
-        let ControlValue::SelectOne {
-            selected: Some(provider),
-        } = value
-        else {
+        let selected = selected_providers(value);
+        if selected.is_empty() {
             return Consequences::default();
-        };
+        }
 
-        // The exact feature flag differs per provider, which is the useful
-        // detail: it is one crate with three features, not three integrations.
+        // One crate, one feature per provider — the useful detail is that
+        // adding a second provider is a feature flag, not a second integration.
+        let provider_features: Vec<&str> = selected.iter().map(|s| s.as_str()).collect();
         let mut crates = vec![
-            CrateRequirement::new("authkestra-providers", &[provider.as_str()]),
+            CrateRequirement::new("authkestra-providers", &provider_features),
             CrateRequirement::new("authkestra-engine", &["session", "token"]),
         ];
+
+        let labels: Vec<&str> = selected.iter().map(|p| Self::label_for(p)).collect();
         let mut requirements = vec![
             format!(
-                "You register an OAuth app with {} and store its client id and secret.",
-                Self::label_for(provider)
+                "You register an OAuth app with {} and store each client id and secret.",
+                join_human(&labels)
             ),
-            "The redirect URI must match exactly, including scheme and path.".to_string(),
+            "Every redirect URI must match exactly, including scheme and path.".to_string(),
             "No password is ever stored, so there is no password reset to build.".to_string(),
         ];
+
+        if selected.len() > 1 {
+            // The thing people actually get wrong with several providers.
+            requirements.push(
+                "With more than one provider you must decide what happens when the same \
+                 person arrives from two of them — link the accounts, or treat them as \
+                 separate identities. The framework leaves that to you, deliberately: it \
+                 owns no user table."
+                    .to_string(),
+            );
+        }
 
         // Google is OIDC rather than plain OAuth2, so it needs another crate —
         // exactly the kind of thing a diff should surface before someone
         // discovers it mid-implementation.
-        if provider == "google" {
+        if selected.iter().any(|p| p == "google") {
             crates.push(CrateRequirement::new("authkestra-oidc", &[]));
             requirements.push(
                 "Google is OpenID Connect, so discovery and ID-token validation come from \
@@ -152,44 +192,55 @@ impl Scenario for OAuthScenario {
             );
         }
 
+        let mut routes = Vec::new();
+        for provider in &selected {
+            routes.push(format!("GET /auth/login/{provider}"));
+            routes.push(format!("GET /auth/callback/{provider}"));
+        }
+        routes.push("GET /auth/logout".to_string());
+
         Consequences {
-            routes: vec![
-                format!("GET /auth/login/{provider}"),
-                format!("GET /auth/callback/{provider}"),
-                "GET /auth/logout".to_string(),
-            ],
+            routes,
             requirements,
             crates,
         }
     }
 
     async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
-        let ControlValue::SelectOne {
-            selected: Some(provider),
-        } = ctx.value
-        else {
+        let selected = selected_providers(ctx.value);
+
+        if selected.is_empty() {
             return Ok(TryResult {
                 outcome: TryOutcome::NotConfigured,
                 detail: if self.configured.is_empty() {
                     "No provider credentials are configured on this deployment yet.".to_string()
                 } else {
-                    "Pick a provider first.".to_string()
+                    "Pick at least one provider.".to_string()
                 },
-            });
-        };
-
-        if !self.configured.iter().any(|c| c == provider) {
-            return Ok(TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: format!("`{provider}` has no credentials configured on this deployment."),
             });
         }
 
+        let unconfigured: Vec<&str> = selected
+            .iter()
+            .filter(|p| !self.configured.iter().any(|c| c == *p))
+            .map(|p| p.as_str())
+            .collect();
+        if !unconfigured.is_empty() {
+            return Ok(TryResult {
+                outcome: TryOutcome::NotConfigured,
+                detail: format!(
+                    "No credentials configured for {} on this deployment.",
+                    join_human(&unconfigured)
+                ),
+            });
+        }
+
+        let labels: Vec<&str> = selected.iter().map(|p| Self::label_for(p)).collect();
         Ok(TryResult {
             outcome: TryOutcome::Ok,
             detail: format!(
-                "Ready. Starting the flow will send you to {} and back.",
-                Self::label_for(provider)
+                "Ready. Your sign-in page would offer {}.",
+                join_human(&labels)
             ),
         })
     }

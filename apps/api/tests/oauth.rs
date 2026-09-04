@@ -270,7 +270,7 @@ async fn the_diff_names_the_provider_feature_flag() {
         .oneshot(
             req("POST", "/api/scenarios/oauth/configure")
                 .body(Body::from(
-                    r#"{"value":{"kind":"select_one","selected":"github"}}"#,
+                    r#"{"value":{"kind":"select_many","selected":["github"]}}"#,
                 ))
                 .unwrap(),
         )
@@ -312,7 +312,7 @@ async fn choosing_google_surfaces_the_oidc_crate() {
         .oneshot(
             req("POST", "/api/scenarios/oauth/configure")
                 .body(Body::from(
-                    r#"{"value":{"kind":"select_one","selected":"google"}}"#,
+                    r#"{"value":{"kind":"select_many","selected":["google"]}}"#,
                 ))
                 .unwrap(),
         )
@@ -333,7 +333,7 @@ async fn an_unknown_option_is_rejected() {
         .oneshot(
             req("POST", "/api/scenarios/oauth/configure")
                 .body(Body::from(
-                    r#"{"value":{"kind":"select_one","selected":"myspace"}}"#,
+                    r#"{"value":{"kind":"select_many","selected":["myspace"]}}"#,
                 ))
                 .unwrap(),
         )
@@ -341,4 +341,119 @@ async fn an_unknown_option_is_rejected() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// The point of multi-select: someone can offer several providers at once, and
+/// the diff must describe the combination rather than one of them.
+#[tokio::test]
+async fn several_providers_can_be_selected_together() {
+    let resp = app(&ALL)
+        .oneshot(
+            req("POST", "/api/scenarios/oauth/configure")
+                .body(Body::from(
+                    r#"{"value":{"kind":"select_many","selected":["github","google"]}}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let diff = body_json(resp).await;
+
+    let crates = diff["diff"]["consequences"]["crates"].as_array().unwrap();
+    let providers = crates
+        .iter()
+        .find(|c| c["name"] == "authkestra-providers")
+        .expect("providers crate");
+    let features: Vec<&str> = providers["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f.as_str().unwrap())
+        .collect();
+    assert!(features.contains(&"github"), "{features:?}");
+    assert!(features.contains(&"google"), "{features:?}");
+
+    // Google in the mix still pulls in the OIDC crate.
+    assert!(crates.iter().any(|c| c["name"] == "authkestra-oidc"));
+
+    // Both providers' routes appear.
+    let routes = diff["diff"]["consequences"]["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(routes.iter().any(|r| r.contains("/auth/callback/github")));
+    assert!(routes.iter().any(|r| r.contains("/auth/callback/google")));
+}
+
+/// Offering two providers raises a question the framework deliberately does not
+/// answer for you, so the diff should say so.
+#[tokio::test]
+async fn multiple_providers_surface_the_account_linking_decision() {
+    let resp = app(&ALL)
+        .oneshot(
+            req("POST", "/api/scenarios/oauth/configure")
+                .body(Body::from(
+                    r#"{"value":{"kind":"select_many","selected":["github","discord"]}}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let diff = body_json(resp).await;
+    let requirements = diff["diff"]["consequences"]["requirements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        requirements.contains("two of them") || requirements.contains("link"),
+        "should raise account linking: {requirements}"
+    );
+}
+
+#[tokio::test]
+async fn try_lists_every_selected_provider() {
+    let app = app(&ALL);
+    let configured = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/scenarios/oauth/configure")
+                .body(Body::from(
+                    r#"{"value":{"kind":"select_many","selected":["github","google","discord"]}}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cookie = configured
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .unwrap()
+        .to_string();
+
+    let tried = app
+        .oneshot(
+            req("POST", "/api/scenarios/oauth/try")
+                .header(header::COOKIE, &cookie)
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let result = body_json(tried).await;
+    assert_eq!(result["outcome"], "ok");
+    let detail = result["detail"].as_str().unwrap();
+    for label in ["GitHub", "Google", "Discord"] {
+        assert!(detail.contains(label), "{label} missing from: {detail}");
+    }
 }
