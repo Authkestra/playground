@@ -36,6 +36,20 @@ ignore = [
     # and remove this ignore the moment one is available.
     { id = "RUSTSEC-2023-0071", reason = "no safe upgrade available upstream (rsa crate); transitive via authkestra-engine -> jsonwebtoken; re-check on every authkestra-engine bump" },
 
+    # rustls-pemfile is unmaintained: its functionality moved into
+    # rustls-pki-types, and the latest release is a thin wrapper over it. An
+    # unmaintained *notice*, not a vulnerability, and the advisory itself says
+    # no safe upgrade exists.
+    #
+    # It arrives transitively through `redis` 0.27's TLS support. We cannot move
+    # to a newer `redis`: the engine's `RedisStore::with_client` takes a
+    # `redis::Client`, so sharing one connection with the framework requires
+    # matching its exact version, and a 0.x minor bump is breaking.
+    #
+    # Exit condition: when authkestra-engine bumps `redis`, bump in step and
+    # remove this.
+    { id = "RUSTSEC-2025-0134", reason = "unmaintained PEM parser (rustls-pemfile), superseded by rustls-pki-types; no vulnerability and no safe upgrade; transitive via redis 0.27 whose version is pinned by authkestra-engine's RedisStore::with_client" },
+
 ]
 
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
