@@ -320,7 +320,14 @@ export default function Playground() {
         />
       )}
 
-      {step === 3 && <StepDownload onBack={() => goToStep(2)} />}
+      {step === 3 && (
+        <StepDownload
+          scenarios={scenarios}
+          config={config}
+          onDemoDisabled={() => setPhase("explainer")}
+          onBack={() => goToStep(2)}
+        />
+      )}
     </main>
   );
 }

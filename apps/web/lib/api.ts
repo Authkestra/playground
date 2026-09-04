@@ -147,3 +147,66 @@ export function scenarioAction<T>(
     { method: "POST", body: JSON.stringify(body) },
   );
 }
+
+/**
+ * The generated project, as a zip.
+ *
+ * Deliberately not routed through `request`, which assumes a JSON body. The
+ * error shapes are shared, so a rate-limited download reads the same as a
+ * rate-limited anything else.
+ */
+export type StarterKitDownload = { blob: Blob; filename: string };
+
+const FALLBACK_FILENAME = "authkestra-starter.zip";
+
+export async function downloadStarterKit(): Promise<ApiResult<StarterKitDownload>> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/starter-kit`, { credentials: "include" });
+  } catch {
+    return { ok: false, error: { kind: "unavailable" } };
+  }
+
+  if (res.status === 503) {
+    return { ok: false, error: { kind: "demo_disabled" } };
+  }
+
+  if (res.status === 429) {
+    const body = await safeJson(res);
+    const detail =
+      typeof body?.detail === "string"
+        ? body.detail
+        : "You're sending requests a bit too fast. Please slow down and try again shortly.";
+    return { ok: false, error: { kind: "rate_limited", detail } };
+  }
+
+  if (!res.ok) {
+    const body = await safeJson(res);
+    const detail =
+      (typeof body?.detail === "string" && body.detail) ||
+      (typeof body?.error === "string" && body.error) ||
+      res.statusText ||
+      "The download failed";
+    return { ok: false, error: { kind: "http_error", status: res.status, detail } };
+  }
+
+  return { ok: true, data: { blob: await res.blob(), filename: filenameFrom(res) } };
+}
+
+/**
+ * The name the server chose. Readable only because the API exposes
+ * `Content-Disposition` through CORS; if that ever stops being true the
+ * download still works, just under a generic name.
+ */
+function filenameFrom(res: Response): string {
+  const header = res.headers.get("content-disposition");
+  if (!header) return FALLBACK_FILENAME;
+
+  const match = /filename="?([^";]+)"?/i.exec(header);
+  const name = match?.[1]?.trim();
+  if (!name) return FALLBACK_FILENAME;
+
+  // The server asserts its names need no quoting or escaping. Anything else
+  // did not come from it, and is not worth handing to a file save.
+  return /^[A-Za-z0-9._-]+$/.test(name) ? name : FALLBACK_FILENAME;
+}
