@@ -208,11 +208,14 @@ impl Scenario for PasskeysScenario {
                     .start_register(&user_id, "demo-visitor")
                     .map_err(|e| ApiError::Scenario(e.to_string()))?;
 
-                ctx.ceremonies.put(
-                    ctx.session_id,
-                    CeremonyKind::Registration,
-                    serde_json::to_string(&state).map_err(|e| ApiError::Scenario(e.to_string()))?,
-                );
+                ctx.ceremonies
+                    .put(
+                        ctx.session_id,
+                        CeremonyKind::Registration,
+                        serde_json::to_string(&state)
+                            .map_err(|e| ApiError::Scenario(e.to_string()))?,
+                    )
+                    .await?;
 
                 tracing::info!(session_id = %ctx.session_id, "passkey registration started");
                 serde_json::to_value(challenge).map_err(|e| ApiError::Scenario(e.to_string()))
@@ -224,6 +227,8 @@ impl Scenario for PasskeysScenario {
                 let Some(raw) = ctx
                     .ceremonies
                     .take(ctx.session_id, CeremonyKind::Registration)
+                    .await
+                    .map_err(ApiError::from)?
                 else {
                     return Err(ApiError::CeremonyExpired);
                 };
@@ -267,11 +272,14 @@ impl Scenario for PasskeysScenario {
                     .start_authentication(&passkeys)
                     .map_err(|e| ApiError::Scenario(e.to_string()))?;
 
-                ctx.ceremonies.put(
-                    ctx.session_id,
-                    CeremonyKind::Authentication,
-                    serde_json::to_string(&state).map_err(|e| ApiError::Scenario(e.to_string()))?,
-                );
+                ctx.ceremonies
+                    .put(
+                        ctx.session_id,
+                        CeremonyKind::Authentication,
+                        serde_json::to_string(&state)
+                            .map_err(|e| ApiError::Scenario(e.to_string()))?,
+                    )
+                    .await?;
 
                 tracing::info!(session_id = %ctx.session_id, "passkey authentication started");
                 serde_json::to_value(challenge).map_err(|e| ApiError::Scenario(e.to_string()))
@@ -281,6 +289,8 @@ impl Scenario for PasskeysScenario {
                 let Some(auth_state_json) = ctx
                     .ceremonies
                     .take(ctx.session_id, CeremonyKind::Authentication)
+                    .await
+                    .map_err(ApiError::from)?
                 else {
                     return Err(ApiError::CeremonyExpired);
                 };

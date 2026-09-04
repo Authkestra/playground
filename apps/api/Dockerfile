@@ -39,13 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /build/target/release/api /usr/local/bin/api
 
-# The service runs unprivileged and needs somewhere writable for the SQLite
-# credential database. Without this the working directory is `/`, which `app`
-# cannot write, so opening the database fails and the process exits at boot.
-RUN mkdir -p /data && chown app:app /data
-WORKDIR /data
-ENV DATABASE_URL=sqlite:///data/credentials.db
-
+# No writable volume is needed: all state lives in Redis, which is what lets
+# this run on infrastructure that scales to zero and recycles instances.
 USER app
 EXPOSE 8000
 ENV PORT=8000

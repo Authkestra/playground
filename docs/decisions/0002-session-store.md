@@ -1,6 +1,12 @@
 # 0002 — Demo session storage: Memory for v0
 
-**Status:** accepted (v0)
+**Status:** SUPERSEDED by [`0004-stateless-service-on-redis.md`](0004-stateless-service-on-redis.md)
+
+> Kept as the record of why Memory was chosen first, and of the storage
+> constraints in the framework that are still true. The decision itself no
+> longer holds: all state now lives in Redis with a TTL, and the process holds
+> nothing durable.
+
 **Date:** 2026-09-04
 **Roadmap:** P0 "Decide the session store: Redis vs Memory"
 

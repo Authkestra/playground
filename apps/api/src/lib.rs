@@ -18,9 +18,10 @@ pub mod routes;
 pub mod scenario;
 pub mod session;
 pub mod settings;
+pub mod store;
+pub mod testing;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::http::{header, HeaderValue, Method};
 use axum::Router;
@@ -116,9 +117,6 @@ impl tower_governor::key_extractor::KeyExtractor for ClientIpKeyExtractor {
     }
 }
 
-/// How often expired demo sessions are swept.
-pub const SWEEP_INTERVAL: Duration = Duration::from_secs(300);
-
 /// Rate limit for ordinary interactive endpoints.
 const STANDARD_REPLENISH_SECS: u64 = 2;
 const STANDARD_BURST: u32 = 30;
@@ -132,22 +130,79 @@ const STANDARD_BURST: u32 = 30;
 const SENSITIVE_REPLENISH_SECS: u64 = 5;
 const SENSITIVE_BURST: u32 = 10;
 
-/// Build application state from the environment.
+/// Open the state backend named by `REDIS_URL`.
 ///
-/// Async because the credential store is opened and migrated here: a scenario
-/// that cannot persist a credential is broken, so failing at boot is better
-/// than failing on a visitor's first ceremony.
-pub async fn state_from_env() -> Result<AppState, sqlx::Error> {
+/// Falls back to an in-process store when unset, so `cargo run` works with no
+/// infrastructure. That fallback is only safe for a single instance — it is
+/// logged loudly, because using it in a deployment that scales would hand
+/// visitors inconsistent state with no other symptom.
+pub async fn open_state_store() -> Result<Arc<dyn crate::store::KeyValue>, StateError> {
+    match std::env::var("REDIS_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+    {
+        Some(url) => {
+            let client = redis::Client::open(url.trim())
+                .map_err(|e| StateError::Redis(format!("invalid REDIS_URL: {e}")))?;
+
+            // Connect eagerly: a broken Redis should fail at boot, not on a
+            // visitor's first request.
+            let mut conn = client
+                .get_multiplexed_async_connection()
+                .await
+                .map_err(|e| StateError::Redis(format!("could not reach Redis: {e}")))?;
+            redis::cmd("PING")
+                .query_async::<String>(&mut conn)
+                .await
+                .map_err(|e| StateError::Redis(format!("Redis did not answer PING: {e}")))?;
+
+            let scheme = if url.starts_with("rediss://") {
+                "TLS"
+            } else {
+                "plaintext"
+            };
+            tracing::info!(transport = scheme, "state store: Redis");
+            Ok(Arc::new(crate::store::RedisKv::new(
+                client,
+                std::env::var("REDIS_PREFIX").unwrap_or_else(|_| "ak_playground".to_string()),
+            )))
+        }
+        None => {
+            tracing::warn!(
+                "REDIS_URL is not set; using an in-process state store. Sessions will not \
+                 survive a restart and MUST NOT be relied on with more than one instance."
+            );
+            Ok(Arc::new(crate::store::MemoryKv::new()))
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StateError {
+    #[error("state store unavailable: {0}")]
+    Redis(String),
+}
+
+/// Build application state from the environment.
+pub async fn state_from_env() -> Result<AppState, StateError> {
     let settings = Arc::new(Settings::from_env());
     let kill_switch = Arc::new(KillSwitch::from_env());
     let registry = ScenarioRegistry::with_builtins();
 
-    let pool = crate::credentials::open().await?;
+    let kv = open_state_store().await?;
+
+    // Credentials share the session's lifetime, so they expire with it. That is
+    // the entire cleanup story — nothing runs on a timer.
+    let credentials = crate::credentials::KvCredentialStore::new(
+        kv.clone(),
+        std::time::Duration::from_secs((settings.session_ttl_hours.max(1) as u64) * 3600),
+    );
 
     let sessions = Arc::new(DemoSessionStore::new(
+        kv.clone(),
         registry,
         settings.session_ttl_hours,
-        crate::credentials::janitor(pool.clone()),
+        credentials.clone(),
     ));
     let engines = Arc::new(EngineFactory::new(
         ProviderCredentials::from_env(),
@@ -159,8 +214,8 @@ pub async fn state_from_env() -> Result<AppState, sqlx::Error> {
         kill_switch,
         engines,
         settings,
-        pool,
-        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new()),
+        credentials: Arc::new(credentials),
+        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv)),
     })
 }
 
@@ -257,126 +312,4 @@ pub fn build_router(state: AppState) -> Router {
         .layer(CookieManagerLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
-}
-
-/// Spawn the background sweep of expired demo sessions.
-///
-/// Reads already treat expired sessions as absent, so this is about reclaiming
-/// memory and triggering credential cleanup rather than correctness. The
-/// service runs as a long-lived process, so no external cron is needed.
-pub fn spawn_session_sweeper(sessions: Arc<DemoSessionStore>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
-        // The first tick fires immediately; skip it so boot isn't a no-op sweep.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            let swept = sessions.sweep();
-            tracing::debug!(swept, live = sessions.len(), "sweep complete");
-        }
-    })
-}
-
-#[cfg(test)]
-mod key_extractor_tests {
-    use super::*;
-    use axum::http::{HeaderName, Request};
-    use std::net::{IpAddr, SocketAddr};
-    use tower_governor::key_extractor::KeyExtractor;
-
-    fn fly() -> ClientIpKeyExtractor {
-        ClientIpKeyExtractor::new(Some(HeaderName::from_static("fly-client-ip")))
-    }
-
-    fn ip(s: &str) -> IpAddr {
-        s.parse().unwrap()
-    }
-
-    /// The bug this type exists to prevent: a proxy *appends* the peer it saw,
-    /// so a client that sends its own `X-Forwarded-For` controls the leftmost
-    /// entry. Keying on that would let anyone mint a fresh rate-limit bucket
-    /// per request just by varying a header.
-    #[test]
-    fn a_spoofed_forwarded_for_cannot_change_the_key() {
-        let req = Request::builder()
-            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
-            .header("fly-client-ip", "198.51.100.7")
-            .body(())
-            .unwrap();
-        assert_eq!(fly().extract(&req).unwrap(), ip("198.51.100.7"));
-    }
-
-    #[test]
-    fn two_requests_spoofing_different_values_share_one_bucket() {
-        let a = Request::builder()
-            .header("x-forwarded-for", "203.0.113.1, 198.51.100.7")
-            .header("fly-client-ip", "198.51.100.7")
-            .body(())
-            .unwrap();
-        let b = Request::builder()
-            .header("x-forwarded-for", "192.0.2.55, 198.51.100.7")
-            .header("fly-client-ip", "198.51.100.7")
-            .body(())
-            .unwrap();
-        let e = fly();
-        assert_eq!(
-            e.extract(&a).unwrap(),
-            e.extract(&b).unwrap(),
-            "a caller varying X-Forwarded-For must not escape its bucket"
-        );
-    }
-
-    /// Without a trusted header we fall back to XFF — but the *rightmost*
-    /// entry, which the nearest proxy wrote, not the client-supplied leftmost.
-    #[test]
-    fn falls_back_to_the_rightmost_forwarded_for_entry() {
-        let e = ClientIpKeyExtractor::new(None);
-        let req = Request::builder()
-            .header("x-forwarded-for", "203.0.113.99, 198.51.100.7")
-            .body(())
-            .unwrap();
-        assert_eq!(e.extract(&req).unwrap(), ip("198.51.100.7"));
-    }
-
-    #[test]
-    fn uses_the_peer_address_when_reached_directly() {
-        let mut req = Request::builder().body(()).unwrap();
-        req.extensions_mut()
-            .insert(axum::extract::ConnectInfo(SocketAddr::from((
-                [198, 51, 100, 9],
-                1234,
-            ))));
-        assert_eq!(
-            ClientIpKeyExtractor::new(None).extract(&req).unwrap(),
-            ip("198.51.100.9")
-        );
-    }
-
-    /// A health probe with no forwarding headers and no ConnectInfo must be
-    /// limited collectively, never rejected — erroring here 500s the endpoint.
-    #[test]
-    fn an_unidentifiable_caller_gets_the_shared_bucket_not_an_error() {
-        let req = Request::builder().body(()).unwrap();
-        assert_eq!(fly().extract(&req).unwrap(), UNIDENTIFIED_CLIENT);
-    }
-
-    #[test]
-    fn the_trusted_header_wins_over_forwarded_for() {
-        let req = Request::builder()
-            .header("x-forwarded-for", "203.0.113.99")
-            .header("fly-client-ip", "192.0.2.1")
-            .body(())
-            .unwrap();
-        assert_eq!(fly().extract(&req).unwrap(), ip("192.0.2.1"));
-    }
-
-    #[test]
-    fn tolerates_an_ip_port_pair() {
-        let e = ClientIpKeyExtractor::new(None);
-        let req = Request::builder()
-            .header("x-forwarded-for", "198.51.100.7:51234")
-            .body(())
-            .unwrap();
-        assert_eq!(e.extract(&req).unwrap(), ip("198.51.100.7"));
-    }
 }

@@ -8,9 +8,6 @@ use std::sync::Arc;
 
 use api::killswitch::KillSwitch;
 use api::routes::AppState;
-use api::scenario::ScenarioRegistry;
-use api::session::{DemoSessionStore, DEFAULT_TTL_HOURS};
-use api::settings::{RelyingParty, Settings};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
@@ -19,35 +16,7 @@ use totp_rs::{Algorithm, Secret, TOTP};
 use tower::ServiceExt;
 
 async fn state() -> AppState {
-    let settings = Arc::new(Settings {
-        port: 0,
-        cookie_secure: false,
-        session_ttl_hours: DEFAULT_TTL_HOURS,
-        admin_token: None,
-        allowed_origins: vec!["http://localhost:3000".to_string()],
-        trusted_client_ip_header: None,
-        relying_party: RelyingParty {
-            id: "localhost".to_string(),
-            origin: "http://localhost:3000".to_string(),
-            name: "test".to_string(),
-        },
-    });
-    let pool = api::credentials::open_in_memory().await.unwrap();
-    AppState {
-        sessions: Arc::new(DemoSessionStore::new(
-            ScenarioRegistry::with_builtins(),
-            settings.session_ttl_hours,
-            api::credentials::janitor(pool.clone()),
-        )),
-        kill_switch: Arc::new(KillSwitch::default()),
-        engines: Arc::new(api::engine::EngineFactory::new(
-            api::engine::ProviderCredentials::default(),
-            false,
-        )),
-        settings,
-        pool,
-        ceremonies: Arc::new(api::ceremony::CeremonyStore::new()),
-    }
+    api::testing::test_state(KillSwitch::default(), None)
 }
 
 fn req(method: &str, uri: &str) -> axum::http::request::Builder {
@@ -375,31 +344,57 @@ async fn the_diff_names_the_engine_crate_not_the_facade() {
 /// Expiry must take the session's credentials with it — a demo that leaves
 /// TOTP secrets behind for every visitor who ever passed through is a liability.
 #[tokio::test]
-async fn expiring_a_session_purges_its_credentials() {
+async fn resetting_a_session_purges_its_credentials() {
     let st = state().await;
-    let pool = st.pool.clone();
+    let credentials = st.credentials.clone();
+    let sessions = st.sessions.clone();
     let app = api::build_router(st);
 
     let cookie = enable_totp(&app).await;
     provision(&app, &cookie).await;
 
     let session_id: uuid::Uuid = cookie.trim_start_matches("ak_demo=").parse().unwrap();
+    let user_id = session_id.to_string();
 
-    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ak_credentials WHERE user_id = ?")
-        .bind(session_id.to_string())
-        .fetch_one(&pool)
+    assert_eq!(
+        credentials.count(&user_id, "totp").await.unwrap(),
+        1,
+        "a secret should be stored"
+    );
+
+    sessions.reset(session_id).await.unwrap();
+
+    assert_eq!(
+        credentials.count(&user_id, "totp").await.unwrap(),
+        0,
+        "a reset must leave no credentials behind"
+    );
+}
+
+/// The mechanism that actually runs in production: nothing sweeps, the store's
+/// TTL drops the key. A visitor's secret must not outlive their session.
+#[tokio::test]
+async fn credentials_expire_on_their_own_without_anything_sweeping() {
+    use api::store::{KeyValue, MemoryKv};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
+    let credentials =
+        api::credentials::KvCredentialStore::new(kv.clone(), Duration::from_millis(40));
+
+    use authkestra_engine::auth::store::CredentialStore;
+    credentials
+        .save_credential("session-x", "totp", serde_json::json!({ "secret": "S" }))
         .await
         .unwrap();
-    assert_eq!(before, 1, "a secret should be stored");
+    assert_eq!(credentials.count("session-x", "totp").await.unwrap(), 1);
 
-    api::credentials::SqliteJanitor::purge(&pool, session_id)
-        .await
-        .unwrap();
+    tokio::time::sleep(Duration::from_millis(80)).await;
 
-    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ak_credentials WHERE user_id = ?")
-        .bind(session_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(after, 0, "expiry must leave no credential rows behind");
+    assert_eq!(
+        credentials.count("session-x", "totp").await.unwrap(),
+        0,
+        "the store's TTL should have dropped it with no sweeper involved"
+    );
 }

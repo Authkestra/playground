@@ -42,29 +42,18 @@ primary_region = 'cdg'
 [http_service]
   internal_port = 8000
   force_https = true
-  # LOAD-BEARING — not cost tuning.
+  # These were load-bearing while sessions lived in process memory. They are
+  # not any more: all state is in Redis with a TTL, so the service can be
+  # stopped, recycled and scaled freely (docs/decisions/0004).
   #
-  # Demo sessions live in process memory and the expiry sweeper is a
-  # `tokio::interval`, so both assume a single long-lived process. Letting Fly
-  # stop the machine would silently reset every visitor's configuration and
-  # stall the sweep.
-  #
-  # `'off'` is the current spelling of what was `false`; they mean the same
-  # thing. Revisit only if the session store moves to Redis — see
-  # docs/decisions/0002-session-store.md.
+  # Left as-is because a demo that is always warm has no cold start, not
+  # because anything breaks otherwise.
   auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
-  # LOAD-BEARING — keep the app at exactly ONE machine (`fly scale count 1`).
-  #
-  # The in-memory session store cannot be shared across machines, so a second
-  # one hands visitors a different configuration depending on which machine
-  # served them. This breaks silently rather than loudly: nothing errors, the
-  # visitor's toggles just appear to randomly revert.
-  #
-  # These concurrency limits exist to keep that single machine from being the
-  # bottleneck, NOT to justify scaling out.
+  # Multiple machines are now safe — state is shared through Redis — so these
+  # limits are ordinary capacity tuning rather than a constraint.
   [http_service.concurrency]
     type = 'requests'
     hard_limit = 250
@@ -77,7 +66,10 @@ primary_region = 'cdg'
     method = 'GET'
     path = '/health'
 
-# Public IPs must be allocated for the .fly.dev hostname to resolve at all:
+# Fly is no longer the deployment target (its trial ended; see
+# docs/decisions/0004). This file is kept because the container and the
+# configuration are still valid, and re-pointing at Fly is `fly deploy` plus a
+# card. Note that public IPs must be allocated for the hostname to resolve:
 #   fly ips allocate-v4 --shared
 #   fly ips allocate-v6
 [[vm]]

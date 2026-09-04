@@ -6,7 +6,7 @@
 //! signature is verified against — so it lives server-side rather than in a
 //! value the client could tamper with.
 //!
-//! It is deliberately in-memory and short-lived:
+//! It lives in the shared key-value store with a short TTL:
 //!
 //! * A ceremony a visitor abandoned (closed the prompt, walked away, hit a
 //!   platform timeout) must not linger. Entries expire on a timer, which is
@@ -17,11 +17,12 @@
 //! Losing this on a redeploy is harmless: the worst case is a visitor mid-prompt
 //! seeing the ceremony fail and retrying, which is already the abort path.
 
-use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::Arc;
+use std::time::Duration;
 
-use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
+
+use crate::store::{KeyValue, StoreError};
 
 /// How long a challenge stays answerable. Platform authenticators typically
 /// time out well inside this.
@@ -45,191 +46,189 @@ impl CeremonyKind {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Entry {
-    /// The ceremony state, serialised. Kept as JSON so this store does not need
-    /// to know about WebAuthn types.
-    state: String,
-    expires_at: DateTime<Utc>,
-}
-
-/// In-memory ceremony states, keyed by session and kind.
-#[derive(Default)]
+/// Ceremony state, keyed by session and kind.
 pub struct CeremonyStore {
-    entries: RwLock<HashMap<(Uuid, CeremonyKind), Entry>>,
+    kv: Arc<dyn KeyValue>,
+    ttl: Duration,
 }
 
 impl CeremonyStore {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(kv: Arc<dyn KeyValue>) -> Self {
+        Self {
+            kv,
+            ttl: Duration::from_secs(CEREMONY_TTL_SECONDS as u64),
+        }
+    }
+
+    fn key(session_id: Uuid, kind: CeremonyKind) -> String {
+        format!("ceremony:{session_id}:{}", kind.as_str())
     }
 
     /// Record the state for a ceremony, replacing any previous one.
-    pub fn put(&self, session_id: Uuid, kind: CeremonyKind, state: String) {
-        self.put_at(session_id, kind, state, Utc::now())
-    }
-
-    pub fn put_at(&self, session_id: Uuid, kind: CeremonyKind, state: String, now: DateTime<Utc>) {
-        self.entries
-            .write()
-            .expect("ceremony store poisoned")
-            .insert(
-                (session_id, kind),
-                Entry {
-                    state,
-                    expires_at: now + Duration::seconds(CEREMONY_TTL_SECONDS),
-                },
-            );
+    ///
+    /// Replacing matters: a visitor who restarts must not then be verified
+    /// against the challenge they abandoned.
+    pub async fn put(
+        &self,
+        session_id: Uuid,
+        kind: CeremonyKind,
+        state: String,
+    ) -> Result<(), StoreError> {
+        self.kv
+            .set(&Self::key(session_id, kind), &state, self.ttl)
+            .await?;
         tracing::debug!(%session_id, kind = kind.as_str(), "ceremony started");
+        Ok(())
     }
 
     /// Take the state for a ceremony, consuming it.
     ///
-    /// Consuming rather than reading is deliberate: a challenge must be
-    /// answerable exactly once, or a replayed response could be verified twice.
-    pub fn take(&self, session_id: Uuid, kind: CeremonyKind) -> Option<String> {
-        self.take_at(session_id, kind, Utc::now())
-    }
-
-    pub fn take_at(
+    /// A challenge must be answerable exactly once, or a replayed response
+    /// could be verified twice — so this is an atomic take, not a read.
+    pub async fn take(
         &self,
         session_id: Uuid,
         kind: CeremonyKind,
-        now: DateTime<Utc>,
-    ) -> Option<String> {
-        let entry = self
-            .entries
-            .write()
-            .expect("ceremony store poisoned")
-            .remove(&(session_id, kind))?;
-
-        if now >= entry.expires_at {
-            tracing::debug!(%session_id, kind = kind.as_str(), "ceremony expired before completion");
-            return None;
+    ) -> Result<Option<String>, StoreError> {
+        let taken = self.kv.take(&Self::key(session_id, kind)).await?;
+        if taken.is_none() {
+            tracing::debug!(%session_id, kind = kind.as_str(), "no live ceremony to complete");
         }
-        Some(entry.state)
+        Ok(taken)
     }
 
-    /// Drop every ceremony belonging to a session (called when it expires).
-    pub fn clear_session(&self, session_id: Uuid) {
-        self.entries
-            .write()
-            .expect("ceremony store poisoned")
-            .retain(|(sid, _), _| *sid != session_id);
-    }
-
-    /// Remove expired entries. Returns how many were reclaimed.
-    pub fn sweep(&self) -> usize {
-        self.sweep_at(Utc::now())
-    }
-
-    pub fn sweep_at(&self, now: DateTime<Utc>) -> usize {
-        let mut guard = self.entries.write().expect("ceremony store poisoned");
-        let before = guard.len();
-        guard.retain(|_, e| now < e.expires_at);
-        before - guard.len()
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.read().expect("ceremony store poisoned").len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+    /// Drop every ceremony belonging to a session.
+    pub async fn clear_session(&self, session_id: Uuid) -> Result<u64, StoreError> {
+        self.kv
+            .delete_with_prefix(&format!("ceremony:{session_id}:"))
+            .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::MemoryKv;
 
-    #[test]
-    fn a_stored_ceremony_can_be_taken_once() {
-        let s = CeremonyStore::new();
+    fn store() -> CeremonyStore {
+        CeremonyStore::new(Arc::new(MemoryKv::new()))
+    }
+
+    #[tokio::test]
+    async fn a_stored_ceremony_can_be_taken_once() {
+        let s = store();
         let id = Uuid::new_v4();
-        s.put(id, CeremonyKind::Registration, "state".into());
+        s.put(id, CeremonyKind::Registration, "state".into())
+            .await
+            .unwrap();
 
         assert_eq!(
-            s.take(id, CeremonyKind::Registration).as_deref(),
+            s.take(id, CeremonyKind::Registration)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("state")
         );
         // A challenge must be answerable exactly once.
-        assert!(s.take(id, CeremonyKind::Registration).is_none());
+        assert!(s
+            .take(id, CeremonyKind::Registration)
+            .await
+            .unwrap()
+            .is_none());
     }
 
-    #[test]
-    fn registration_and_authentication_do_not_collide() {
-        let s = CeremonyStore::new();
+    #[tokio::test]
+    async fn registration_and_authentication_do_not_collide() {
+        let s = store();
         let id = Uuid::new_v4();
-        s.put(id, CeremonyKind::Registration, "reg".into());
-        s.put(id, CeremonyKind::Authentication, "auth".into());
+        s.put(id, CeremonyKind::Registration, "reg".into())
+            .await
+            .unwrap();
+        s.put(id, CeremonyKind::Authentication, "auth".into())
+            .await
+            .unwrap();
 
         assert_eq!(
-            s.take(id, CeremonyKind::Registration).as_deref(),
+            s.take(id, CeremonyKind::Registration)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("reg")
         );
         assert_eq!(
-            s.take(id, CeremonyKind::Authentication).as_deref(),
+            s.take(id, CeremonyKind::Authentication)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("auth")
         );
     }
 
-    #[test]
-    fn restarting_replaces_the_previous_challenge() {
-        let s = CeremonyStore::new();
+    #[tokio::test]
+    async fn restarting_replaces_the_previous_challenge() {
+        let s = store();
         let id = Uuid::new_v4();
-        s.put(id, CeremonyKind::Registration, "first".into());
-        s.put(id, CeremonyKind::Registration, "second".into());
+        s.put(id, CeremonyKind::Registration, "first".into())
+            .await
+            .unwrap();
+        s.put(id, CeremonyKind::Registration, "second".into())
+            .await
+            .unwrap();
 
         assert_eq!(
-            s.take(id, CeremonyKind::Registration).as_deref(),
+            s.take(id, CeremonyKind::Registration)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("second"),
             "a retry must not be verified against the abandoned challenge"
         );
     }
 
     /// An abandoned ceremony — the visitor dismissed the prompt and left — must
-    /// not stay answerable.
-    #[test]
-    fn an_abandoned_ceremony_expires() {
-        let s = CeremonyStore::new();
+    /// not stay answerable. The store's TTL handles that.
+    #[tokio::test]
+    async fn an_abandoned_ceremony_expires() {
+        let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
+        let s = CeremonyStore {
+            kv,
+            ttl: Duration::from_millis(30),
+        };
         let id = Uuid::new_v4();
-        let now = Utc::now();
-        s.put_at(id, CeremonyKind::Registration, "state".into(), now);
-
-        let later = now + Duration::seconds(CEREMONY_TTL_SECONDS + 1);
-        assert!(s.take_at(id, CeremonyKind::Registration, later).is_none());
+        s.put(id, CeremonyKind::Registration, "state".into())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(s
+            .take(id, CeremonyKind::Registration)
+            .await
+            .unwrap()
+            .is_none());
     }
 
-    #[test]
-    fn sweep_reclaims_only_expired_entries() {
-        let s = CeremonyStore::new();
-        let old = Uuid::new_v4();
-        let fresh = Uuid::new_v4();
-        let now = Utc::now();
-        s.put_at(
-            old,
-            CeremonyKind::Registration,
-            "old".into(),
-            now - Duration::seconds(CEREMONY_TTL_SECONDS + 10),
-        );
-        s.put_at(fresh, CeremonyKind::Registration, "fresh".into(), now);
-
-        assert_eq!(s.sweep_at(now), 1);
-        assert_eq!(s.len(), 1);
-    }
-
-    #[test]
-    fn clearing_a_session_drops_its_ceremonies_only() {
-        let s = CeremonyStore::new();
+    #[tokio::test]
+    async fn clearing_a_session_drops_its_ceremonies_only() {
+        let s = store();
         let a = Uuid::new_v4();
         let b = Uuid::new_v4();
-        s.put(a, CeremonyKind::Registration, "a".into());
-        s.put(b, CeremonyKind::Registration, "b".into());
+        s.put(a, CeremonyKind::Registration, "a".into())
+            .await
+            .unwrap();
+        s.put(b, CeremonyKind::Registration, "b".into())
+            .await
+            .unwrap();
 
-        s.clear_session(a);
+        s.clear_session(a).await.unwrap();
 
-        assert!(s.take(a, CeremonyKind::Registration).is_none());
-        assert!(s.take(b, CeremonyKind::Registration).is_some());
+        assert!(s
+            .take(a, CeremonyKind::Registration)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(s
+            .take(b, CeremonyKind::Registration)
+            .await
+            .unwrap()
+            .is_some());
     }
 }

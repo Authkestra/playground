@@ -21,7 +21,7 @@ use serde_json::Value;
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::credentials::Credentials;
+use crate::credentials::KvCredentialStore;
 use crate::error::ApiError;
 
 /// A selectable option for `SelectOne` / `SelectMany` controls.
@@ -227,7 +227,7 @@ pub struct ScenarioContext<'a> {
     pub session_id: Uuid,
     /// The visitor's current value for this scenario.
     pub value: &'a ControlValue,
-    pub pool: &'a sqlx::SqlitePool,
+    pub credentials: &'a KvCredentialStore,
     /// Relying-party settings for WebAuthn ceremonies.
     pub relying_party: &'a crate::settings::RelyingParty,
     /// Short-lived state for multi-round-trip ceremonies.
@@ -240,9 +240,13 @@ impl ScenarioContext<'_> {
         self.session_id.to_string()
     }
 
-    /// A credential store bound to this request.
-    pub fn credentials(&self) -> Credentials {
-        crate::credentials::store(self.pool)
+    /// An owned credential store for this request.
+    ///
+    /// Owned because the framework's `TotpAuthMethod<S>` /
+    /// `WebAuthnAuthMethod<S>` take `S: CredentialStore` by value. Cloning is
+    /// an `Arc` bump.
+    pub fn credentials(&self) -> KvCredentialStore {
+        self.credentials.clone()
     }
 }
 

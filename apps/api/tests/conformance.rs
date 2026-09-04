@@ -16,8 +16,6 @@ use std::sync::Arc;
 use api::killswitch::KillSwitch;
 use api::routes::AppState;
 use api::scenario::{ControlShape, ControlValue, ScenarioRegistry};
-use api::session::{DemoSessionStore, DEFAULT_TTL_HOURS};
-use api::settings::{RelyingParty, Settings};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
@@ -25,35 +23,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 async fn state() -> AppState {
-    let settings = Arc::new(Settings {
-        port: 0,
-        cookie_secure: false,
-        session_ttl_hours: DEFAULT_TTL_HOURS,
-        admin_token: None,
-        allowed_origins: vec!["http://localhost:3000".to_string()],
-        trusted_client_ip_header: None,
-        relying_party: RelyingParty {
-            id: "localhost".to_string(),
-            origin: "http://localhost:3000".to_string(),
-            name: "conformance".to_string(),
-        },
-    });
-    let pool = api::credentials::open_in_memory().await.unwrap();
-    AppState {
-        sessions: Arc::new(DemoSessionStore::new(
-            ScenarioRegistry::with_builtins(),
-            settings.session_ttl_hours,
-            api::credentials::janitor(pool.clone()),
-        )),
-        kill_switch: Arc::new(KillSwitch::default()),
-        engines: Arc::new(api::engine::EngineFactory::new(
-            api::engine::ProviderCredentials::default(),
-            false,
-        )),
-        settings,
-        pool,
-        ceremonies: Arc::new(api::ceremony::CeremonyStore::new()),
-    }
+    api::testing::test_state(KillSwitch::default(), None)
 }
 
 fn req(method: &str, uri: &str) -> axum::http::request::Builder {
@@ -535,9 +505,9 @@ async fn the_kill_switch_stops_every_scenario_uniformly() {
 /// Expiry must take a session's credentials with it, whichever scenario made
 /// them.
 #[tokio::test]
-async fn expiry_leaves_no_credentials_behind_for_any_scenario() {
+async fn resetting_leaves_no_credentials_behind_for_any_scenario() {
     let st = state().await;
-    let pool = st.pool.clone();
+    let credentials = st.credentials.clone();
     let sessions = st.sessions.clone();
     let app = api::build_router(st);
 
@@ -563,26 +533,16 @@ async fn expiry_leaves_no_credentials_behind_for_any_scenario() {
         .unwrap();
 
     let session_id: uuid::Uuid = cookie.trim_start_matches("ak_demo=").parse().unwrap();
-    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ak_credentials WHERE user_id = ?")
-        .bind(session_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(before, 1);
+    let user_id = session_id.to_string();
+    assert_eq!(credentials.count(&user_id, "totp").await.unwrap(), 1);
 
-    // Expire it the way the sweeper would.
-    sessions.reset(session_id);
-    api::credentials::SqliteJanitor::purge(&pool, session_id)
-        .await
-        .unwrap();
+    sessions.reset(session_id).await.unwrap();
 
-    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ak_credentials WHERE user_id = ?")
-        .bind(session_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(
-        after, 0,
-        "expired sessions must leave no credentials behind"
-    );
+    for cred_type in ["totp", "webauthn"] {
+        assert_eq!(
+            credentials.count(&user_id, cred_type).await.unwrap(),
+            0,
+            "{cred_type} credentials survived a session reset"
+        );
+    }
 }

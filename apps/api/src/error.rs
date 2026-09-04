@@ -28,6 +28,9 @@ pub enum ApiError {
     CeremonyExpired,
     /// The authenticator's response did not verify.
     CeremonyRejected(String),
+    /// The state backend is unreachable. Distinct from a scenario fault: the
+    /// service cannot serve anyone until it recovers.
+    StateUnavailable(String),
 }
 
 impl ApiError {
@@ -74,7 +77,18 @@ impl ApiError {
             ApiError::CeremonyRejected(detail) => {
                 (StatusCode::BAD_REQUEST, "ceremony_rejected", detail.clone())
             }
+            ApiError::StateUnavailable(detail) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "state_unavailable",
+                format!("The playground's state store is unreachable: {detail}"),
+            ),
         }
+    }
+}
+
+impl From<crate::store::StoreError> for ApiError {
+    fn from(e: crate::store::StoreError) -> Self {
+        ApiError::StateUnavailable(e.to_string())
     }
 }
 

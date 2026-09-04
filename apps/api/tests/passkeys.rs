@@ -10,9 +10,7 @@ use std::sync::Arc;
 
 use api::killswitch::KillSwitch;
 use api::routes::AppState;
-use api::scenario::ScenarioRegistry;
-use api::session::{DemoSessionStore, DEFAULT_TTL_HOURS};
-use api::settings::{RelyingParty, Settings};
+use api::settings::RelyingParty;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
@@ -20,31 +18,11 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 async fn state_with_rp(rp: RelyingParty) -> AppState {
-    let settings = Arc::new(Settings {
-        port: 0,
-        cookie_secure: false,
-        session_ttl_hours: DEFAULT_TTL_HOURS,
-        admin_token: None,
-        allowed_origins: vec!["http://localhost:3000".to_string()],
-        trusted_client_ip_header: None,
+    let settings = api::settings::Settings {
         relying_party: rp,
-    });
-    let pool = api::credentials::open_in_memory().await.unwrap();
-    AppState {
-        sessions: Arc::new(DemoSessionStore::new(
-            ScenarioRegistry::with_builtins(),
-            settings.session_ttl_hours,
-            api::credentials::janitor(pool.clone()),
-        )),
-        kill_switch: Arc::new(KillSwitch::default()),
-        engines: Arc::new(api::engine::EngineFactory::new(
-            api::engine::ProviderCredentials::default(),
-            false,
-        )),
-        settings,
-        pool,
-        ceremonies: Arc::new(api::ceremony::CeremonyStore::new()),
-    }
+        ..api::testing::test_settings(None)
+    };
+    api::testing::test_state_with_settings(KillSwitch::default(), settings)
 }
 
 fn good_rp() -> RelyingParty {

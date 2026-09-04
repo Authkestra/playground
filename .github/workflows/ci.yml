@@ -64,6 +64,24 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+
+    # The state store is Redis in production, so the tests that exercise the
+    # Redis backend need one. They skip when REDIS_URL is unset, which would
+    # mean silently testing only the in-memory backend.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      REDIS_URL: redis://127.0.0.1:6379
+
     steps:
       - uses: actions/checkout@v4
 

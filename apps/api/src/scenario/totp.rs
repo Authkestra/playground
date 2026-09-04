@@ -149,15 +149,11 @@ impl Scenario for TotpScenario {
         let user_id = ctx.user_id();
 
         match action {
-            // Enrolment appends rather than replaces, and verification reads
-            // the *first* stored credential — so without this delete, a visitor
-            // who re-scans keeps verifying against their previous secret and
-            // every new code is rejected. Clear first, then enrol.
+            // Re-enrolling replaces the previous secret rather than adding a
+            // second one, because the credential store files a session's TOTP
+            // secret under a fixed id. That used to need an explicit delete
+            // here; it is now impossible to get wrong.
             "provision" => {
-                crate::credentials::SqliteJanitor::purge_type(ctx.pool, ctx.session_id, "totp")
-                    .await
-                    .map_err(|e| ApiError::Scenario(e.to_string()))?;
-
                 let (secret, uri) = method
                     .register_totp(&user_id, ISSUER, "demo-visitor")
                     .await

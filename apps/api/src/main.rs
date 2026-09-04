@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 
-use api::{build_router, spawn_session_sweeper, state_from_env};
+use api::{build_router, state_from_env};
 
 #[tokio::main]
 async fn main() {
@@ -27,8 +27,6 @@ async fn main() {
         demo_enabled = state.kill_switch.demo_enabled(),
         "starting playground api"
     );
-
-    spawn_session_sweeper(state.sessions.clone());
 
     let port = state.settings.port;
     let app = build_router(state);

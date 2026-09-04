@@ -7,12 +7,10 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use api::engine::{EngineFactory, ProviderCredentials};
 use api::killswitch::KillSwitch;
 use api::routes::AppState;
-use api::scenario::ScenarioRegistry;
-use api::session::{DemoSessionStore, NoopJanitor, DEFAULT_TTL_HOURS};
 use api::settings::Settings;
+use api::testing::{test_settings, test_state_with_settings};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
@@ -20,40 +18,11 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 fn settings(admin_token: Option<&str>) -> Settings {
-    Settings {
-        port: 0,
-        cookie_secure: false,
-        session_ttl_hours: DEFAULT_TTL_HOURS,
-        admin_token: admin_token.map(|t| t.to_string()),
-        allowed_origins: vec!["http://localhost:3000".to_string()],
-        // Tests reach the router directly with no proxy in front, so they
-        // identify callers by X-Forwarded-For rather than a trusted header.
-        trusted_client_ip_header: None,
-        relying_party: api::settings::RelyingParty {
-            id: "localhost".to_string(),
-            origin: "http://localhost:3000".to_string(),
-            name: "test".to_string(),
-        },
-    }
+    test_settings(admin_token)
 }
 
 async fn state_with(kill_switch: KillSwitch, admin_token: Option<&str>) -> AppState {
-    let settings = Arc::new(settings(admin_token));
-    let pool = api::credentials::open_in_memory()
-        .await
-        .expect("in-memory credential store");
-    AppState {
-        sessions: Arc::new(DemoSessionStore::new(
-            ScenarioRegistry::with_builtins(),
-            settings.session_ttl_hours,
-            Arc::new(NoopJanitor),
-        )),
-        kill_switch: Arc::new(kill_switch),
-        engines: Arc::new(EngineFactory::new(ProviderCredentials::default(), false)),
-        settings,
-        pool,
-        ceremonies: Arc::new(api::ceremony::CeremonyStore::new()),
-    }
+    test_state_with_settings(kill_switch, settings(admin_token))
 }
 
 async fn app(kill_switch: KillSwitch, admin_token: Option<&str>) -> axum::Router {

@@ -82,7 +82,8 @@ scenarios simply report themselves as not configured.
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base for provider redirect URIs |
 | `TRUSTED_CLIENT_IP_HEADER` | `fly-client-ip` | Header carrying the true client IP. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. Use `cf-connecting-ip` behind Cloudflare; empty to disable. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
-| `DATABASE_URL` | `sqlite://data.db` | Credential store (TOTP secrets, passkeys) |
+| `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
+| `REDIS_PREFIX` | `ak_playground` | Key namespace, so deployments can share one Redis |
 | `WEBAUTHN_ORIGIN` | `http://localhost:3000` | The frontend's origin, exactly as the browser sends it |
 | `WEBAUTHN_RP_ID` | derived from origin | Relying-party ID — the frontend's domain |
 
@@ -92,10 +93,15 @@ Each visitor gets an isolated demo session (12h TTL, id in an HttpOnly cookie).
 Toggles affect only that visitor. Two people using the site at once never see
 each other's configuration.
 
-**Sessions live in memory and do not survive a redeploy** — on deploy, every
-visitor's configuration resets to defaults and the site behaves as if they had
-just arrived. That is a deliberate v0 choice; see
-[`docs/decisions/0002-session-store.md`](docs/decisions/0002-session-store.md).
+**All state lives in Redis** — demo sessions, in-flight WebAuthn challenges and
+scenario credentials — so the process itself holds nothing durable. Any instance
+can serve any visitor, and a deploy or an instance being recycled costs nothing.
+See [`docs/decisions/0002-session-store.md`](docs/decisions/0002-session-store.md).
+
+**Expiry is Redis's TTL, not a background task.** Sessions, ceremonies and
+credentials each carry one, so they clean themselves up. There is deliberately
+no sweeper: a process that is allowed to scale to zero cannot be relied on to
+run anything on a timer.
 
 ## API
 
@@ -130,6 +136,20 @@ of a ceremony failing with a deliberately vague browser-side error.
 A passkey is bound to the RP ID that created it, so **changing domains means
 every visitor re-registers** — worth knowing before `play.authkestra.com` goes
 live.
+
+## Statelessness
+
+The service is stateless by design, which is what makes it safe to host on
+infrastructure that scales to zero:
+
+| State | Where | Lifetime |
+| --- | --- | --- |
+| Demo session (config) | Redis | 12h TTL, refreshed on use |
+| WebAuthn challenge | Redis | 5 min TTL, single-use (`GETDEL`) |
+| TOTP secret / passkey | Redis | session TTL |
+
+Nothing is written to the container filesystem, and no background task has to be
+alive for cleanup to happen.
 
 ## Safety
 

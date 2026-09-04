@@ -28,8 +28,8 @@ pub struct AppState {
     pub kill_switch: Arc<KillSwitch>,
     pub engines: Arc<EngineFactory>,
     pub settings: Arc<Settings>,
-    /// Pool backing the credential store scenarios enrol into.
-    pub pool: sqlx::SqlitePool,
+    /// Where scenarios enrol credentials.
+    pub credentials: Arc<crate::credentials::KvCredentialStore>,
     /// In-flight ceremony state (WebAuthn challenges).
     pub ceremonies: Arc<crate::ceremony::CeremonyStore>,
 }
@@ -74,12 +74,12 @@ pub struct AdminKillSwitchBody {
 
 /// Resolve the caller's session from the cookie, creating one when needed, and
 /// write the cookie back if it changed.
-fn resolve_session(state: &AppState, cookies: &Cookies) -> DemoSession {
+async fn resolve_session(state: &AppState, cookies: &Cookies) -> Result<DemoSession, ApiError> {
     let existing = cookies
         .get(COOKIE_NAME)
         .and_then(|c| Uuid::parse_str(c.value()).ok());
 
-    let session = state.sessions.get_or_create(existing);
+    let session = state.sessions.get_or_create(existing).await?;
 
     if existing != Some(session.id) {
         let mut cookie = Cookie::new(COOKIE_NAME, session.id.to_string());
@@ -93,7 +93,7 @@ fn resolve_session(state: &AppState, cookies: &Cookies) -> DemoSession {
         cookies.add(cookie);
     }
 
-    session
+    Ok(session)
 }
 
 /// Attach the kill switch's current view of availability to each spec.
@@ -126,16 +126,24 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 }
 
 #[tracing::instrument(skip_all)]
-async fn get_session(State(state): State<AppState>, cookies: Cookies) -> Json<DemoSessionView> {
-    let session = resolve_session(&state, &cookies);
-    Json(session.view())
+async fn get_session(
+    State(state): State<AppState>,
+    cookies: Cookies,
+) -> Result<Json<DemoSessionView>, ApiError> {
+    let session = resolve_session(&state, &cookies).await?;
+    Ok(Json(session.view()))
 }
 
 #[tracing::instrument(skip_all)]
-async fn reset_session(State(state): State<AppState>, cookies: Cookies) -> Json<DemoSessionView> {
-    let session = resolve_session(&state, &cookies);
-    let fresh = state.sessions.reset(session.id);
-    Json(fresh.view())
+async fn reset_session(
+    State(state): State<AppState>,
+    cookies: Cookies,
+) -> Result<Json<DemoSessionView>, ApiError> {
+    let session = resolve_session(&state, &cookies).await?;
+    let fresh = state.sessions.reset(session.id).await?;
+    // Ceremonies belong to the state the visitor just discarded.
+    let _ = state.ceremonies.clear_session(session.id).await;
+    Ok(Json(fresh.view()))
 }
 
 #[tracing::instrument(skip_all)]
@@ -161,7 +169,7 @@ async fn configure_scenario(
         .validate(&body.value)
         .map_err(ApiError::InvalidValue)?;
 
-    let session = resolve_session(&state, &cookies);
+    let session = resolve_session(&state, &cookies).await?;
     let before = session.config.clone();
     let mut after = before.clone();
     after.set(&id, body.value);
@@ -169,6 +177,7 @@ async fn configure_scenario(
     let updated = state
         .sessions
         .update_config(session.id, after.clone())
+        .await?
         .ok_or(ApiError::SessionGone)?;
 
     let d = diff::diff(&before, &after, registry);
@@ -195,7 +204,7 @@ async fn scenario_diff(
         .get(&id)
         .ok_or_else(|| ApiError::UnknownScenario(id.clone()))?;
 
-    let session = resolve_session(&state, &cookies);
+    let session = resolve_session(&state, &cookies).await?;
 
     // Isolate this scenario's contribution: the current config against the same
     // config with this one scenario back at its default.
@@ -221,7 +230,7 @@ async fn try_scenario(
         return Err(ApiError::DemoDisabled);
     }
 
-    let session = resolve_session(&state, &cookies);
+    let session = resolve_session(&state, &cookies).await?;
     let value = session
         .config
         .get(&id)
@@ -234,7 +243,7 @@ async fn try_scenario(
     let ctx = ScenarioContext {
         session_id: session.id,
         value: &value,
-        pool: &state.pool,
+        credentials: &state.credentials,
         relying_party: &state.settings.relying_party,
         ceremonies: &state.ceremonies,
     };
@@ -265,7 +274,7 @@ async fn scenario_action(
         return Err(ApiError::DemoDisabled);
     }
 
-    let session = resolve_session(&state, &cookies);
+    let session = resolve_session(&state, &cookies).await?;
     let value = session
         .config
         .get(&id)
@@ -275,7 +284,7 @@ async fn scenario_action(
     let ctx = ScenarioContext {
         session_id: session.id,
         value: &value,
-        pool: &state.pool,
+        credentials: &state.credentials,
         relying_party: &state.settings.relying_party,
         ceremonies: &state.ceremonies,
     };

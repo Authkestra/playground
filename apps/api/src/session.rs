@@ -1,26 +1,28 @@
-//! Per-visitor demo sessions (roadmap P1).
+//! Per-visitor demo sessions.
 //!
 //! Every visitor gets an isolated session keyed by an opaque id in an HttpOnly
 //! cookie. Toggles mutate only that visitor's config — there is deliberately no
 //! global mutable configuration, which would break the moment two people used
 //! the site at once.
 //!
-//! Expiry is belt-and-braces: reads treat a stale session as absent (so an
-//! expired session is unreachable even if the sweeper has not run yet), and a
-//! background `tokio` interval sweep reclaims the memory and triggers
-//! credential cleanup. The service is a long-lived process, so no external cron
-//! is needed.
+//! Sessions live in the shared key-value store rather than process memory, so
+//! any instance can serve any visitor and nothing is lost when an instance goes
+//! away. **Expiry is the store's TTL.** This used to need a `tokio::interval`
+//! sweep plus expiry-on-read; both are gone, because a background sweeper is
+//! precisely the thing that stops working once the process is allowed to sleep.
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::time::Duration;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::credentials::KvCredentialStore;
 use crate::demo_config::DemoConfig;
 use crate::scenario::ScenarioRegistry;
+use crate::store::{self, KeyValue, StoreError};
 
 /// Name of the cookie carrying the demo session id.
 pub const COOKIE_NAME: &str = "ak_demo";
@@ -28,7 +30,7 @@ pub const COOKIE_NAME: &str = "ak_demo";
 /// How long a demo session lives.
 pub const DEFAULT_TTL_HOURS: i64 = 12;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DemoSession {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
@@ -37,10 +39,6 @@ pub struct DemoSession {
 }
 
 impl DemoSession {
-    pub fn is_expired_at(&self, now: DateTime<Utc>) -> bool {
-        now >= self.expires_at
-    }
-
     pub fn view(&self) -> DemoSessionView {
         DemoSessionView {
             id: self.id.to_string(),
@@ -63,46 +61,26 @@ pub struct DemoSessionView {
     pub config: DemoConfig,
 }
 
-/// Cleans up artefacts a session created outside the session map itself.
-///
-/// WebAuthn credentials and TOTP secrets are created per demo session (P2), and
-/// must not outlive it. The seam exists now so that expiry is already wired
-/// when those scenarios land; v0 has no credentials to remove.
-pub trait CredentialJanitor: Send + Sync {
-    fn purge_session(&self, session_id: Uuid);
-}
-
-/// v0 janitor: nothing is stored yet, so there is nothing to purge.
-pub struct NoopJanitor;
-
-impl CredentialJanitor for NoopJanitor {
-    fn purge_session(&self, session_id: Uuid) {
-        tracing::debug!(%session_id, "no credential store wired yet; nothing to purge");
-    }
-}
-
-/// In-memory store of demo sessions.
-///
-/// Memory rather than Redis is a deliberate v0 choice — see
-/// `docs/decisions/0002-session-store.md`. Sessions do not survive a redeploy.
+/// Demo sessions, backed by the shared key-value store.
 pub struct DemoSessionStore {
-    sessions: RwLock<HashMap<Uuid, DemoSession>>,
+    kv: Arc<dyn KeyValue>,
     registry: ScenarioRegistry,
     ttl: Duration,
-    janitor: Arc<dyn CredentialJanitor>,
+    credentials: KvCredentialStore,
 }
 
 impl DemoSessionStore {
     pub fn new(
+        kv: Arc<dyn KeyValue>,
         registry: ScenarioRegistry,
         ttl_hours: i64,
-        janitor: Arc<dyn CredentialJanitor>,
+        credentials: KvCredentialStore,
     ) -> Self {
         Self {
-            sessions: RwLock::new(HashMap::new()),
+            kv,
             registry,
-            ttl: Duration::hours(ttl_hours),
-            janitor,
+            ttl: Duration::from_secs((ttl_hours.max(1) as u64) * 3600),
+            credentials,
         }
     }
 
@@ -110,131 +88,92 @@ impl DemoSessionStore {
         &self.registry
     }
 
-    fn new_session_at(&self, now: DateTime<Utc>) -> DemoSession {
+    pub fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
+    fn key(id: Uuid) -> String {
+        format!("session:{id}")
+    }
+
+    fn new_session(&self) -> DemoSession {
+        let now = Utc::now();
         DemoSession {
             id: Uuid::new_v4(),
             created_at: now,
-            expires_at: now + self.ttl,
+            expires_at: now
+                + chrono::Duration::from_std(self.ttl)
+                    .unwrap_or_else(|_| chrono::Duration::hours(12)),
             config: DemoConfig::defaults_for(&self.registry),
         }
+    }
+
+    async fn write(&self, session: &DemoSession) -> Result<(), StoreError> {
+        store::set_json(&*self.kv, &Self::key(session.id), session, self.ttl).await
     }
 
     /// Create a fresh session.
-    pub fn create(&self) -> DemoSession {
-        self.create_at(Utc::now())
-    }
-
-    pub fn create_at(&self, now: DateTime<Utc>) -> DemoSession {
-        let session = self.new_session_at(now);
-        self.sessions
-            .write()
-            .expect("session store poisoned")
-            .insert(session.id, session.clone());
+    pub async fn create(&self) -> Result<DemoSession, StoreError> {
+        let session = self.new_session();
+        self.write(&session).await?;
         tracing::info!(session_id = %session.id, expires_at = %session.expires_at, "demo session created");
-        session
+        Ok(session)
     }
 
-    /// Fetch a session, treating an expired one as absent and reclaiming it.
-    pub fn get(&self, id: Uuid) -> Option<DemoSession> {
-        self.get_at(id, Utc::now())
+    /// Fetch a session. An expired one is simply absent — the store dropped it.
+    pub async fn get(&self, id: Uuid) -> Result<Option<DemoSession>, StoreError> {
+        store::get_json(&*self.kv, &Self::key(id)).await
     }
 
-    pub fn get_at(&self, id: Uuid, now: DateTime<Utc>) -> Option<DemoSession> {
-        // Fast path under a read lock.
-        {
-            let guard = self.sessions.read().expect("session store poisoned");
-            match guard.get(&id) {
-                None => return None,
-                Some(s) if !s.is_expired_at(now) => return Some(s.clone()),
-                Some(_) => { /* expired — fall through to remove it */ }
+    /// Return the session for `id`, or a brand-new one if it is missing or gone.
+    pub async fn get_or_create(&self, id: Option<Uuid>) -> Result<DemoSession, StoreError> {
+        if let Some(id) = id {
+            if let Some(session) = self.get(id).await? {
+                return Ok(session);
             }
         }
-        // Lazy expiry: an expired session is unreachable immediately, whether or
-        // not the sweeper has run.
-        let removed = self
-            .sessions
-            .write()
-            .expect("session store poisoned")
-            .remove(&id)
-            .is_some();
-        if removed {
-            tracing::debug!(session_id = %id, "expired demo session reclaimed on read");
-            self.janitor.purge_session(id);
-        }
-        None
+        self.create().await
     }
 
-    /// Return the session for `id`, or a brand-new one if it is missing/stale.
-    pub fn get_or_create(&self, id: Option<Uuid>) -> DemoSession {
-        match id.and_then(|i| self.get(i)) {
-            Some(s) => s,
-            None => self.create(),
-        }
-    }
-
-    /// Replace a session's config. Returns `None` if the session has gone.
-    pub fn update_config(&self, id: Uuid, config: DemoConfig) -> Option<DemoSession> {
-        let now = Utc::now();
-        let mut guard = self.sessions.write().expect("session store poisoned");
-        let session = guard.get_mut(&id)?;
-        if session.is_expired_at(now) {
-            guard.remove(&id);
-            self.janitor.purge_session(id);
-            return None;
-        }
+    /// Replace a session's config. `None` if the session has gone.
+    pub async fn update_config(
+        &self,
+        id: Uuid,
+        config: DemoConfig,
+    ) -> Result<Option<DemoSession>, StoreError> {
+        let Some(mut session) = self.get(id).await? else {
+            return Ok(None);
+        };
         session.config = config;
-        Some(session.clone())
+        // Writing refreshes the TTL, so an actively used session does not
+        // expire out from under a visitor mid-interaction.
+        self.write(&session).await?;
+        Ok(Some(session))
     }
 
-    /// Drop a session's state and hand back a clean one, reusing the same id so
-    /// the visitor's cookie stays valid.
-    pub fn reset(&self, id: Uuid) -> DemoSession {
+    /// Drop a session's state and hand back a clean one, reusing the id so the
+    /// visitor's cookie stays valid.
+    ///
+    /// Credentials are removed explicitly here: TTL would get them eventually,
+    /// but a visitor who asked for a reset expects their passkey and TOTP
+    /// secret gone *now*.
+    pub async fn reset(&self, id: Uuid) -> Result<DemoSession, StoreError> {
+        if let Err(e) = self.credentials.purge_session(&id.to_string()).await {
+            tracing::error!(session_id = %id, error = %e, "failed to purge credentials on reset");
+        }
+
         let now = Utc::now();
-        let mut guard = self.sessions.write().expect("session store poisoned");
-        self.janitor.purge_session(id);
         let fresh = DemoSession {
             id,
             created_at: now,
-            expires_at: now + self.ttl,
+            expires_at: now
+                + chrono::Duration::from_std(self.ttl)
+                    .unwrap_or_else(|_| chrono::Duration::hours(12)),
             config: DemoConfig::defaults_for(&self.registry),
         };
-        guard.insert(id, fresh.clone());
+        self.write(&fresh).await?;
         tracing::info!(session_id = %id, "demo session reset");
-        fresh
-    }
-
-    /// Remove every expired session. Returns how many were reclaimed.
-    pub fn sweep(&self) -> usize {
-        self.sweep_at(Utc::now())
-    }
-
-    pub fn sweep_at(&self, now: DateTime<Utc>) -> usize {
-        let expired: Vec<Uuid> = {
-            let guard = self.sessions.read().expect("session store poisoned");
-            guard
-                .values()
-                .filter(|s| s.is_expired_at(now))
-                .map(|s| s.id)
-                .collect()
-        };
-        if expired.is_empty() {
-            return 0;
-        }
-        let mut guard = self.sessions.write().expect("session store poisoned");
-        for id in &expired {
-            guard.remove(id);
-            self.janitor.purge_session(*id);
-        }
-        tracing::info!(count = expired.len(), "swept expired demo sessions");
-        expired.len()
-    }
-
-    pub fn len(&self) -> usize {
-        self.sessions.read().expect("session store poisoned").len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        Ok(fresh)
     }
 }
 
@@ -242,97 +181,120 @@ impl DemoSessionStore {
 mod tests {
     use super::*;
     use crate::scenario::ControlValue;
+    use crate::store::MemoryKv;
 
     fn store() -> DemoSessionStore {
+        let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
+        let credentials = KvCredentialStore::new(kv.clone(), Duration::from_secs(3600));
         DemoSessionStore::new(
+            kv,
             ScenarioRegistry::with_builtins(),
             DEFAULT_TTL_HOURS,
-            Arc::new(NoopJanitor),
+            credentials,
         )
     }
 
-    #[test]
-    fn a_new_session_starts_at_scenario_defaults() {
+    #[tokio::test]
+    async fn a_new_session_starts_at_scenario_defaults() {
         let s = store();
-        let session = s.create();
+        let session = s.create().await.unwrap();
         assert_eq!(
-            session.config.get("dummy_toggle"),
+            session.config.get("totp"),
             Some(&ControlValue::Toggle { enabled: false })
         );
         assert!(session.config.active_ids().is_empty());
     }
 
-    #[test]
-    fn ttl_is_twelve_hours() {
+    #[tokio::test]
+    async fn ttl_is_twelve_hours() {
         let s = store();
-        let session = s.create();
-        assert_eq!(session.expires_at - session.created_at, Duration::hours(12));
+        let session = s.create().await.unwrap();
+        assert_eq!(
+            session.expires_at - session.created_at,
+            chrono::Duration::hours(12)
+        );
     }
 
     /// The property that matters most: two visitors must never share config.
-    #[test]
-    fn two_concurrent_visitors_hold_different_configurations() {
+    #[tokio::test]
+    async fn two_concurrent_visitors_hold_different_configurations() {
         let s = store();
-        let a = s.create();
-        let b = s.create();
+        let a = s.create().await.unwrap();
+        let b = s.create().await.unwrap();
         assert_ne!(a.id, b.id);
 
         let mut cfg = a.config.clone();
-        cfg.set("dummy_toggle", ControlValue::Toggle { enabled: true });
-        s.update_config(a.id, cfg).expect("a still live");
+        cfg.set("totp", ControlValue::Toggle { enabled: true });
+        s.update_config(a.id, cfg).await.unwrap().expect("a live");
 
-        let a_after = s.get(a.id).expect("a still live");
-        let b_after = s.get(b.id).expect("b still live");
+        let a_after = s.get(a.id).await.unwrap().expect("a live");
+        let b_after = s.get(b.id).await.unwrap().expect("b live");
 
-        assert!(a_after.config.get("dummy_toggle").unwrap().is_active());
+        assert!(a_after.config.get("totp").unwrap().is_active());
         assert!(
-            !b_after.config.get("dummy_toggle").unwrap().is_active(),
+            !b_after.config.get("totp").unwrap().is_active(),
             "visitor B's config leaked from visitor A"
         );
     }
 
-    #[test]
-    fn an_expired_session_is_unreachable_on_read() {
+    #[tokio::test]
+    async fn an_unknown_session_is_absent() {
         let s = store();
-        let session = s.create();
-        let later = session.expires_at + Duration::seconds(1);
-        assert!(s.get_at(session.id, later).is_none());
-        // and it was reclaimed rather than left to rot
-        assert!(s.is_empty());
+        assert!(s.get(Uuid::new_v4()).await.unwrap().is_none());
     }
 
-    #[test]
-    fn sweep_reclaims_only_expired_sessions() {
-        let s = store();
-        let old = s.create_at(Utc::now() - Duration::hours(13));
-        let fresh = s.create();
-
-        let swept = s.sweep();
-
-        assert_eq!(swept, 1);
-        assert!(s.get(old.id).is_none());
-        assert!(s.get(fresh.id).is_some());
+    /// Expiry is the store's TTL now, so an expired session simply is not there.
+    #[tokio::test]
+    async fn an_expired_session_is_unreachable() {
+        let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
+        let credentials = KvCredentialStore::new(kv.clone(), Duration::from_millis(30));
+        // A one-hour TTL rounded from a sub-second duration is not expressible
+        // through the hour-based constructor, so write directly.
+        let s = DemoSessionStore {
+            kv: kv.clone(),
+            registry: ScenarioRegistry::with_builtins(),
+            ttl: Duration::from_millis(30),
+            credentials,
+        };
+        let session = s.create().await.unwrap();
+        assert!(s.get(session.id).await.unwrap().is_some());
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(
+            s.get(session.id).await.unwrap().is_none(),
+            "the store's TTL should have dropped it"
+        );
     }
 
-    #[test]
-    fn reset_clears_config_but_keeps_the_id() {
+    #[tokio::test]
+    async fn reset_clears_config_but_keeps_the_id() {
         let s = store();
-        let session = s.create();
+        let session = s.create().await.unwrap();
         let mut cfg = session.config.clone();
-        cfg.set("dummy_toggle", ControlValue::Toggle { enabled: true });
-        s.update_config(session.id, cfg).unwrap();
+        cfg.set("totp", ControlValue::Toggle { enabled: true });
+        s.update_config(session.id, cfg).await.unwrap();
 
-        let fresh = s.reset(session.id);
+        let fresh = s.reset(session.id).await.unwrap();
 
         assert_eq!(fresh.id, session.id, "cookie should stay valid");
         assert!(fresh.config.active_ids().is_empty());
     }
 
-    #[test]
-    fn get_or_create_makes_a_session_for_an_unknown_id() {
+    #[tokio::test]
+    async fn get_or_create_makes_a_session_for_an_unknown_id() {
         let s = store();
-        let made = s.get_or_create(Some(Uuid::new_v4()));
-        assert!(s.get(made.id).is_some());
-        assert_eq!(s.len(), 1);
+        let made = s.get_or_create(Some(Uuid::new_v4())).await.unwrap();
+        assert!(s.get(made.id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn updating_refreshes_the_expiry() {
+        let s = store();
+        let session = s.create().await.unwrap();
+        let updated = s
+            .update_config(session.id, session.config.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(updated.expires_at >= session.expires_at);
     }
 }

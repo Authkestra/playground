@@ -40,11 +40,22 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tower-cookies = "0.11.0"
 tower_governor = "0.7"
 
-# --- storage for scenario credentials (WebAuthn/TOTP) ---
-# `runtime-tokio-rustls` matches what authkestra-engine's `sql-sqlite` feature
-# turns on, so we do not end up with two TLS stacks in the graph.
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite"] }
+# --- state storage ---
+# Redis holds demo sessions, ceremony state and scenario credentials, so the
+# process itself is stateless and can be scaled to zero.
+#
+# TLS features are enabled HERE rather than relying on authkestra-engine, which
+# declares `redis` with only `tokio-comp`. Cargo features are additive, so
+# enabling them in this crate gives the single `redis` in the graph TLS support
+# — which the engine's own `RedisStore` then benefits from via
+# `RedisStore::with_client`. Managed providers require `rediss://`.
+redis = { version = "0.27", features = [
+    "tokio-comp",
+    "tokio-rustls-comp",
+    "tls-rustls-webpki-roots",
+] }
 async-trait = "0.1"
+thiserror = "2"
 # Needed directly to build the `Webauthn` relying-party instance and to name the
 # ceremony types in signatures; the engine re-exports the traits but not these.
 webauthn-rs = "0.5.0"
