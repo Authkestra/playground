@@ -91,6 +91,21 @@ async fn action(
         .unwrap()
 }
 
+/// A registration response in the browser's own shape.
+///
+/// Well-formed so it gets past parsing — it cannot verify, which is what these
+/// tests want: they are about ceremony state, not cryptography. Note
+/// `clientDataJSON`, capitalised as the WebAuthn spec has it.
+const WELL_FORMED_REGISTRATION: &str = r#"{
+    "id": "Y3JlZC1pZA",
+    "rawId": "Y3JlZC1pZA",
+    "type": "public-key",
+    "response": {
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIn0",
+        "attestationObject": "o2NmbXRkbm9uZQ"
+    }
+}"#;
+
 #[tokio::test]
 async fn registration_start_issues_a_usable_challenge() {
     let app = api::build_router(state().await);
@@ -145,7 +160,9 @@ async fn finishing_without_starting_is_reported_as_expired() {
     let app = api::build_router(state().await);
     let cookie = enable(&app).await;
 
-    let resp = action(&app, &cookie, "register_finish", "{}").await;
+    // Well-formed, so it reaches the challenge lookup rather than failing on
+    // its shape.
+    let resp = action(&app, &cookie, "register_finish", WELL_FORMED_REGISTRATION).await;
 
     assert_eq!(resp.status(), StatusCode::GONE);
     assert_eq!(body_json(resp).await["error"], "ceremony_expired");
@@ -160,12 +177,12 @@ async fn a_challenge_cannot_be_answered_twice() {
 
     action(&app, &cookie, "register_start", "{}").await;
 
-    // First attempt consumes the state; the body is junk so it fails
-    // verification, but the state is spent either way.
-    let first = action(&app, &cookie, "register_finish", r#"{"nonsense":true}"#).await;
+    // First attempt consumes the state; the credential cannot verify, but the
+    // state is spent either way.
+    let first = action(&app, &cookie, "register_finish", WELL_FORMED_REGISTRATION).await;
     assert_ne!(first.status(), StatusCode::GONE);
 
-    let second = action(&app, &cookie, "register_finish", r#"{"nonsense":true}"#).await;
+    let second = action(&app, &cookie, "register_finish", WELL_FORMED_REGISTRATION).await;
     assert_eq!(
         second.status(),
         StatusCode::GONE,
@@ -180,8 +197,16 @@ async fn a_malformed_registration_response_is_a_400_not_a_panic() {
     action(&app, &cookie, "register_start", "{}").await;
 
     let resp = action(&app, &cookie, "register_finish", r#"{"id":"nope"}"#).await;
-
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // And the challenge survives, so a mistake that never reached any
+    // cryptography does not cost the visitor the whole ceremony.
+    let retry = action(&app, &cookie, "register_finish", WELL_FORMED_REGISTRATION).await;
+    assert_ne!(
+        retry.status(),
+        StatusCode::GONE,
+        "a malformed body must not consume the challenge"
+    );
 }
 
 #[tokio::test]
@@ -249,7 +274,7 @@ async fn two_visitors_do_not_share_ceremony_state() {
     action(&app, &cookie_a, "register_start", "{}").await;
 
     // B never started one, so B's finish must not find A's challenge.
-    let resp = action(&app, &cookie_b, "register_finish", "{}").await;
+    let resp = action(&app, &cookie_b, "register_finish", WELL_FORMED_REGISTRATION).await;
     assert_eq!(resp.status(), StatusCode::GONE);
 }
 
@@ -397,4 +422,67 @@ async fn a_malformed_extra_origin_fails_with_an_explanation() {
         detail.contains("WEBAUTHN_EXTRA_ORIGINS"),
         "should name the setting at fault: {detail}"
     );
+}
+
+/// Regression test for a real failure: authenticating with a passkey enrolled
+/// in Bitwarden returned "not a WebAuthn assertion: missing field
+/// `clientDataJson`".
+///
+/// The spec field is `clientDataJSON`, with `JSON` fully capitalised.
+/// `rename_all = "camelCase"` renders it `clientDataJson`, which no browser
+/// sends — so every authentication was rejected before any cryptography ran.
+/// Registration was unaffected, because that path deserialises into
+/// `webauthn-rs`'s own type, which is why enrolment appeared to work.
+#[tokio::test]
+async fn an_assertion_in_the_browsers_own_shape_is_accepted_for_parsing() {
+    let app = api::build_router(state().await);
+    let cookie = enable(&app).await;
+
+    // Exactly what `navigator.credentials.get()` produces once serialised —
+    // note the capitalisation of `clientDataJSON`.
+    let assertion = r#"{
+        "id": "Y3JlZC1pZA",
+        "rawId": "Y3JlZC1pZA",
+        "type": "public-key",
+        "response": {
+            "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+            "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MBAAAAAQ",
+            "signature": "MEUCIQD",
+            "userHandle": null
+        }
+    }"#;
+
+    let resp = action(&app, &cookie, "authenticate_finish", assertion).await;
+
+    // No ceremony was started, so this must fail at the *challenge* stage —
+    // which proves the body parsed. A parse failure would be a 400
+    // `invalid_value` naming the missing field instead.
+    assert_eq!(
+        resp.status(),
+        StatusCode::GONE,
+        "the assertion should parse and fail on the missing challenge, not on its shape"
+    );
+    assert_eq!(body_json(resp).await["error"], "ceremony_expired");
+}
+
+/// And the spelling the old code expected must NOT be accepted, or the bug
+/// could quietly return behind a lenient alias.
+#[tokio::test]
+async fn the_incorrect_camel_case_spelling_is_rejected() {
+    let app = api::build_router(state().await);
+    let cookie = enable(&app).await;
+
+    let wrong = r#"{
+        "id": "Y3JlZC1pZA",
+        "response": {
+            "clientDataJson": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+            "authenticatorData": "SZYN5Y",
+            "signature": "MEUCIQD"
+        }
+    }"#;
+
+    let resp = action(&app, &cookie, "authenticate_finish", wrong).await;
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body_json(resp).await["error"], "invalid_value");
 }

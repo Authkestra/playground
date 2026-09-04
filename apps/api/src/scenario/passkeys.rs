@@ -31,8 +31,8 @@ use webauthn_rs::prelude::{Passkey, PasskeyRegistration, Webauthn};
 use webauthn_rs::WebauthnBuilder;
 
 use super::{
-    Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioContext,
-    TryOutcome, TryResult,
+    Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
+    Scenario, ScenarioContext, TryOutcome, TryResult,
 };
 use crate::ceremony::CeremonyKind;
 use crate::error::ApiError;
@@ -172,6 +172,65 @@ impl Scenario for PasskeysScenario {
         }
     }
 
+    fn kit_fragment(&self, value: &ControlValue, _ctx: &KitContext<'_>) -> Option<KitFragment> {
+        if !value.is_active() {
+            return None;
+        }
+        Some(KitFragment {
+            imports: vec!["use webauthn_rs::prelude::WebauthnBuilder;".to_string()],
+            prelude: vec![
+                r#"    // The relying party must match the origin the browser actually uses.
+    // A mismatch fails inside the browser with a deliberately vague error, so
+    // it is worth getting right first. The RP ID may be a registrable suffix
+    // of the origin (`example.com` for `app.example.com`), which lets you move
+    // between subdomains without invalidating every passkey.
+    let rp_origin = std::env::var("WEBAUTHN_ORIGIN")
+        .unwrap_or_else(|_| format!("http://localhost:{port}"));
+    let rp_origin = url::Url::parse(&rp_origin).expect("WEBAUTHN_ORIGIN must be a URL");
+    let rp_id = std::env::var("WEBAUTHN_RP_ID")
+        .unwrap_or_else(|_| rp_origin.host_str().unwrap_or("localhost").to_string());
+    let webauthn = WebauthnBuilder::new(&rp_id, &rp_origin)
+        .expect("the RP ID must be a registrable suffix of the origin")
+        .rp_name("Authkestra Starter")
+        .build()
+        .expect("valid WebAuthn configuration");"#
+                    .to_string(),
+            ],
+            builder_calls: vec![
+                "        // Passkeys as a first factor. The private key never leaves the
+        // authenticator; only its public key is stored here.
+        .with_webauthn(std::sync::Arc::new(webauthn), SqlxCredentialStore::new(pool.clone()))"
+                    .to_string(),
+            ],
+            routes: Vec::new(),
+            handlers: Vec::new(),
+            env: vec![
+                KitEnvVar::with_default(
+                    "WEBAUTHN_ORIGIN",
+                    "The origin the browser loads your app from, exactly.",
+                    "http://localhost:3000",
+                ),
+                KitEnvVar::with_default(
+                    "WEBAUTHN_RP_ID",
+                    "Relying-party ID. May be a registrable suffix of the origin.",
+                    "localhost",
+                ),
+            ],
+            notes: vec![
+                "**Passkeys.** A passkey is bound to the relying-party ID that created it, so \
+                 changing `WEBAUTHN_RP_ID` invalidates every existing registration. Prefer a \
+                 registrable suffix (`example.com` over `app.example.com`) so you can move \
+                 between subdomains later."
+                    .to_string(),
+                "The signature counter is stored alongside the credential and must be \
+                 persisted: a counter that fails to advance is how a cloned authenticator is \
+                 detected."
+                    .to_string(),
+            ],
+            needs_credential_store: true,
+        })
+    }
+
     async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
         if !ctx.value.is_active() {
             return Ok(TryResult {
@@ -244,6 +303,14 @@ impl Scenario for PasskeysScenario {
             }
 
             "register_finish" => {
+                // Parsed before the challenge is consumed. Taking it first
+                // meant a malformed body burned the challenge and forced the
+                // visitor to restart the whole ceremony for a mistake that
+                // never reached any cryptography.
+                let credential = serde_json::from_value(body).map_err(|e| {
+                    ApiError::InvalidValue(format!("not a WebAuthn registration response: {e}"))
+                })?;
+
                 // Taking the state consumes it, so a challenge is answerable
                 // exactly once and an abandoned ceremony simply expires.
                 let Some(raw) = ctx
@@ -256,10 +323,6 @@ impl Scenario for PasskeysScenario {
                 };
                 let state: PasskeyRegistration = serde_json::from_str(&raw)
                     .map_err(|e| ApiError::Scenario(format!("bad ceremony state: {e}")))?;
-
-                let credential = serde_json::from_value(body).map_err(|e| {
-                    ApiError::InvalidValue(format!("not a WebAuthn registration response: {e}"))
-                })?;
 
                 match method.finish_register(&user_id, credential, state).await {
                     Ok(_) => {
@@ -334,6 +397,12 @@ impl Scenario for PasskeysScenario {
             }
 
             "authenticate_finish" => {
+                // Parsed before the challenge is consumed, so a malformed body
+                // does not cost the visitor the ceremony.
+                let assertion: Assertion = serde_json::from_value(body).map_err(|e| {
+                    ApiError::InvalidValue(format!("not a WebAuthn assertion: {e}"))
+                })?;
+
                 let Some(auth_state_json) = ctx
                     .ceremonies
                     .take(ctx.session_id, CeremonyKind::Authentication)
@@ -347,9 +416,6 @@ impl Scenario for PasskeysScenario {
                 // `finish_authentication`, because that path also advances and
                 // persists the signature counter — the clone-detection signal
                 // this scenario is meant to demonstrate.
-                let assertion: Assertion = serde_json::from_value(body).map_err(|e| {
-                    ApiError::InvalidValue(format!("not a WebAuthn assertion: {e}"))
-                })?;
 
                 let result = method
                     .authenticate(AuthInput::WebAuthnAuthentication {
@@ -448,6 +514,14 @@ struct Assertion {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AssertionResponse {
+    /// Spelled `clientDataJSON`, with `JSON` fully capitalised.
+    ///
+    /// This is a genuine quirk of the WebAuthn spec and the one field
+    /// `rename_all = "camelCase"` gets wrong — it would produce
+    /// `clientDataJson`, which no browser ever sends. Registration was
+    /// unaffected because it deserialises into `webauthn-rs`'s own type, so
+    /// only authentication broke.
+    #[serde(rename = "clientDataJSON")]
     client_data_json: String,
     authenticator_data: String,
     signature: String,

@@ -22,8 +22,8 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use super::{
-    Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioContext,
-    TryOutcome, TryResult,
+    Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitFragment, Scenario,
+    ScenarioContext, TryOutcome, TryResult,
 };
 use crate::error::ApiError;
 use crate::events::Step;
@@ -104,6 +104,53 @@ impl Scenario for TotpScenario {
                 CrateRequirement::new("sqlx", &["sqlite"]),
             ],
         }
+    }
+
+    fn kit_fragment(&self, value: &ControlValue, ctx: &KitContext<'_>) -> Option<KitFragment> {
+        if !value.is_active() {
+            return None;
+        }
+
+        // TOTP changes role by company, following the framework's own MFA
+        // example. Alone it is the only way in, so it must be a first factor.
+        // Alongside another method it is registered as step-up, which is the
+        // stronger design and almost certainly what was intended.
+        let alone = !ctx.has_company("totp");
+        let (call, note) = if alone {
+            (
+                "        // TOTP as a *first factor* — it is the only method registered.
+        .with_totp(SqlxCredentialStore::new(pool.clone()))",
+                "**TOTP is registered as a first factor**, because it is the only method \
+                 you selected. That means a six-digit code is the whole of authentication. \
+                 If you add another method later, move this to `.with_mfa_method(...)` so \
+                 TOTP becomes a second factor instead.",
+            )
+        } else {
+            (
+                "        // TOTP as *step-up only*: it cannot start a session on its own,
+        // only answer an `MfaRequired` challenge from another method.
+        .with_mfa_method(authkestra_engine::auth::totp::TotpAuthMethod::new(\n            SqlxCredentialStore::new(pool.clone()),\n        ))",
+                "**TOTP is registered as step-up only**, because another method is also \
+                 enabled. It cannot start a session by itself — it answers an `MfaRequired` \
+                 challenge. Swap it to `.with_totp(...)` to make it a first factor.",
+            )
+        };
+
+        Some(KitFragment {
+            imports: Vec::new(),
+            prelude: Vec::new(),
+            builder_calls: vec![call.to_string()],
+            routes: Vec::new(),
+            handlers: Vec::new(),
+            env: Vec::new(),
+            notes: vec![
+                note.to_string(),
+                "Enrolment generates one secret per user and returns an `otpauth://` URI for \
+                 a QR code. Treat the secret as a credential, not a profile field."
+                    .to_string(),
+            ],
+            needs_credential_store: true,
+        })
     }
 
     async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {

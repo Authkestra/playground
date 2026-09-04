@@ -258,6 +258,84 @@ impl ScenarioContext<'_> {
     }
 }
 
+/// What a scenario contributes to a generated project.
+///
+/// Assembled by concatenation rather than templated, because composition in
+/// this framework is a linear builder chain — see
+/// `docs/decisions/0005-starter-kit-model.md`.
+///
+/// The crates and features are deliberately **not** here: they come from
+/// [`Scenario::consequences`], which is what the diff already renders. Two
+/// descriptions of the same thing would drift, and the failure mode is the
+/// worst available — the playground promising one dependency set while the
+/// download ships another.
+#[derive(Debug, Clone, Default)]
+pub struct KitFragment {
+    /// `use` lines.
+    pub imports: Vec<String>,
+    /// Setup that must run before the builder chain.
+    pub prelude: Vec<String>,
+    /// Lines appended to the `Engine::builder()` chain, in order.
+    pub builder_calls: Vec<String>,
+    /// `.route(...)` lines.
+    pub routes: Vec<String>,
+    /// Whole `fn` definitions appended after `main`.
+    pub handlers: Vec<String>,
+    /// Environment variables this scenario reads, for `.env.example`.
+    pub env: Vec<KitEnvVar>,
+    /// Paragraphs for the generated README.
+    pub notes: Vec<String>,
+    /// Whether this scenario needs the shared credential store.
+    ///
+    /// Emitted once however many scenarios ask for it, as in the framework's
+    /// own MFA example.
+    pub needs_credential_store: bool,
+}
+
+/// An environment variable a generated project reads.
+#[derive(Debug, Clone)]
+pub struct KitEnvVar {
+    pub name: String,
+    pub comment: String,
+    /// A usable default, or `None` when the value must be supplied.
+    pub default: Option<String>,
+}
+
+impl KitEnvVar {
+    pub fn required(name: &str, comment: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            comment: comment.to_string(),
+            default: None,
+        }
+    }
+
+    pub fn with_default(name: &str, comment: &str, default: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            comment: comment.to_string(),
+            default: Some(default.to_string()),
+        }
+    }
+}
+
+/// What else is switched on, so a fragment can adapt to its company.
+pub struct KitContext<'a> {
+    /// Ids of every active scenario, in registry order.
+    pub active: &'a [String],
+}
+
+impl KitContext<'_> {
+    pub fn is_active(&self, id: &str) -> bool {
+        self.active.iter().any(|a| a == id)
+    }
+
+    /// True when something other than `id` is also switched on.
+    pub fn has_company(&self, id: &str) -> bool {
+        self.active.iter().any(|a| a != id)
+    }
+}
+
 /// One playground scenario.
 ///
 /// Implementors are registered once and driven entirely through this trait, so
@@ -338,6 +416,15 @@ pub trait Scenario: Send + Sync {
     /// can be built from data rather than hardcoded per scenario.
     fn actions(&self) -> Vec<&'static str> {
         Vec::new()
+    }
+
+    /// What this scenario contributes to a downloaded project.
+    ///
+    /// `None` means it contributes nothing — a placeholder, or a scenario that
+    /// is switched off. The default suits a scenario with no generated
+    /// counterpart.
+    fn kit_fragment(&self, _value: &ControlValue, _ctx: &KitContext<'_>) -> Option<KitFragment> {
+        None
     }
 }
 

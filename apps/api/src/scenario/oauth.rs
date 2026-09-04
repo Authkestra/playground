@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{
-    Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioContext,
-    ScenarioOption, TryOutcome, TryResult,
+    Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
+    Scenario, ScenarioContext, ScenarioOption, TryOutcome, TryResult,
 };
 use crate::error::ApiError;
 
@@ -204,6 +204,85 @@ impl Scenario for OAuthScenario {
             requirements,
             crates,
         }
+    }
+
+    fn kit_fragment(&self, value: &ControlValue, _ctx: &KitContext<'_>) -> Option<KitFragment> {
+        let selected = selected_providers(value);
+        if selected.is_empty() {
+            return None;
+        }
+
+        let mut imports = vec!["use authkestra_engine::OAuth2Flow;".to_string()];
+        let mut builder_calls = Vec::new();
+        let mut env = vec![KitEnvVar::with_default(
+            "OAUTH_REDIRECT_BASE",
+            "Base URL the provider redirects back to. Must match what you registered.",
+            "http://localhost:3000",
+        )];
+
+        for provider in &selected {
+            let type_name = match provider.as_str() {
+                "github" => "GithubProvider",
+                "google" => "GoogleProvider",
+                "discord" => "DiscordProvider",
+                // Unknown ids cannot be selected — the control only offers
+                // configured providers — so this is unreachable in practice.
+                _ => continue,
+            };
+            imports.push(format!(
+                "use authkestra_providers::{provider}::{type_name};"
+            ));
+            let upper = provider.to_uppercase();
+            builder_calls.push(format!(
+                r#"        .provider(OAuth2Flow::new({type_name}::new(
+            std::env::var("{upper}_CLIENT_ID").expect("{upper}_CLIENT_ID must be set"),
+            std::env::var("{upper}_CLIENT_SECRET").expect("{upper}_CLIENT_SECRET must be set"),
+            format!("{{redirect_base}}/auth/callback/{provider}"),
+        )))"#
+            ));
+            env.push(KitEnvVar::required(
+                &format!("{upper}_CLIENT_ID"),
+                &format!("Client id of your {} OAuth app.", Self::label_for(provider)),
+            ));
+            env.push(KitEnvVar::required(
+                &format!("{upper}_CLIENT_SECRET"),
+                &format!(
+                    "Client secret of your {} OAuth app.",
+                    Self::label_for(provider)
+                ),
+            ));
+        }
+
+        let labels: Vec<&str> = selected.iter().map(|p| Self::label_for(p)).collect();
+        let mut notes = vec![format!(
+            "**Sign in with {}.** The routes come from `engine.axum_router()`, already              merged below: `/auth/login/{{provider}}` starts the flow and              `/auth/callback/{{provider}}` completes it. Register the callback URL with each              provider exactly as it appears — including scheme and path.",
+            join_human(&labels)
+        )];
+        notes.push(
+            "OAuth `state` and `nonce` travel in an encrypted cookie rather than a database,              so the callback verifies itself with no server-side lookup."
+                .to_string(),
+        );
+        if selected.len() > 1 {
+            notes.push(
+                "With more than one provider you must decide what happens when the same                  person arrives from two of them — link the accounts, or treat them as                  separate identities. The framework leaves that to you deliberately: it owns                  no user table."
+                    .to_string(),
+            );
+        }
+
+        Some(KitFragment {
+            imports,
+            prelude: vec![
+                r#"    let redirect_base = std::env::var("OAUTH_REDIRECT_BASE")
+        .unwrap_or_else(|_| format!("http://localhost:{port}"));"#
+                    .to_string(),
+            ],
+            builder_calls,
+            routes: Vec::new(),
+            handlers: Vec::new(),
+            env,
+            notes,
+            needs_credential_store: false,
+        })
     }
 
     async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
