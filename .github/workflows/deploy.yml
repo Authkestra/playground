@@ -1,8 +1,17 @@
-name: Deploy
+# Deploy to Fly.io.
+#
+# `workflow_dispatch` only: Fly's trial ended, so every push-triggered run fails
+# with "trial has ended" and leaves main permanently red for a reason that has
+# nothing to do with the commit. Fly remains a valid target — the container and
+# fly.toml are unchanged — so this is kept ready rather than deleted.
+#
+# The active paths are Render (its own Git integration, no workflow needed) and
+# Cloud Run (deploy-cloudrun.yml). See docs/deployment.md.
+#
+# To make Fly the target again: add a card, then restore the `push` trigger.
+name: Deploy (Fly.io)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
