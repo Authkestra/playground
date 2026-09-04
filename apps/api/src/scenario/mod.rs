@@ -285,11 +285,62 @@ pub struct KitFragment {
     pub env: Vec<KitEnvVar>,
     /// Paragraphs for the generated README.
     pub notes: Vec<String>,
+    /// What the developer must register or create themselves before this
+    /// works — an OAuth app, a callback URL. Rendered as the README's setup
+    /// steps, because a project you cannot configure is not a starting point.
+    pub setup: Vec<KitSetup>,
+    /// Where to read more: the framework's docs, and the upstream example
+    /// this fragment derives from.
+    pub links: Vec<KitLink>,
     /// Whether this scenario needs the shared credential store.
     ///
     /// Emitted once however many scenarios ask for it, as in the framework's
     /// own MFA example.
     pub needs_credential_store: bool,
+}
+
+/// Something the developer must do outside the project before it will run.
+#[derive(Debug, Clone)]
+pub struct KitSetup {
+    pub title: String,
+    /// Ordered steps, rendered as a numbered list.
+    pub steps: Vec<String>,
+}
+
+impl KitSetup {
+    pub fn new(title: &str, steps: &[String]) -> Self {
+        Self {
+            title: title.to_string(),
+            steps: steps.to_vec(),
+        }
+    }
+}
+
+/// A pointer into the framework's documentation or examples.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KitLink {
+    pub label: String,
+    pub url: String,
+}
+
+impl KitLink {
+    /// A page on the docs site. `path` is the route, without slashes at
+    /// either end — `providers/passkeys`.
+    pub fn docs(label: &str, path: &str) -> Self {
+        Self {
+            label: label.to_string(),
+            url: format!("https://authkestra.com/{path}/"),
+        }
+    }
+
+    /// An example in the framework repository, by path from its root.
+    pub fn example(path: &str) -> Self {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        Self {
+            label: format!("upstream example: `{name}`"),
+            url: format!("https://github.com/marcjazz/authkestra/blob/main/{path}"),
+        }
+    }
 }
 
 /// An environment variable a generated project reads.

@@ -26,7 +26,7 @@ use ts_rs::TS;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
-    Scenario, ScenarioContext, ScenarioOption, TryOutcome, TryResult,
+    KitLink, KitSetup, Scenario, ScenarioContext, ScenarioOption, TryOutcome, TryResult,
 };
 use crate::error::ApiError;
 
@@ -112,6 +112,53 @@ impl OAuthScenario {
             .find(|(pid, _)| *pid == id)
             .map(|(_, label)| *label)
             .unwrap_or(id)
+    }
+
+    /// What the developer has to do at the provider before any of this works.
+    /// Credentials are the one thing a generator cannot produce, so the README
+    /// has to say exactly where to get them.
+    fn kit_setup_for(provider: &str) -> Option<KitSetup> {
+        let label = Self::label_for(provider);
+        let upper = provider.to_uppercase();
+        // The default of OAUTH_REDIRECT_BASE, written out in full: a callback
+        // URL that is nearly right fails at the provider, not here.
+        let callback = format!("http://localhost:3000/auth/callback/{provider}");
+
+        let (console, create) = match provider {
+            "github" => (
+                "https://github.com/settings/developers",
+                "**New OAuth App**, then set *Authorization callback URL*",
+            ),
+            "google" => (
+                "https://console.cloud.google.com/apis/credentials",
+                "**Create credentials → OAuth client ID → Web application**, then add \
+                 an *Authorised redirect URI*",
+            ),
+            "discord" => (
+                "https://discord.com/developers/applications",
+                "**New Application → OAuth2**, then add a *Redirect*",
+            ),
+            // Only configured providers can be selected, so this is
+            // unreachable in practice.
+            _ => return None,
+        };
+
+        Some(KitSetup::new(
+            &format!("Register a {label} OAuth app"),
+            &[
+                format!("Open <{console}> and choose {create}: `{callback}`."),
+                "That URL must match what this project builds from \
+                 `OAUTH_REDIRECT_BASE` byte for byte — scheme, host, port and path. A \
+                 trailing slash makes it a different URL. When you deploy, change the \
+                 variable here and the registration there."
+                    .to_string(),
+                format!(
+                    "Copy the client id and secret into `{upper}_CLIENT_ID` and \
+                     `{upper}_CLIENT_SECRET` in your `.env`. They are secrets, and the \
+                     generated `.gitignore` already excludes that file."
+                ),
+            ],
+        ))
     }
 }
 
@@ -255,18 +302,45 @@ impl Scenario for OAuthScenario {
 
         let labels: Vec<&str> = selected.iter().map(|p| Self::label_for(p)).collect();
         let mut notes = vec![format!(
-            "**Sign in with {}.** The routes come from `engine.axum_router()`, already              merged below: `/auth/login/{{provider}}` starts the flow and              `/auth/callback/{{provider}}` completes it. Register the callback URL with each              provider exactly as it appears — including scheme and path.",
+            "**Sign in with {}.** The routes come from `engine.axum_router()`, already \
+             merged below: `/auth/login/{{provider}}` starts the flow and \
+             `/auth/callback/{{provider}}` completes it. Register the callback URL with \
+             each provider exactly as it appears — including scheme, port and path.",
             join_human(&labels)
         )];
         notes.push(
-            "OAuth `state` and `nonce` travel in an encrypted cookie rather than a database,              so the callback verifies itself with no server-side lookup."
+            "OAuth `state` and `nonce` travel in an encrypted cookie rather than a \
+             database, so the callback verifies itself with no server-side lookup."
                 .to_string(),
         );
         if selected.len() > 1 {
             notes.push(
-                "With more than one provider you must decide what happens when the same                  person arrives from two of them — link the accounts, or treat them as                  separate identities. The framework leaves that to you deliberately: it owns                  no user table."
+                "With more than one provider you must decide what happens when the same \
+                 person arrives from two of them — link the accounts, or treat them as \
+                 separate identities. The framework leaves that to you deliberately: it \
+                 owns no user table."
                     .to_string(),
             );
+        }
+
+        let setup = selected
+            .iter()
+            .filter_map(|provider| Self::kit_setup_for(provider))
+            .collect();
+
+        let mut links = vec![KitLink::docs("OAuth 2.0 providers", "providers/oauth2")];
+        if selected.iter().any(|p| p == "google") {
+            // Google is an OIDC provider, so the id-token half is documented
+            // apart from the plain OAuth2 flow.
+            links.push(KitLink::docs("OpenID Connect", "providers/oidc"));
+            links.push(KitLink::example(
+                "crates/authkestra/examples/axum_oidc_google.rs",
+            ));
+        }
+        if selected.iter().any(|p| p != "google") {
+            links.push(KitLink::example(
+                "crates/authkestra/examples/axum_oauth2_github.rs",
+            ));
         }
 
         Some(KitFragment {
@@ -281,6 +355,8 @@ impl Scenario for OAuthScenario {
             handlers: Vec::new(),
             env,
             notes,
+            setup,
+            links,
             needs_credential_store: false,
         })
     }

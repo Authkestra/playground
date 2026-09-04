@@ -32,7 +32,7 @@ use webauthn_rs::WebauthnBuilder;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
-    Scenario, ScenarioContext, TryOutcome, TryResult,
+    KitLink, KitSetup, Scenario, ScenarioContext, TryOutcome, TryResult,
 };
 use crate::ceremony::CeremonyKind;
 use crate::error::ApiError;
@@ -226,6 +226,26 @@ impl Scenario for PasskeysScenario {
                  persisted: a counter that fails to advance is how a cloned authenticator is \
                  detected."
                     .to_string(),
+            ],
+            setup: vec![KitSetup::new(
+                "Point WebAuthn at the origin you actually serve",
+                &[
+                    "Browsers only allow WebAuthn from `http://localhost` or an HTTPS \
+                     origin. There is nothing to register with a third party — the \
+                     origin is the trust anchor."
+                        .to_string(),
+                    "Set `WEBAUTHN_ORIGIN` to the origin exactly as the browser shows \
+                     it, scheme and port included."
+                        .to_string(),
+                    "Set `WEBAUTHN_RP_ID` to that host, or to a registrable suffix of \
+                     it. Every passkey already enrolled stops working if you change \
+                     it later."
+                        .to_string(),
+                ],
+            )],
+            links: vec![
+                KitLink::docs("Passkeys", "providers/passkeys"),
+                KitLink::example("crates/authkestra-engine/examples/totp_webauthn.rs"),
             ],
             needs_credential_store: true,
         })

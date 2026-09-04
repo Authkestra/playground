@@ -22,8 +22,8 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use super::{
-    Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitFragment, Scenario,
-    ScenarioContext, TryOutcome, TryResult,
+    Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitFragment, KitLink,
+    Scenario, ScenarioContext, TryOutcome, TryResult,
 };
 use crate::error::ApiError;
 use crate::events::Step;
@@ -148,6 +148,13 @@ impl Scenario for TotpScenario {
                 "Enrolment generates one secret per user and returns an `otpauth://` URI for \
                  a QR code. Treat the secret as a credential, not a profile field."
                     .to_string(),
+            ],
+            // Nothing to register anywhere: enrolment happens in your own app,
+            // and the authenticator is whatever the user already has.
+            setup: Vec::new(),
+            links: vec![
+                KitLink::docs("TOTP", "providers/totp"),
+                KitLink::example("crates/authkestra-engine/examples/totp_webauthn.rs"),
             ],
             needs_credential_store: true,
         })
