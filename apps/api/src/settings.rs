@@ -12,6 +12,14 @@ pub struct RelyingParty {
     pub id: String,
     pub origin: String,
     pub name: String,
+    /// Additional origins accepted for a ceremony.
+    ///
+    /// Useful for running a local frontend against a deployed API, or for
+    /// several subdomains under one relying party. **It cannot bridge
+    /// different registrable domains**: the browser requires the RP ID to be a
+    /// suffix of the page's own origin, so adding `*.vercel.app` here while the
+    /// RP ID is `authkestra.com` would still be refused client-side.
+    pub extra_origins: Vec<String>,
 }
 
 impl RelyingParty {
@@ -33,8 +41,25 @@ impl RelyingParty {
         let name = std::env::var("WEBAUTHN_RP_NAME")
             .unwrap_or_else(|_| "Authkestra Playground".to_string());
 
-        tracing::info!(rp_id = %id, rp_origin = %origin, "WebAuthn relying party");
-        Self { id, origin, name }
+        let extra_origins: Vec<String> = std::env::var("WEBAUTHN_EXTRA_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        tracing::info!(
+            rp_id = %id,
+            rp_origin = %origin,
+            extra_origins = ?extra_origins,
+            "WebAuthn relying party"
+        );
+        Self {
+            id,
+            origin,
+            name,
+            extra_origins,
+        }
     }
 }
 

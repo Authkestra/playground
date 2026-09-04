@@ -94,7 +94,7 @@ Four settings change together, and three of them fail *silently* if missed:
 | --- | --- | --- |
 | `ALLOWED_ORIGINS` (API) | `https://play.authkestra.com` | Browser blocks every request; site reads as "API unavailable" |
 | `NEXT_PUBLIC_API_BASE_URL` (Vercel) | the API's new origin | Frontend calls the old host |
-| `WEBAUTHN_ORIGIN` / `WEBAUTHN_RP_ID` (API) | `https://play.authkestra.com` / `play.authkestra.com` | Ceremonies fail with a vague browser error — **and every existing passkey stops working, because a passkey is bound to the RP ID that created it** |
+| `WEBAUTHN_ORIGIN` / `WEBAUTHN_RP_ID` (API) | `https://play.authkestra.com` / **`authkestra.com`** | Ceremonies fail with a vague browser error — **and every existing passkey stops working, because a passkey is bound to the RP ID that created it** |
 | `COOKIE_SAMESITE` (API) | `lax` | Nothing breaks; you just keep the looser cross-site cookie |
 
 `OAUTH_REDIRECT_BASE` only changes if the *API* host moves; the callback URIs
@@ -113,6 +113,16 @@ ceremony failing with a deliberately vague browser-side error.
 
 A passkey is bound to the RP ID that created it, so **changing domains means
 every visitor re-registers.**
+
+The RP ID may be a **registrable suffix** of the origin, so `authkestra.com`
+works for a page served at `play.authkestra.com`. Prefer the suffix: passkeys
+then survive a later move to another `*.authkestra.com` subdomain, where pinning
+`play.authkestra.com` would invalidate all of them.
+
+`WEBAUTHN_EXTRA_ORIGINS` accepts additional origins — useful for a local
+frontend against a deployed API. It cannot bridge different registrable domains,
+because the browser separately requires the RP ID to be a suffix of the page's
+own origin.
 
 ## 5. Everything else
 

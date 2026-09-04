@@ -35,6 +35,7 @@ pub fn test_settings(admin_token: Option<&str>) -> Settings {
             id: "localhost".to_string(),
             origin: "http://localhost:3000".to_string(),
             name: "test".to_string(),
+            extra_origins: Vec::new(),
         },
         xff_position: XffPosition::Rightmost,
         cookie_same_site: CookieSameSite::Lax,

@@ -77,9 +77,19 @@ fn webauthn(rp: &RelyingParty) -> Result<Arc<Webauthn>, ApiError> {
         ))
     })?;
 
-    Ok(Arc::new(builder.rp_name(&rp.name).build().map_err(
-        |e| ApiError::Scenario(format!("failed to build relying party: {e}")),
-    )?))
+    let mut builder = builder.rp_name(&rp.name);
+    for extra in &rp.extra_origins {
+        let parsed = url::Url::parse(extra).map_err(|e| {
+            ApiError::Scenario(format!(
+                "WEBAUTHN_EXTRA_ORIGINS entry `{extra}` is not a valid URL: {e}"
+            ))
+        })?;
+        builder = builder.append_allowed_origin(&parsed);
+    }
+
+    Ok(Arc::new(builder.build().map_err(|e| {
+        ApiError::Scenario(format!("failed to build relying party: {e}"))
+    })?))
 }
 
 /// Passkeys already enrolled for this session.

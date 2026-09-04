@@ -87,7 +87,8 @@ scenarios simply report themselves as not configured.
 | `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
 | `REDIS_PREFIX` | `ak_playground` | Key namespace, so deployments can share one Redis |
 | `WEBAUTHN_ORIGIN` | `http://localhost:3000` | The frontend's origin, exactly as the browser sends it |
-| `WEBAUTHN_RP_ID` | derived from origin | Relying-party ID — the frontend's domain |
+| `WEBAUTHN_RP_ID` | derived from origin | Relying-party ID. May be a **registrable suffix** of the origin (`authkestra.com` for `play.authkestra.com`), which lets the site move between subdomains without invalidating every passkey. |
+| `WEBAUTHN_EXTRA_ORIGINS` | — | Additional accepted origins, comma-separated. Cannot bridge different registrable domains — the browser requires the RP ID to be a suffix of the page's own origin. |
 
 ## What a visitor gets
 

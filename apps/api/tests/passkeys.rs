@@ -30,6 +30,7 @@ fn good_rp() -> RelyingParty {
         id: "localhost".to_string(),
         origin: "http://localhost:3000".to_string(),
         name: "Playground Test".to_string(),
+        extra_origins: Vec::new(),
     }
 }
 
@@ -120,6 +121,7 @@ async fn a_mismatched_relying_party_fails_with_an_explanation() {
             id: "example.com".to_string(),
             origin: "http://localhost:3000".to_string(),
             name: "Mismatched".to_string(),
+            extra_origins: Vec::new(),
         })
         .await,
     );
@@ -326,4 +328,73 @@ async fn an_unknown_passkey_action_is_a_404() {
 
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     assert_eq!(body_json(resp).await["error"], "unknown_action");
+}
+
+/// A registrable suffix is a valid relying-party ID, which is what lets the
+/// playground move between subdomains without invalidating every passkey.
+#[tokio::test]
+async fn a_parent_domain_is_a_valid_relying_party_for_a_subdomain() {
+    let app = api::build_router(
+        state_with_rp(RelyingParty {
+            id: "authkestra.com".to_string(),
+            origin: "https://play.authkestra.com".to_string(),
+            name: "Authkestra".to_string(),
+            extra_origins: Vec::new(),
+        })
+        .await,
+    );
+    let cookie = enable(&app).await;
+
+    let resp = action(&app, &cookie, "register_start", "{}").await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "authkestra.com should be accepted for play.authkestra.com"
+    );
+    let pk = body_json(resp).await;
+    assert_eq!(pk["publicKey"]["rp"]["id"], "authkestra.com");
+}
+
+#[tokio::test]
+async fn additional_origins_are_accepted() {
+    let app = api::build_router(
+        state_with_rp(RelyingParty {
+            id: "localhost".to_string(),
+            origin: "http://localhost:3000".to_string(),
+            name: "Playground".to_string(),
+            extra_origins: vec!["http://localhost:4000".to_string()],
+        })
+        .await,
+    );
+    let cookie = enable(&app).await;
+
+    // The relying party must still build — a bad extra origin is a clear
+    // configuration error rather than a broken challenge.
+    let resp = action(&app, &cookie, "register_start", "{}").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_malformed_extra_origin_fails_with_an_explanation() {
+    let app = api::build_router(
+        state_with_rp(RelyingParty {
+            id: "localhost".to_string(),
+            origin: "http://localhost:3000".to_string(),
+            name: "Playground".to_string(),
+            extra_origins: vec!["not a url".to_string()],
+        })
+        .await,
+    );
+    let cookie = enable(&app).await;
+
+    let resp = action(&app, &cookie, "register_start", "{}").await;
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let detail = body_json(resp).await["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        detail.contains("WEBAUTHN_EXTRA_ORIGINS"),
+        "should name the setting at fault: {detail}"
+    );
 }
