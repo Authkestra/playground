@@ -307,6 +307,7 @@ export default function Playground() {
           onTry={(id) => void handleTry(id)}
           tryingIds={tryingIds}
           tryResults={tryResults}
+          onDemoDisabled={() => setPhase("explainer")}
         />
       </section>
       <section className="flex flex-col gap-3">

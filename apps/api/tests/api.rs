@@ -52,6 +52,7 @@ async fn state_with(kill_switch: KillSwitch, admin_token: Option<&str>) -> AppSt
         engines: Arc::new(EngineFactory::new(ProviderCredentials::default(), false)),
         settings,
         pool,
+        ceremonies: Arc::new(api::ceremony::CeremonyStore::new()),
     }
 }
 

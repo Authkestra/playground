@@ -7,6 +7,7 @@
 //! Exposed as a library so integration tests can build the same router the
 //! binary serves.
 
+pub mod ceremony;
 pub mod credentials;
 pub mod demo_config;
 pub mod diff;
@@ -159,6 +160,7 @@ pub async fn state_from_env() -> Result<AppState, sqlx::Error> {
         engines,
         settings,
         pool,
+        ceremonies: Arc::new(crate::ceremony::CeremonyStore::new()),
     })
 }
 

@@ -10,6 +10,7 @@
 //! needs a new `match` arm.
 
 pub mod dummy;
+pub mod passkeys;
 pub mod totp;
 
 use std::collections::HashMap;
@@ -229,6 +230,8 @@ pub struct ScenarioContext<'a> {
     pub pool: &'a sqlx::SqlitePool,
     /// Relying-party settings for WebAuthn ceremonies.
     pub relying_party: &'a crate::settings::RelyingParty,
+    /// Short-lived state for multi-round-trip ceremonies.
+    pub ceremonies: &'a crate::ceremony::CeremonyStore,
 }
 
 impl ScenarioContext<'_> {
@@ -347,6 +350,7 @@ impl ScenarioRegistry {
     /// the codebase has to change to accommodate them.
     pub fn with_builtins() -> Self {
         let mut r = Self::new();
+        r.register(Arc::new(passkeys::PasskeysScenario));
         r.register(Arc::new(totp::TotpScenario));
         // Placeholders covering control shapes no real scenario uses yet.
         // `dummy_provider` goes when the OAuth scenario lands; `dummy_toggle`

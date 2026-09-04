@@ -18,6 +18,8 @@ export type { DemoSessionView } from "./generated/DemoSessionView";
 export type { DiffEntry } from "./generated/DiffEntry";
 export type { DiffKind } from "./generated/DiffKind";
 export type { HealthResponse } from "./generated/HealthResponse";
+export type { PasskeyAuthResult } from "./generated/PasskeyAuthResult";
+export type { PasskeyEnrolment } from "./generated/PasskeyEnrolment";
 export type { ScenarioOption } from "./generated/ScenarioOption";
 export type { ScenarioSpec } from "./generated/ScenarioSpec";
 export type { TotpProvision } from "./generated/TotpProvision";

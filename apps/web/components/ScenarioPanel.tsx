@@ -1,11 +1,26 @@
 "use client";
 
+import type { ComponentType } from "react";
 import type { ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-types";
+import TotpPanel from "@/components/TotpPanel";
 
 export interface TryResultState {
   outcome: string;
   detail: string;
 }
+
+interface ActionPanelProps {
+  scenarioId: string;
+  onDemoDisabled: () => void;
+}
+
+// Ceremony UI for scenarios that expose `actions` (e.g. multi-step flows
+// beyond the generic toggle/select controls), keyed by scenario id. A
+// scenario with no entry here still renders normally — it just doesn't get
+// an extra panel.
+const ACTION_PANELS: Record<string, ComponentType<ActionPanelProps>> = {
+  totp: TotpPanel,
+};
 
 interface Props {
   scenarios: ScenarioSpec[];
@@ -17,6 +32,7 @@ interface Props {
   onTry: (id: string) => void;
   tryingIds: Set<string>;
   tryResults: Record<string, TryResultState>;
+  onDemoDisabled?: () => void;
 }
 
 function isSatisfied(config: DemoConfig | null, dependencyId: string): boolean {
@@ -44,6 +60,7 @@ export default function ScenarioPanel({
   onTry,
   tryingIds,
   tryResults,
+  onDemoDisabled,
 }: Props) {
   if (scenarios.length === 0) {
     return <p className="text-sm text-slate-400">No scenarios published yet.</p>;
@@ -63,6 +80,14 @@ export default function ScenarioPanel({
         const controlDisabled =
           disabled || !scenario.available || unmetDeps.length > 0 || isPending;
         const tryResult = tryResults[scenario.id];
+        const actions = scenario.actions ?? [];
+        const ActionPanel = actions.length > 0 ? ACTION_PANELS[scenario.id] : undefined;
+        const showActionPanel =
+          ActionPanel &&
+          !disabled &&
+          scenario.available &&
+          unmetDeps.length === 0 &&
+          isSatisfied(config, scenario.id);
 
         return (
           <div
@@ -113,6 +138,15 @@ export default function ScenarioPanel({
                 </span>
               )}
             </div>
+
+            {showActionPanel && ActionPanel && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <ActionPanel
+                  scenarioId={scenario.id}
+                  onDemoDisabled={onDemoDisabled ?? (() => {})}
+                />
+              </div>
+            )}
           </div>
         );
       })}

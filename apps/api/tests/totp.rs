@@ -46,6 +46,7 @@ async fn state() -> AppState {
         )),
         settings,
         pool,
+        ceremonies: Arc::new(api::ceremony::CeremonyStore::new()),
     }
 }
 

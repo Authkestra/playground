@@ -30,6 +30,8 @@ pub struct AppState {
     pub settings: Arc<Settings>,
     /// Pool backing the credential store scenarios enrol into.
     pub pool: sqlx::SqlitePool,
+    /// In-flight ceremony state (WebAuthn challenges).
+    pub ceremonies: Arc<crate::ceremony::CeremonyStore>,
 }
 
 // ---------------------------------------------------------------- wire types
@@ -234,6 +236,7 @@ async fn try_scenario(
         value: &value,
         pool: &state.pool,
         relying_party: &state.settings.relying_party,
+        ceremonies: &state.ceremonies,
     };
     Ok(Json(scenario.try_run(&ctx).await?))
 }
@@ -274,6 +277,7 @@ async fn scenario_action(
         value: &value,
         pool: &state.pool,
         relying_party: &state.settings.relying_party,
+        ceremonies: &state.ceremonies,
     };
 
     let payload = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);

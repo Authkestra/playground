@@ -122,3 +122,19 @@ export function tryScenario(
     body: JSON.stringify(body),
   });
 }
+
+/**
+ * Generic ceremony-step endpoint: `POST /api/scenarios/:id/action/:action`.
+ * Scenarios advertise the steps they accept via `ScenarioSpec.actions`
+ * (e.g. `totp` accepts `"provision"` and `"verify"`).
+ */
+export function scenarioAction<T>(
+  id: string,
+  action: string,
+  body: unknown = {},
+): Promise<ApiResult<T>> {
+  return request<T>(
+    `/api/scenarios/${encodeURIComponent(id)}/action/${encodeURIComponent(action)}`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}

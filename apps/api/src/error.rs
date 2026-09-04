@@ -24,6 +24,10 @@ pub enum ApiError {
     /// The scenario itself failed. Distinct from a flow *rejecting* input —
     /// a wrong TOTP code is a normal result, not this.
     Scenario(String),
+    /// The challenge was never issued, already answered, or timed out.
+    CeremonyExpired,
+    /// The authenticator's response did not verify.
+    CeremonyRejected(String),
 }
 
 impl ApiError {
@@ -62,6 +66,14 @@ impl ApiError {
                 "scenario_failed",
                 detail.clone(),
             ),
+            ApiError::CeremonyExpired => (
+                StatusCode::GONE,
+                "ceremony_expired",
+                "That request timed out or was already completed. Start again.".to_string(),
+            ),
+            ApiError::CeremonyRejected(detail) => {
+                (StatusCode::BAD_REQUEST, "ceremony_rejected", detail.clone())
+            }
         }
     }
 }

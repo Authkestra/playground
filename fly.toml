@@ -26,6 +26,19 @@ primary_region = 'cdg'
   # check `fly secrets list` before editing this line.
   ALLOWED_ORIGINS = 'https://playground-web-opal.vercel.app,http://localhost:3000'
 
+  # WebAuthn relying party.
+  #
+  # This is the FRONTEND's domain, not the API's: the ceremony runs in the
+  # browser at the page's origin, and the browser refuses any RP ID that is not
+  # a registrable suffix of it. Pointing this at the API host is the usual cause
+  # of a ceremony failing with a deliberately vague browser-side error.
+  #
+  # A passkey is bound to the RP ID that created it, so changing this means every
+  # visitor re-registers. That matters when play.authkestra.com goes live.
+  WEBAUTHN_ORIGIN = 'https://playground-web-opal.vercel.app'
+  WEBAUTHN_RP_ID = 'playground-web-opal.vercel.app'
+  WEBAUTHN_RP_NAME = 'Authkestra Playground'
+
 [http_service]
   internal_port = 8000
   force_https = true
