@@ -457,3 +457,93 @@ async fn try_lists_every_selected_provider() {
         assert!(detail.contains(label), "{label} missing from: {detail}");
     }
 }
+
+/// Three unrelated causes used to collapse into one `exchange_failed`, which
+/// made a real failure undiagnosable. They must be distinguishable.
+#[tokio::test]
+async fn a_callback_with_no_state_cookie_says_so_specifically() {
+    let resp = app(&ALL)
+        .oneshot(
+            req("GET", "/auth/callback/github?code=abc&state=xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(resp.status().is_redirection());
+    let url = location(&resp);
+    assert!(
+        url.contains("reason=state_missing"),
+        "a missing state cookie must not be reported as a failed exchange: {url}"
+    );
+}
+
+#[tokio::test]
+async fn a_callback_with_an_undecryptable_state_cookie_is_distinguished() {
+    let resp = app(&ALL)
+        .oneshot(
+            req("GET", "/auth/callback/github?code=abc&state=xyz")
+                .header(header::COOKIE, "ak_state=not-a-valid-encrypted-blob")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(resp.status().is_redirection());
+    let url = location(&resp);
+    assert!(
+        url.contains("reason=state_invalid") || url.contains("reason=callback_failed"),
+        "a corrupt state cookie should not read as a failed exchange: {url}"
+    );
+    assert!(
+        !url.contains("reason=state_missing"),
+        "the cookie was present: {url}"
+    );
+}
+
+/// Whatever the outcome, the visitor's own flow log should explain it — that is
+/// the only diagnosis available to someone without server access.
+#[tokio::test]
+async fn a_failed_callback_is_narrated_in_the_flow_log() {
+    let st = state(&ALL);
+    let events = st.events.clone();
+    let app = api::build_router(st);
+
+    // Establish a demo session so the log has an owner.
+    let session_resp = app
+        .clone()
+        .oneshot(req("GET", "/api/session").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let cookie = session_resp
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .unwrap()
+        .to_string();
+    let session_id: uuid::Uuid = cookie.trim_start_matches("ak_demo=").parse().unwrap();
+
+    app.oneshot(
+        req("GET", "/auth/callback/github?error=access_denied")
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let log = events.read(session_id).await.unwrap();
+    let entry = log
+        .iter()
+        .find(|e| e.scenario == "oauth")
+        .expect("the OAuth outcome should be narrated");
+    assert_eq!(
+        entry.level,
+        api::events::EventLevel::Rejected,
+        "declining consent is an ordinary outcome, not a failure"
+    );
+    assert!(entry.detail.len() > 20, "{entry:?}");
+}

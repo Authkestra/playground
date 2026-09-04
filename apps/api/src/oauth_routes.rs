@@ -20,8 +20,12 @@ use serde::Deserialize;
 use tower_cookies::Cookies;
 
 use crate::error::ApiError;
+use crate::events::Step;
 use crate::routes::AppState;
 use crate::scenario::oauth::OAuthMode;
+
+/// Cookie the framework keeps the encrypted OAuth state in.
+const STATE_COOKIE: &str = "ak_state";
 
 /// Query parameters accepted by the login route.
 #[derive(Debug, Deserialize)]
@@ -133,6 +137,12 @@ async fn callback(
     Query(raw): Query<std::collections::HashMap<String, String>>,
     cookies: Cookies,
 ) -> Response {
+    // The flow log belongs to the visitor's demo session.
+    let session_id = cookies
+        .get(crate::session::COOKIE_NAME)
+        .and_then(|c| uuid::Uuid::parse_str(c.value()).ok())
+        .unwrap_or_else(uuid::Uuid::nil);
+
     // A declined consent screen is the single most common outcome after the
     // happy path, and it is not an error on our side — send the visitor back
     // with something the page can explain.
@@ -142,6 +152,20 @@ async fn callback(
             description = ?raw.get("error_description"),
             "oauth denied at the provider"
         );
+        state
+            .events
+            .record(
+                session_id,
+                Step::rejected("oauth", "declined at the provider")
+                    .detail(
+                        "The provider reported that consent was not granted. An ordinary \
+                         outcome, not a failure of the integration.",
+                    )
+                    .fact("provider", provider.clone())
+                    .fact("reason", error.clone())
+                    .build(),
+            )
+            .await;
         return result_redirect(
             &state,
             &format!(
@@ -174,6 +198,34 @@ async fn callback(
         );
     };
 
+    // Checked here rather than inferred from the helper's error string: a
+    // missing state cookie and a failed token exchange are unrelated problems,
+    // and collapsing them into one reason made a real failure undiagnosable.
+    if cookies.get(STATE_COOKIE).is_none() {
+        tracing::warn!("oauth callback arrived without the state cookie");
+        state
+            .events
+            .record(
+                session_id,
+                Step::failed("oauth", "state cookie missing")
+                    .detail(
+                        "The browser did not send back the short-lived cookie holding this \
+                         flow's state, so the callback could not be verified. Usually that \
+                         means more than 15 minutes passed, the cookie was blocked, or the \
+                         flow was started in a different browser.",
+                    )
+                    .build(),
+            )
+            .await;
+        return result_redirect(
+            &state,
+            &format!(
+                "oauth=error&provider={}&reason=state_missing",
+                urlencode(&provider)
+            ),
+        );
+    }
+
     let config = state.engines.session_config();
 
     // Which completion path depends on the mode the login step recorded. The
@@ -192,21 +244,63 @@ async fn callback(
     match outcome {
         Ok(_) => {
             tracing::info!("oauth round trip completed");
+            state
+                .events
+                .record(
+                    session_id,
+                    Step::success("oauth", "provider round trip completed")
+                        .detail(
+                            "The state cookie verified, the authorization code was exchanged \
+                             for a token, and the provider returned an identity. State and \
+                             nonce lived in an encrypted cookie throughout — nothing was \
+                             written to a database to make this work.",
+                        )
+                        .fact("provider", provider.clone())
+                        .build(),
+                )
+                .await;
             result_redirect(
                 &state,
                 &format!("oauth=success&provider={}", urlencode(&provider)),
             )
         }
         Err((status, message)) => {
-            // A failed exchange is usually a misconfigured redirect URI or a
-            // replayed state, both of which are worth logging in full while
-            // showing the visitor something plain.
             tracing::warn!(%status, %message, "oauth callback failed");
+
+            // Classified from the helper's message because it exposes no typed
+            // error. Brittle if upstream rewords these, hence the fallback —
+            // but one opaque reason for three unrelated causes is worse.
+            let reason = if message.contains("Invalid state cookie") {
+                "state_invalid"
+            } else if message.contains("Authentication failed") {
+                "exchange_failed"
+            } else {
+                "callback_failed"
+            };
+
+            // The real detail goes to the visitor's own flow log, which is
+            // scoped to their session. Without it, a failure here cannot be
+            // diagnosed without server access.
+            state
+                .events
+                .record(
+                    session_id,
+                    Step::failed("oauth", "callback failed")
+                        .detail(format!(
+                            "The provider redirected back, but completing the flow failed: {message}"
+                        ))
+                        .fact("provider", provider.clone())
+                        .fact("stage", reason)
+                        .build(),
+                )
+                .await;
+
             result_redirect(
                 &state,
                 &format!(
-                    "oauth=error&provider={}&reason=exchange_failed",
-                    urlencode(&provider)
+                    "oauth=error&provider={}&reason={}",
+                    urlencode(&provider),
+                    reason
                 ),
             )
         }

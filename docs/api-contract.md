@@ -169,7 +169,22 @@ the outcome arrives as query parameters the page reads:
 | --- | --- |
 | `oauth=success&provider=…` | Round trip completed |
 | `oauth=denied&provider=…&reason=access_denied` | Visitor declined at the provider — an ordinary outcome, not an error |
-| `oauth=error&provider=…&reason=missing_code\|unknown_provider\|exchange_failed` | Could not complete |
+| `oauth=error&provider=…&reason=…` | Could not complete — see the reasons below |
+
+The `error` reasons are deliberately distinct, because they have unrelated fixes:
+
+| Reason | Means | Usual cause |
+| --- | --- | --- |
+| `missing_code` | No `code`/`state` and no `error` either | Not a real callback |
+| `unknown_provider` | No such provider registered | Credentials absent for it |
+| `state_missing` | The `ak_state` cookie did not come back | More than 15 min elapsed, cookie blocked, or the flow started in another browser |
+| `state_invalid` | The cookie came back but would not decrypt | `OAUTH_STATE_KEY` changed between the login and the callback |
+| `exchange_failed` | State verified; the provider rejected the code exchange | Wrong client secret, or a `redirect_uri` that differs from the one registered |
+| `callback_failed` | Anything else | Check the flow log |
+
+Whatever the outcome, **the visitor's own flow log carries the underlying
+message** (`GET /api/session/events`). Without it a failure here can only be
+diagnosed from server logs.
 
 The redirect target is the first entry of `ALLOWED_ORIGINS` and is never taken
 from the request, so the callback cannot be turned into an open redirect.
