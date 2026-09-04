@@ -18,6 +18,7 @@ use crate::diff::{self, ConfigDiff};
 use crate::engine::EngineFactory;
 use crate::error::ApiError;
 use crate::killswitch::KillSwitch;
+use crate::kit::StarterKit;
 use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec, TryResult};
 use crate::session::{DemoSession, DemoSessionStore, DemoSessionView, COOKIE_NAME};
 use crate::settings::Settings;
@@ -383,6 +384,40 @@ async fn admin_client_ip(
     Ok(Json(extractor.explain(&req_headers)))
 }
 
+/// Download the visitor's configuration as a runnable project.
+///
+/// Generated from the same session config the diff and the try buttons read,
+/// so what arrives is what the page has been describing. On the tighter rate
+/// limit: it is the most expensive thing this service does.
+#[tracing::instrument(skip_all)]
+async fn download_starter_kit(
+    State(state): State<AppState>,
+    cookies: Cookies,
+) -> Result<impl IntoResponse, ApiError> {
+    let session = resolve_session(&state, &cookies).await?;
+    let kit = StarterKit::generate(&session.config, state.sessions.registry());
+
+    let name = kit.archive_name();
+    let bytes = kit
+        .to_zip()
+        .map_err(|e| ApiError::ArchiveFailed(e.to_string()))?;
+
+    tracing::info!(archive = %name, bytes = bytes.len(), "starter kit downloaded");
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            // The name is asserted to need no quoting, so this stays a plain
+            // token — no encoding games, nothing for a browser to mis-parse.
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{name}\""),
+            ),
+        ],
+        bytes,
+    ))
+}
+
 // -------------------------------------------------------------------- router
 
 /// Routes that hit third parties or create credentials, and so carry the
@@ -393,6 +428,9 @@ pub fn sensitive_router() -> Router<AppState> {
         // Ceremony steps create credentials and call third parties, so they
         // belong on the tighter bucket alongside `try`.
         .route("/api/scenarios/{id}/action/{action}", post(scenario_action))
+        // Generating and compressing a project is the most expensive request
+        // this service serves, so it shares the tighter bucket.
+        .route("/api/starter-kit", get(download_starter_kit))
 }
 
 /// Everything else.

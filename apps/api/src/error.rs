@@ -31,6 +31,9 @@ pub enum ApiError {
     /// The state backend is unreachable. Distinct from a scenario fault: the
     /// service cannot serve anyone until it recovers.
     StateUnavailable(String),
+    /// The starter kit could not be packed. Always a bug here, never the
+    /// visitor's doing.
+    ArchiveFailed(String),
 }
 
 impl ApiError {
@@ -45,6 +48,11 @@ impl ApiError {
                 StatusCode::NOT_FOUND,
                 "unknown_scenario",
                 format!("No scenario with id `{id}`."),
+            ),
+            ApiError::ArchiveFailed(detail) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "archive_failed",
+                format!("The starter kit could not be packaged: {detail}"),
             ),
             ApiError::InvalidValue(detail) => {
                 (StatusCode::BAD_REQUEST, "invalid_value", detail.clone())

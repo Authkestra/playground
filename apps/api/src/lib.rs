@@ -421,6 +421,10 @@ pub fn build_router(state: AppState) -> Router {
         .allow_origin(origins)
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+        // The download is fetched cross-site, and a cross-origin response's
+        // headers are invisible to script unless they are exposed. Without
+        // this the frontend cannot read the filename the server chose.
+        .expose_headers([header::CONTENT_DISPOSITION])
         // The demo session rides in a cookie, so credentials must be allowed.
         .allow_credentials(true);
 

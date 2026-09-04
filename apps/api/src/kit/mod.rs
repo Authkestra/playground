@@ -10,8 +10,13 @@
 //! per-scenario fragments that fill the seams are the next piece of work.
 
 use crate::demo_config::DemoConfig;
+mod archive;
+
+pub use archive::ArchiveError;
+
 use crate::scenario::{
-    CrateRequirement, KitContext, KitEnvVar, KitFragment, KitLink, KitSetup, ScenarioRegistry,
+    ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment, KitLink, KitSetup,
+    ScenarioRegistry,
 };
 
 /// The framework version every generated project pins.
@@ -37,6 +42,9 @@ pub struct GeneratedFile {
 #[derive(Debug, Clone)]
 pub struct StarterKit {
     pub files: Vec<GeneratedFile>,
+    /// A stable, readable summary of the selection, for the archive name.
+    /// Two different selections never produce the same one.
+    pub slug: String,
 }
 
 impl StarterKit {
@@ -44,6 +52,7 @@ impl StarterKit {
     pub fn generate(config: &DemoConfig, registry: &ScenarioRegistry) -> Self {
         let plan = Plan::from(config, registry);
         Self {
+            slug: plan.slug(),
             files: vec![
                 GeneratedFile {
                     path: "Cargo.toml".to_string(),
@@ -76,6 +85,17 @@ impl StarterKit {
     pub fn file(&self, path: &str) -> Option<&GeneratedFile> {
         self.files.iter().find(|f| f.path == path)
     }
+
+    /// The name the archive is offered under, extension included.
+    pub fn archive_name(&self) -> String {
+        format!("{PROJECT_NAME}-{}.zip", self.slug)
+    }
+
+    /// The directory every file sits under inside the archive, so unzipping in
+    /// a downloads folder does not scatter six files across it.
+    pub fn archive_root(&self) -> String {
+        format!("{PROJECT_NAME}-{}", self.slug)
+    }
 }
 
 /// What the selected configuration implies, resolved once.
@@ -88,6 +108,9 @@ struct Plan {
     /// The same scenarios by their display name, for prose. The README is read
     /// by a person, so it says "Passkeys", not `passkeys`.
     labels: Vec<String>,
+    /// Each active scenario's id with whatever options it had chosen, in
+    /// registry order. Only the archive name needs this much detail.
+    selection: Vec<(String, Vec<String>)>,
     /// Crates and features, unioned across active scenarios.
     crates: Vec<CrateRequirement>,
     /// What each active scenario contributes, in registry order — which is the
@@ -100,6 +123,7 @@ impl Plan {
     fn from(config: &DemoConfig, registry: &ScenarioRegistry) -> Self {
         let mut active = Vec::new();
         let mut labels = Vec::new();
+        let mut selection: Vec<(String, Vec<String>)> = Vec::new();
         let mut consequences = crate::scenario::Consequences::default();
 
         for scenario in registry.iter() {
@@ -107,6 +131,7 @@ impl Plan {
                 if value.is_active() {
                     active.push(scenario.id().to_string());
                     labels.push(scenario.name().to_string());
+                    selection.push((scenario.id().to_string(), chosen_options(value)));
                     consequences.merge(scenario.consequences(value));
                 }
             }
@@ -129,6 +154,7 @@ impl Plan {
         Self {
             active,
             labels,
+            selection,
             crates: consequences.crates,
             fragments,
         }
@@ -215,6 +241,38 @@ impl Plan {
 
     fn is_active(&self, id: &str) -> bool {
         self.active.iter().any(|a| a == id)
+    }
+
+    /// A filename-safe summary of the selection.
+    ///
+    /// Scenario ids alone would collide: picking GitHub and picking Google are
+    /// both "oauth", and two downloads that differ would arrive under one name.
+    /// So the chosen options are folded in too.
+    fn slug(&self) -> String {
+        if self.selection.is_empty() {
+            return "base".to_string();
+        }
+        self.selection
+            .iter()
+            .map(|(id, options)| {
+                if options.is_empty() {
+                    id.clone()
+                } else {
+                    format!("{id}-{}", options.join("-"))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("-")
+    }
+}
+
+/// The options a control has selected, if it is the kind of control that has
+/// any. A toggle contributes nothing beyond its own id.
+fn chosen_options(value: &ControlValue) -> Vec<String> {
+    match value {
+        ControlValue::Toggle { .. } => Vec::new(),
+        ControlValue::SelectOne { selected } => selected.iter().cloned().collect(),
+        ControlValue::SelectMany { selected } => selected.clone(),
     }
 }
 
@@ -929,8 +987,6 @@ mod tests {
         assert!(!env.contains("CLIENT_ID"), "not read by this configuration");
         assert!(!env.contains("WEBAUTHN"), "not read by this configuration");
     }
-
-    use crate::scenario::ControlValue;
 
     fn kit_with(scenarios: &[(&str, ControlValue)]) -> StarterKit {
         let registry = ScenarioRegistry::with_providers(vec![

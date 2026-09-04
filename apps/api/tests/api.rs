@@ -737,3 +737,150 @@ async fn a_returned_cookie_resumes_the_same_session() {
         "the same cookie must resume the same session, not create another"
     );
 }
+
+// ------------------------------------------------- P4 #31: the download
+
+/// Read a zip response back into (path, contents) pairs.
+async fn archive_entries(resp: axum::response::Response) -> Vec<(String, String)> {
+    use std::io::{Cursor, Read};
+
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("a valid zip");
+    (0..archive.len())
+        .map(|i| {
+            let mut entry = archive.by_index(i).expect("entry");
+            let name = entry.name().to_string();
+            let mut contents = String::new();
+            entry.read_to_string(&mut contents).expect("utf-8");
+            (name, contents)
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_starter_kit_downloads_as_a_named_zip() {
+    let resp = app(KillSwitch::default(), None)
+        .await
+        .oneshot(req("GET", "/api/starter-kit").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()[header::CONTENT_TYPE], "application/zip");
+
+    let disposition = resp.headers()[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        disposition.starts_with("attachment; filename=\"authkestra-starter-"),
+        "{disposition}"
+    );
+    assert!(disposition.ends_with(".zip\""), "{disposition}");
+
+    let entries = archive_entries(resp).await;
+    for expected in ["Cargo.toml", "src/main.rs", "README.md", ".env.example"] {
+        assert!(
+            entries.iter().any(|(name, _)| name.ends_with(expected)),
+            "{expected} missing from {:?}",
+            entries.iter().map(|(n, _)| n).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// The acceptance criterion: the download matches what the visitor configured,
+/// not some default. Configure on one request, download on the next, same
+/// cookie.
+#[tokio::test]
+async fn the_download_reflects_the_session_configuration() {
+    let app = app(KillSwitch::default(), None).await;
+
+    let configured = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/scenarios/passkeys/configure")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"value":{"kind":"toggle","enabled":true}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(configured.status(), StatusCode::OK);
+    let cookie = session_cookie(&configured).expect("cookie");
+
+    let resp = app
+        .oneshot(
+            req("GET", "/api/starter-kit")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let disposition = resp.headers()[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        disposition.contains("passkeys"),
+        "the name should reflect the selection: {disposition}"
+    );
+
+    let entries = archive_entries(resp).await;
+    let manifest = entries
+        .iter()
+        .find(|(name, _)| name.ends_with("Cargo.toml"))
+        .expect("a manifest");
+    assert!(
+        manifest.1.contains("webauthn"),
+        "passkeys were selected but the manifest lacks the feature:\n{}",
+        manifest.1
+    );
+}
+
+/// A fresh visitor and a configured one must not receive the same archive.
+#[tokio::test]
+async fn an_unconfigured_visitor_gets_the_base_project() {
+    let resp = app(KillSwitch::default(), None)
+        .await
+        .oneshot(req("GET", "/api/starter-kit").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let disposition = resp.headers()[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(disposition.contains("base"), "{disposition}");
+}
+
+/// Generating a project is the most expensive request this service serves, so
+/// it must sit behind the tighter bucket rather than the default one.
+#[tokio::test]
+async fn the_download_is_rate_limited() {
+    let app = app(KillSwitch::default(), None).await;
+    let mut limited = false;
+
+    // The sensitive bucket allows a burst of 10; the standard one allows 30.
+    // Exceeding the smaller budget proves which one is in front of this route.
+    for _ in 0..15 {
+        let resp = app
+            .clone()
+            .oneshot(
+                req("GET", "/api/starter-kit")
+                    .header("x-forwarded-for", "198.51.100.77")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+            limited = true;
+            break;
+        }
+    }
+
+    assert!(limited, "the download endpoint is not rate limited");
+}

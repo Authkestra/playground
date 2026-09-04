@@ -79,6 +79,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
@@ -88,3 +89,4 @@ totp-rs = "5"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 serde_json = "1.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
