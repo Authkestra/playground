@@ -547,3 +547,60 @@ async fn a_failed_callback_is_narrated_in_the_flow_log() {
     );
     assert!(entry.detail.len() > 20, "{entry:?}");
 }
+
+/// Regression test for the upstream nonce bug.
+///
+/// `OAuth2Flow::initiate_login` sets a nonce unconditionally, and
+/// `finalize_login` then demands a matching one back — but the shipped plain
+/// OAuth2 providers never return one, so every round trip failed with "Nonce
+/// mismatch". The login step must leave no nonce in the state.
+#[tokio::test]
+async fn the_state_cookie_carries_no_unusable_nonce() {
+    use authkestra_engine::state::OAuth2State;
+
+    let st = state(&ALL);
+    let key = st.engines.session_config().state_encryption_key;
+    let app = api::build_router(st);
+
+    let resp = app
+        .oneshot(
+            req("GET", "/auth/login/github")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let raw = resp
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("ak_state="))
+        .expect("the state cookie should be set")
+        .to_string();
+
+    let value = raw
+        .trim_start_matches("ak_state=")
+        .split(';')
+        .next()
+        .unwrap();
+    let decoded = OAuth2State::decrypt(value, &key).expect("state should decrypt");
+
+    assert!(
+        decoded.nonce.is_none(),
+        "a nonce the provider cannot echo back makes every callback fail"
+    );
+
+    // The parts that actually protect the flow must survive.
+    assert!(!decoded.state.is_empty(), "CSRF state must remain");
+    assert!(
+        decoded.code_verifier.is_some(),
+        "the PKCE verifier must survive the rewrite"
+    );
+    assert_eq!(decoded.provider_id, "github");
+    assert!(
+        decoded.success_url.is_some(),
+        "the return URL must survive the rewrite"
+    );
+}
