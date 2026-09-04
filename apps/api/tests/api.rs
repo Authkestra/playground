@@ -26,6 +26,9 @@ fn settings(admin_token: Option<&str>) -> Settings {
         session_ttl_hours: DEFAULT_TTL_HOURS,
         admin_token: admin_token.map(|t| t.to_string()),
         allowed_origins: vec!["http://localhost:3000".to_string()],
+        // Tests reach the router directly with no proxy in front, so they
+        // identify callers by X-Forwarded-For rather than a trusted header.
+        trusted_client_ip_header: None,
     }
 }
 

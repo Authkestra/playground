@@ -70,6 +70,7 @@ scenarios simply report themselves as not configured.
 | `ADMIN_TOKEN` | — | Enables `POST /admin/kill-switch`. **Unset means the endpoint is not mounted at all.** |
 | `OAUTH_STATE_KEY` | — | ≥32 bytes; keeps encrypted OAuth state valid across restarts |
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base for provider redirect URIs |
+| `TRUSTED_CLIENT_IP_HEADER` | `fly-client-ip` | Header carrying the true client IP. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. Use `cf-connecting-ip` behind Cloudflare; empty to disable. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
 
 ## What a visitor gets
@@ -105,6 +106,11 @@ door:
 
 - **Rate limiting** — per-IP token buckets, deliberately tighter on endpoints
   that hit third parties. Returns a JSON 429 the UI renders as a friendly note.
+  The client IP comes from `TRUSTED_CLIENT_IP_HEADER` (a header the proxy
+  overwrites), falling back to the **rightmost** `X-Forwarded-For` entry. Reading
+  the leftmost entry — the obvious choice, and what `SmartIpKeyExtractor` does —
+  is a bypass: proxies *append*, so the leftmost value is whatever the client
+  sent. Set this correctly whenever the proxy in front changes.
 - **Kill switch** — `DEMO_ENABLED` plus per-scenario disable, flippable at
   runtime through `POST /admin/kill-switch` without a redeploy. With flows off
   the site degrades to explainer-only mode rather than looking broken.

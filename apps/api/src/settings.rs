@@ -14,6 +14,13 @@ pub struct Settings {
     pub admin_token: Option<String>,
     /// Origins allowed to call the API with credentials.
     pub allowed_origins: Vec<String>,
+    /// Header carrying the true client IP, set by the proxy in front of us.
+    ///
+    /// Must name a header the proxy *overwrites*, or the rate limiter can be
+    /// bypassed by forging it. `Fly-Client-IP` on Fly; `CF-Connecting-IP` once
+    /// Cloudflare sits in front. Set to an empty string to disable and fall
+    /// back to the rightmost `X-Forwarded-For` entry.
+    pub trusted_client_ip_header: Option<axum::http::HeaderName>,
 }
 
 impl Settings {
@@ -41,12 +48,30 @@ impl Settings {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let trusted_client_ip_header = std::env::var("TRUSTED_CLIENT_IP_HEADER")
+            .unwrap_or_else(|_| "fly-client-ip".to_string());
+        let trusted_client_ip_header = if trusted_client_ip_header.trim().is_empty() {
+            None
+        } else {
+            match axum::http::HeaderName::try_from(trusted_client_ip_header.trim().to_lowercase()) {
+                Ok(h) => Some(h),
+                Err(_) => {
+                    tracing::error!(
+                        "TRUSTED_CLIENT_IP_HEADER is not a valid header name; falling back to \
+                         X-Forwarded-For, which is weaker. Fix the value."
+                    );
+                    None
+                }
+            }
+        };
+
         Self {
             port,
             cookie_secure,
             session_ttl_hours,
             admin_token,
             allowed_origins,
+            trusted_client_ip_header,
         }
     }
 }
