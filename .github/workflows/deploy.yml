@@ -45,6 +45,26 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+      # A successful `flyctl deploy` does not mean the service is serving: a
+      # process that exits at boot (a database it cannot open, a missing env
+      # var) still reports a green deploy. This turns that into a red build.
+      - name: Smoke test the deployed service
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          URL="https://authkestra-playground-api.fly.dev/health"
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 10 "$URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "healthy after ${attempt} attempt(s):"
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "attempt ${attempt}: HTTP ${code:-000}"
+            sleep 10
+          done
+          echo "::error::Deploy reported success but ${URL} never returned 200. Check 'fly logs' — the process is most likely exiting at boot."
+          exit 1
+
   # Frontend deploys through Vercel's own Git integration rather than a workflow
   # step: Vercel builds on push to `main`, gives PRs preview deployments for
   # free, and needs no tokens stored here. Set Root Directory to `apps/web` in
