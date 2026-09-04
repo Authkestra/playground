@@ -141,9 +141,16 @@ produces a **cancelled** Vercel build. That is the healthy outcome, not a
 failure.
 
 The one case where it bites is a project's *first* import, when there is no
-prior deployment to fall back on: if that commit didn't touch `apps/web` or
-`packages/`, you get no deployment at all. Hit **Redeploy** in the Vercel
-dashboard once; every later commit behaves correctly.
+prior deployment to fall back on: if the latest commit didn't touch `apps/web`
+or `packages/`, you get no deployment at all — and **Redeploy does not help,
+because it re-runs the ignore step and reaches the same conclusion.**
+
+Two ways out:
+
+- Set `VERCEL_FORCE_BUILD=1` in the Vercel project's environment variables. The
+  ignore command checks it first and always builds when it is set. Remove it
+  once a deployment exists.
+- Or push any commit touching `apps/web/` or `packages/`.
 
 Secrets go in with `fly secrets set`; the app reads plain env vars either way.
 The Fly app, Vercel project, DNS and provider credentials still need creating —

@@ -1,4 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages"
+  "ignoreCommand": "if [ \"$VERCEL_FORCE_BUILD\" = \"1\" ]; then exit 1; fi; git diff --quiet HEAD^ HEAD -- . ../../packages"
 }
