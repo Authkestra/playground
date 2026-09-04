@@ -15,11 +15,21 @@ live, download a working Rust project.
 
 ## Status
 
-**v0 — core machinery.** The session/config/diff/safety layer that every
-scenario depends on is built and tested. The user-visible auth scenarios
-(passkeys, TOTP, OAuth, bot protection) are the next phase and are not
-implemented yet; two placeholder scenarios exist to exercise both control
-shapes. Nothing is deployed — see [Deployment](#deployment).
+**Live.** Backend on [Fly.io](https://authkestra-playground-api.fly.dev),
+frontend on [Vercel](https://playground-web-opal.vercel.app).
+
+| Scenario | State |
+| --- | --- |
+| **TOTP** (authenticator app) | Working end to end — enrol by QR, verify a real code |
+| **Passkeys** (WebAuthn) | Working — registration and authentication, with signature-counter tracking |
+| OAuth (GitHub / Google / Discord) | Blocked on provider credentials |
+| Bot protection (Turnstile / hCaptcha / reCAPTCHA) | Blocked on captcha site keys |
+
+Two placeholder scenarios (`dummy_toggle`, `dummy_provider`) remain registered
+to cover control shapes no real scenario uses yet. They go when the OAuth
+scenario lands.
+
+`play.authkestra.com` is not wired up yet — see the open P0 issues.
 
 ## Layout
 
@@ -72,6 +82,9 @@ scenarios simply report themselves as not configured.
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base for provider redirect URIs |
 | `TRUSTED_CLIENT_IP_HEADER` | `fly-client-ip` | Header carrying the true client IP. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. Use `cf-connecting-ip` behind Cloudflare; empty to disable. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
+| `DATABASE_URL` | `sqlite://data.db` | Credential store (TOTP secrets, passkeys) |
+| `WEBAUTHN_ORIGIN` | `http://localhost:3000` | The frontend's origin, exactly as the browser sends it |
+| `WEBAUTHN_RP_ID` | derived from origin | Relying-party ID — the frontend's domain |
 
 ## What a visitor gets
 
@@ -97,6 +110,26 @@ Write one module implementing `Scenario` and register it in
 `ScenarioRegistry::with_builtins`. The HTTP layer, diff engine and frontend all
 work from the registry, so nothing else needs a new branch — the frontend
 renders its controls from `ScenarioSpec` data rather than hardcoded markup.
+
+Multi-step ceremonies (registration, verification) go through one generic
+endpoint, `POST /api/scenarios/:id/action/:action`, and the scenario declares
+the steps it accepts in `ScenarioSpec::actions`. That keeps per-scenario logic
+out of the HTTP layer entirely.
+
+`apps/api/tests/conformance.rs` enumerates the registry, so a new scenario is
+picked up automatically and must satisfy every shared property — it cannot ship
+untested.
+
+### WebAuthn relying party
+
+`WEBAUTHN_RP_ID` must be the **frontend's** domain, not the API's: the ceremony
+runs in the browser at the page's origin, and the browser rejects any RP ID that
+is not a registrable suffix of it. Aiming it at the API host is the usual cause
+of a ceremony failing with a deliberately vague browser-side error.
+
+A passkey is bound to the RP ID that created it, so **changing domains means
+every visitor re-registers** — worth knowing before `play.authkestra.com` goes
+live.
 
 ## Safety
 
