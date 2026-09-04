@@ -41,12 +41,27 @@ impl Settings {
 
         let admin_token = std::env::var("ADMIN_TOKEN").ok().filter(|t| !t.is_empty());
 
-        let allowed_origins = std::env::var("ALLOWED_ORIGINS")
-            .unwrap_or_else(|_| "http://localhost:3000".to_string())
+        // A malformed entry here disables CORS silently: the browser simply
+        // blocks every request and the frontend looks like the API is down. So
+        // normalise the easy mistakes and be loud about the rest.
+        let raw_origins = std::env::var("ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let allowed_origins: Vec<String> = raw_origins
             .split(',')
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().trim_end_matches('/').to_string())
             .filter(|s| !s.is_empty())
             .collect();
+
+        if allowed_origins.is_empty() {
+            tracing::error!(
+                raw = %raw_origins,
+                "ALLOWED_ORIGINS resolved to an empty list; every cross-origin request \
+                 will be blocked by the browser and the frontend will look like the API \
+                 is down"
+            );
+        } else {
+            tracing::info!(origins = ?allowed_origins, "CORS allow-list");
+        }
 
         let trusted_client_ip_header = std::env::var("TRUSTED_CLIENT_IP_HEADER")
             .unwrap_or_else(|_| "fly-client-ip".to_string());

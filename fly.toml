@@ -17,6 +17,14 @@ primary_region = 'cdg'
   COOKIE_SECURE = 'true'
   PORT = '8000'
   RUST_LOG = 'info,api=debug,authkestra=info'
+  # CORS allow-list. Credentialed (the demo session rides in a cookie), so these
+  # must match the frontend's origin EXACTLY — no trailing slash, scheme
+  # included. A mismatch does not error: the browser just blocks the request and
+  # the site looks like the API is down.
+  #
+  # NOTE: a Fly *secret* of the same name overrides this value. If CORS misbehaves,
+  # check `fly secrets list` before editing this line.
+  ALLOWED_ORIGINS = 'https://playground-web-opal.vercel.app,http://localhost:3000'
 
 [http_service]
   internal_port = 8000

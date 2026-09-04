@@ -586,3 +586,69 @@ async fn a_request_with_no_forwarding_header_and_no_connect_info_still_works() {
     );
     assert_eq!(body_json(resp).await["status"], "ok");
 }
+
+/// CORS here is credentialed (the session rides in a cookie), so an origin that
+/// fails to match produces no `access-control-allow-origin` header and the
+/// browser blocks the request — with no server-side error. These pin the two
+/// mistakes that cause it.
+#[tokio::test]
+async fn an_allowed_origin_is_echoed_back() {
+    let settings = Settings {
+        allowed_origins: vec!["https://example.test".to_string()],
+        ..settings(None)
+    };
+    let mut st = state_with(KillSwitch::default(), None);
+    st.settings = Arc::new(settings);
+
+    let resp = api::build_router(st)
+        .oneshot(
+            req("GET", "/api/session")
+                .header(header::ORIGIN, "https://example.test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|v| v.to_str().ok()),
+        Some("https://example.test"),
+        "an allowed origin must be echoed, or the browser blocks the request"
+    );
+}
+
+#[tokio::test]
+async fn a_trailing_slash_in_the_allow_list_still_matches() {
+    // `Origin` headers never carry a trailing slash, so an entry written as
+    // "https://example.test/" would otherwise match nothing at all.
+    std::env::set_var("ALLOWED_ORIGINS", "https://example.test/");
+    let parsed = Settings::from_env();
+    std::env::remove_var("ALLOWED_ORIGINS");
+
+    assert_eq!(
+        parsed.allowed_origins,
+        vec!["https://example.test".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn an_origin_not_on_the_list_is_not_echoed() {
+    let resp = app(KillSwitch::default(), None)
+        .oneshot(
+            req("GET", "/api/session")
+                .header(header::ORIGIN, "https://evil.test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        resp.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none(),
+        "an unlisted origin must not be granted access"
+    );
+}

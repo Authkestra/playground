@@ -213,7 +213,15 @@ pub fn build_router(state: AppState) -> Router {
     let origins: Vec<HeaderValue> = settings
         .allowed_origins
         .iter()
-        .filter_map(|o| o.parse().ok())
+        .filter_map(|o| match o.parse::<HeaderValue>() {
+            Ok(v) => Some(v),
+            Err(_) => {
+                // Dropping this silently would block the origin in a browser
+                // with no server-side trace of why.
+                tracing::error!(origin = %o, "ALLOWED_ORIGINS entry is not a valid header value; ignoring it");
+                None
+            }
+        })
         .collect();
 
     let cors = CorsLayer::new()
