@@ -15,6 +15,7 @@ pub mod engine;
 pub mod error;
 pub mod events;
 pub mod killswitch;
+pub mod kit;
 pub mod oauth_routes;
 pub mod routes;
 pub mod scenario;
