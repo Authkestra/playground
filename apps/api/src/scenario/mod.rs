@@ -10,6 +10,7 @@
 //! needs a new `match` arm.
 
 pub mod dummy;
+pub mod oauth;
 pub mod passkeys;
 pub mod totp;
 
@@ -353,8 +354,15 @@ impl ScenarioRegistry {
     /// P2 adds passkeys / TOTP / OAuth / bot-protection here; nothing else in
     /// the codebase has to change to accommodate them.
     pub fn with_builtins() -> Self {
+        Self::with_providers(Vec::new())
+    }
+
+    /// The registry, with the OAuth scenario offering only the providers this
+    /// deployment actually has credentials for.
+    pub fn with_providers(configured_providers: Vec<String>) -> Self {
         let mut r = Self::new();
         r.register(Arc::new(passkeys::PasskeysScenario));
+        r.register(Arc::new(oauth::OAuthScenario::new(configured_providers)));
         r.register(Arc::new(totp::TotpScenario));
         // Placeholders covering control shapes no real scenario uses yet.
         // `dummy_provider` goes when the OAuth scenario lands; `dummy_toggle`

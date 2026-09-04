@@ -45,6 +45,9 @@ responses are scenario-specific and typed in `packages/api-types`.
 | `passkeys` | `authenticate_start` | `{}` | WebAuthn `CredentialRequestOptions` |
 | `passkeys` | `authenticate_finish` | assertion | `PasskeyAuthResult` |
 
+The `oauth` scenario has **no** actions, because OAuth is a navigation rather
+than an XHR ceremony — see below.
+
 Action endpoints share the tighter rate limit with `try`, since they create
 credentials and reach third parties.
 
@@ -114,6 +117,43 @@ interface TryResult { outcome: TryOutcome; detail: string }
 
 interface HealthResponse { status: string; version: string; demo_enabled: boolean }
 ```
+
+## OAuth navigation routes
+
+OAuth cannot use the action endpoint: the browser has to *leave* for the
+provider and come back. Two ordinary GET routes handle it, and the frontend
+starts the flow with a top-level navigation (`window.location.href = ...`), not
+a fetch.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/auth/login/{provider}?mode=session\|jwt&scope=...` | Redirects to the provider. Generates PKCE and writes the encrypted `state` cookie. |
+| GET | `/auth/callback/{provider}` | The provider's callback. Verifies state, exchanges the code, then redirects back to the frontend. |
+
+`{provider}` is one of `github`, `google`, `discord`, and only providers with
+credentials configured on the deployment are accepted — `ScenarioSpec.control`
+for `oauth` lists exactly those, so the UI never offers a dead end.
+
+`mode` selects how identity is established: `session` (default, server-side
+session in a cookie) or `jwt` (stateless — nothing stored server-side, which is
+the variant worth showing off).
+
+**The callback always redirects back to the frontend**, never renders a page, so
+the outcome arrives as query parameters the page reads:
+
+| Parameter | Meaning |
+| --- | --- |
+| `oauth=success&provider=…` | Round trip completed |
+| `oauth=denied&provider=…&reason=access_denied` | Visitor declined at the provider — an ordinary outcome, not an error |
+| `oauth=error&provider=…&reason=missing_code\|unknown_provider\|exchange_failed` | Could not complete |
+
+The redirect target is the first entry of `ALLOWED_ORIGINS` and is never taken
+from the request, so the callback cannot be turned into an open redirect.
+
+### Registering the callback with a provider
+
+The redirect URI to register is `{OAUTH_REDIRECT_BASE}/auth/callback/{provider}`
+— note the order: `/auth/callback/github`, **not** `/auth/github/callback`.
 
 ## Errors
 

@@ -14,6 +14,7 @@ pub mod diff;
 pub mod engine;
 pub mod error;
 pub mod killswitch;
+pub mod oauth_routes;
 pub mod routes;
 pub mod scenario;
 pub mod session;
@@ -305,7 +306,11 @@ pub enum StateError {
 pub async fn state_from_env() -> Result<AppState, StateError> {
     let settings = Arc::new(Settings::from_env());
     let kill_switch = Arc::new(KillSwitch::from_env());
-    let registry = ScenarioRegistry::with_builtins();
+
+    // The OAuth control must only offer providers this deployment can actually
+    // complete, so credentials are read before the registry is built.
+    let provider_credentials = ProviderCredentials::from_env();
+    let registry = ScenarioRegistry::with_providers(provider_credentials.configured());
 
     let kv = open_state_store().await?;
 
@@ -323,7 +328,7 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         credentials.clone(),
     ));
     let engines = Arc::new(EngineFactory::new(
-        ProviderCredentials::from_env(),
+        provider_credentials,
         settings.cookie_secure,
     ));
 
@@ -418,7 +423,13 @@ pub fn build_router(state: AppState) -> Router {
         .allow_credentials(true);
 
     let mut app = Router::new()
-        .merge(routes::sensitive_router().layer(GovernorLayer { config: sensitive }))
+        .merge(
+            routes::sensitive_router()
+                // Every OAuth login reaches a third party, so it shares the
+                // tighter bucket that protects provider quota.
+                .merge(crate::oauth_routes::router())
+                .layer(GovernorLayer { config: sensitive }),
+        )
         .merge(routes::standard_router().layer(GovernorLayer { config: standard }));
 
     // A missing admin token must mean "no admin surface", never "open switch".

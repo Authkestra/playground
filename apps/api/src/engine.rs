@@ -69,12 +69,43 @@ impl ProviderCredentials {
         self.creds.get(provider)
     }
 
+    /// Inject credentials without touching the environment.
+    ///
+    /// For tests: the OAuth routes and control are driven entirely by which
+    /// providers have credentials, and that is exactly what needs exercising.
+    pub fn insert_for_test(&mut self, provider: &str, client_id: &str, secret: &str) {
+        self.creds.insert(
+            provider.to_string(),
+            (client_id.to_string(), secret.to_string()),
+        );
+        if self.redirect_base.is_empty() {
+            self.redirect_base = "http://localhost:8000".to_string();
+        }
+    }
+
     pub fn is_configured(&self, provider: &str) -> bool {
         self.creds.contains_key(provider)
     }
 
+    /// The callback URI to register with the provider.
+    ///
+    /// Must match the mounted callback route exactly, and the provider is
+    /// configured with this same value — a mismatch is rejected by the provider
+    /// with a generic error, so it is worth keeping the two in one place.
+    /// The path follows the framework's own convention
+    /// (`/auth/callback/{provider}`, not `/auth/{provider}/callback`).
     pub fn redirect_uri(&self, provider: &str) -> String {
-        format!("{}/auth/{}/callback", self.redirect_base, provider)
+        format!("{}/auth/callback/{}", self.redirect_base, provider)
+    }
+
+    /// Providers with credentials present, in a stable order.
+    ///
+    /// Used to offer only the providers that can actually complete a round
+    /// trip — offering one that is not configured produces a dead end.
+    pub fn configured(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.creds.keys().cloned().collect();
+        ids.sort();
+        ids
     }
 }
 
@@ -131,6 +162,37 @@ impl EngineFactory {
 
     pub fn credentials(&self) -> &ProviderCredentials {
         &self.credentials
+    }
+
+    /// The session configuration these engines are built with.
+    ///
+    /// The OAuth helpers need it to encrypt and decrypt the `state` cookie, and
+    /// it must be the *same* config the login step used or the callback cannot
+    /// read its own state.
+    pub fn session_config(&self) -> SessionConfig {
+        SessionConfig {
+            secure: self.cookie_secure,
+            state_encryption_key: self.state_encryption_key,
+            ..Default::default()
+        }
+    }
+
+    /// An engine with every configured provider attached.
+    ///
+    /// The OAuth login and callback routes take the provider from the URL, so
+    /// they need one engine that knows all of them — unlike the per-session
+    /// engines, which reflect a single visitor's choice.
+    pub fn auth_engine(&self) -> AkWebAppEngine {
+        let mut config = DemoConfig::default();
+        // A SelectMany over every configured provider makes `build` attach them
+        // all, reusing exactly the same construction path as a session engine.
+        config.set(
+            "__auth_routes__",
+            crate::scenario::ControlValue::SelectMany {
+                selected: self.credentials.configured(),
+            },
+        );
+        self.engine_for(&config)
     }
 
     /// Get (or build) the engine for this configuration.

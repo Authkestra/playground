@@ -22,16 +22,45 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
+/// State with every OAuth provider configured.
+///
+/// The harness needs each scenario to have a meaningful "active" value, and a
+/// provider-select control offers nothing without credentials — so a deployment
+/// missing them would let the OAuth scenario pass vacuously.
 async fn state() -> AppState {
-    api::testing::test_state(KillSwitch::default(), None)
+    api::testing::test_state_with_providers(
+        KillSwitch::default(),
+        &[
+            ("github", "gh-id", "gh-secret"),
+            ("google", "go-id", "go-secret"),
+            ("discord", "di-id", "di-secret"),
+        ],
+    )
 }
 
 fn req(method: &str, uri: &str) -> axum::http::request::Builder {
+    req_from("203.0.113.77", method, uri)
+}
+
+/// A request from a specific client IP.
+///
+/// The harness walks every scenario, and the endpoints it exercises share the
+/// tighter rate-limit bucket — so with enough scenarios the loop throttles
+/// itself and a later scenario sees 429 where the test expects its real status.
+/// Giving each scenario its own IP keeps the property under test isolated from
+/// the limiter, which is genuinely working.
+fn req_from(ip: &str, method: &str, uri: &str) -> axum::http::request::Builder {
     Request::builder()
         .method(method)
         .uri(uri)
-        .header("x-forwarded-for", "203.0.113.77")
+        .header("x-forwarded-for", ip)
         .header(header::CONTENT_TYPE, "application/json")
+}
+
+/// A stable per-scenario client IP, so buckets never overlap.
+fn ip_for(scenario: &str) -> String {
+    let n = scenario.bytes().map(|b| b as u32).sum::<u32>() % 250 + 1;
+    format!("198.18.{}.{}", n / 250, n % 250 + 1)
 }
 
 async fn body_json(resp: axum::response::Response) -> Value {
@@ -62,7 +91,7 @@ fn active_value(shape: &ControlShape) -> ControlValue {
 
 /// Every registered scenario, as (id, control shape, actions).
 fn registered() -> Vec<(String, ControlShape, Vec<String>)> {
-    ScenarioRegistry::with_builtins()
+    test_registry()
         .iter()
         .map(|s| {
             (
@@ -72,6 +101,15 @@ fn registered() -> Vec<(String, ControlShape, Vec<String>)> {
             )
         })
         .collect()
+}
+
+/// The same registry the test state is built with, so control options line up.
+fn test_registry() -> ScenarioRegistry {
+    ScenarioRegistry::with_providers(vec![
+        "discord".to_string(),
+        "github".to_string(),
+        "google".to_string(),
+    ])
 }
 
 #[tokio::test]
@@ -87,7 +125,7 @@ async fn the_registry_is_not_empty() {
 #[tokio::test]
 async fn every_scenario_has_a_unique_id_and_human_facing_text() {
     let mut seen = BTreeSet::new();
-    for s in ScenarioRegistry::with_builtins().iter() {
+    for s in test_registry().iter() {
         assert!(
             seen.insert(s.id().to_string()),
             "duplicate scenario id `{}`",
@@ -111,7 +149,7 @@ async fn every_scenario_has_a_unique_id_and_human_facing_text() {
 /// fresh session is already inconsistent.
 #[tokio::test]
 async fn every_default_value_matches_its_control_shape() {
-    for s in ScenarioRegistry::with_builtins().iter() {
+    for s in test_registry().iter() {
         let default = s.default_value();
         assert!(
             default.matches_shape(&s.control()),
@@ -137,7 +175,7 @@ async fn every_default_value_matches_its_control_shape() {
 /// a project needs crates it does not.
 #[tokio::test]
 async fn an_inactive_scenario_has_no_consequences() {
-    for s in ScenarioRegistry::with_builtins().iter() {
+    for s in test_registry().iter() {
         let c = s.consequences(&s.default_value());
         assert!(
             c.routes.is_empty() && c.requirements.is_empty() && c.crates.is_empty(),
@@ -150,7 +188,7 @@ async fn an_inactive_scenario_has_no_consequences() {
 /// The whole promise of the diff is that it names real, actionable changes.
 #[tokio::test]
 async fn an_active_scenario_names_real_consequences() {
-    for s in ScenarioRegistry::with_builtins().iter() {
+    for s in test_registry().iter() {
         // Placeholders exist only to cover control shapes; they are exempt.
         if s.id().starts_with("dummy_") {
             continue;
@@ -185,7 +223,7 @@ async fn an_active_scenario_names_real_consequences() {
 
 #[tokio::test]
 async fn every_scenario_rejects_a_value_of_the_wrong_shape() {
-    for s in ScenarioRegistry::with_builtins().iter() {
+    for s in test_registry().iter() {
         // A shape this control is definitely not.
         let wrong = match s.control() {
             ControlShape::Toggle => ControlValue::SelectOne {
@@ -203,7 +241,7 @@ async fn every_scenario_rejects_a_value_of_the_wrong_shape() {
 
 #[tokio::test]
 async fn every_scenario_rejects_an_unknown_option() {
-    for s in ScenarioRegistry::with_builtins().iter() {
+    for s in test_registry().iter() {
         let bogus = match s.control() {
             ControlShape::Toggle => continue,
             ControlShape::SelectOne { .. } => ControlValue::SelectOne {
@@ -233,9 +271,13 @@ async fn every_scenario_supports_configure_diff_and_try() {
         let configured = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/configure"))
-                    .body(Body::from(format!(r#"{{"value":{value}}}"#)))
-                    .unwrap(),
+                req_from(
+                    &ip_for(&id),
+                    "POST",
+                    &format!("/api/scenarios/{id}/configure"),
+                )
+                .body(Body::from(format!(r#"{{"value":{value}}}"#)))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -254,7 +296,7 @@ async fn every_scenario_supports_configure_diff_and_try() {
         let diffed = app
             .clone()
             .oneshot(
-                req("GET", &format!("/api/scenarios/{id}/diff"))
+                req_from(&ip_for(&id), "GET", &format!("/api/scenarios/{id}/diff"))
                     .header(header::COOKIE, &cookie)
                     .body(Body::empty())
                     .unwrap(),
@@ -271,7 +313,7 @@ async fn every_scenario_supports_configure_diff_and_try() {
         let tried = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/try"))
+                req_from(&ip_for(&id), "POST", &format!("/api/scenarios/{id}/try"))
                     .header(header::COOKIE, &cookie)
                     .body(Body::from("{}"))
                     .unwrap(),
@@ -307,9 +349,13 @@ async fn every_declared_action_is_dispatchable() {
         let configured = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/configure"))
-                    .body(Body::from(format!(r#"{{"value":{value}}}"#)))
-                    .unwrap(),
+                req_from(
+                    &ip_for(&id),
+                    "POST",
+                    &format!("/api/scenarios/{id}/configure"),
+                )
+                .body(Body::from(format!(r#"{{"value":{value}}}"#)))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -319,10 +365,14 @@ async fn every_declared_action_is_dispatchable() {
             let resp = app
                 .clone()
                 .oneshot(
-                    req("POST", &format!("/api/scenarios/{id}/action/{action}"))
-                        .header(header::COOKIE, &cookie)
-                        .body(Body::from("{}"))
-                        .unwrap(),
+                    req_from(
+                        &ip_for(&id),
+                        "POST",
+                        &format!("/api/scenarios/{id}/action/{action}"),
+                    )
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::from("{}"))
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -353,9 +403,13 @@ async fn an_undeclared_action_is_rejected_everywhere() {
         let configured = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/configure"))
-                    .body(Body::from(format!(r#"{{"value":{value}}}"#)))
-                    .unwrap(),
+                req_from(
+                    &ip_for(&id),
+                    "POST",
+                    &format!("/api/scenarios/{id}/configure"),
+                )
+                .body(Body::from(format!(r#"{{"value":{value}}}"#)))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -364,10 +418,14 @@ async fn an_undeclared_action_is_rejected_everywhere() {
         let resp = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/action/__nope__"))
-                    .header(header::COOKIE, &cookie)
-                    .body(Body::from("{}"))
-                    .unwrap(),
+                req_from(
+                    &ip_for(&id),
+                    "POST",
+                    &format!("/api/scenarios/{id}/action/__nope__"),
+                )
+                .header(header::COOKIE, &cookie)
+                .body(Body::from("{}"))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -392,9 +450,13 @@ async fn conflicting_configurations_do_not_interfere() {
         let a = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/configure"))
-                    .body(Body::from(format!(r#"{{"value":{active}}}"#)))
-                    .unwrap(),
+                req_from(
+                    &ip_for(&id),
+                    "POST",
+                    &format!("/api/scenarios/{id}/configure"),
+                )
+                .body(Body::from(format!(r#"{{"value":{active}}}"#)))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -411,7 +473,7 @@ async fn conflicting_configurations_do_not_interfere() {
 
         // B must hold exactly the registered default — comparing against that
         // is shape-agnostic, so this works for toggles and selects alike.
-        let default = ScenarioRegistry::with_builtins()
+        let default = test_registry()
             .get(&id)
             .expect("registered")
             .default_value();
@@ -456,9 +518,13 @@ async fn the_kill_switch_stops_every_scenario_uniformly() {
         let configured = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/configure"))
-                    .body(Body::from(format!(r#"{{"value":{value}}}"#)))
-                    .unwrap(),
+                req_from(
+                    &ip_for(&id),
+                    "POST",
+                    &format!("/api/scenarios/{id}/configure"),
+                )
+                .body(Body::from(format!(r#"{{"value":{value}}}"#)))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -469,7 +535,7 @@ async fn the_kill_switch_stops_every_scenario_uniformly() {
         let tried = app
             .clone()
             .oneshot(
-                req("POST", &format!("/api/scenarios/{id}/try"))
+                req_from(&ip_for(&id), "POST", &format!("/api/scenarios/{id}/try"))
                     .header(header::COOKIE, &cookie)
                     .body(Body::from("{}"))
                     .unwrap(),
@@ -486,10 +552,14 @@ async fn the_kill_switch_stops_every_scenario_uniformly() {
             let resp = app
                 .clone()
                 .oneshot(
-                    req("POST", &format!("/api/scenarios/{id}/action/{action}"))
-                        .header(header::COOKIE, &cookie)
-                        .body(Body::from("{}"))
-                        .unwrap(),
+                    req_from(
+                        &ip_for(&id),
+                        "POST",
+                        &format!("/api/scenarios/{id}/action/{action}"),
+                    )
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::from("{}"))
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
