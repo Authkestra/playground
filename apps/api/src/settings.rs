@@ -176,10 +176,24 @@ pub struct Settings {
     pub allowed_origins: Vec<String>,
     /// Header carrying the true client IP, set by the proxy in front of us.
     ///
-    /// Must name a header the proxy *overwrites*, or the rate limiter can be
-    /// bypassed by forging it. `Fly-Client-IP` on Fly; `CF-Connecting-IP` once
-    /// Cloudflare sits in front. Set to an empty string to disable and fall
-    /// back to the rightmost `X-Forwarded-For` entry.
+    /// There is no portable default — the correct value is a property of the
+    /// proxy sitting in front of this service, and that proxy must *overwrite*
+    /// the header rather than appending to it, or the rate limiter can be
+    /// bypassed by forging it.
+    ///
+    /// To find the right value, set `ADMIN_TOKEN` and call:
+    ///   `GET /admin/client-ip`
+    /// It returns every candidate header that actually arrived, what each
+    /// strategy would select, and which one the rate limiter is using. Then
+    /// set this variable to that header name. Examples: `cf-connecting-ip`
+    /// behind Cloudflare, `x-forwarded-for` on some CDNs (risky; see below).
+    ///
+    /// Set to an empty string (the safe default) to disable and fall back to
+    /// the rightmost `X-Forwarded-For` entry. When disabled, every visitor
+    /// shares one coarse rate-limit bucket based on the proxy's address — a
+    /// weaker limiter, but never a bypass. Until this is properly set, that is
+    /// the only option that does not risk rate-limiting the service's own IP
+    /// address or making the limiter bypassable.
     pub trusted_client_ip_header: Option<axum::http::HeaderName>,
     /// WebAuthn relying-party identity.
     pub relying_party: RelyingParty,
@@ -229,8 +243,8 @@ impl Settings {
             tracing::info!(origins = ?allowed_origins, "CORS allow-list");
         }
 
-        let trusted_client_ip_header = std::env::var("TRUSTED_CLIENT_IP_HEADER")
-            .unwrap_or_else(|_| "fly-client-ip".to_string());
+        let trusted_client_ip_header =
+            std::env::var("TRUSTED_CLIENT_IP_HEADER").unwrap_or_default();
         let trusted_client_ip_header = if trusted_client_ip_header.trim().is_empty() {
             None
         } else {

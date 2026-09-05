@@ -15,7 +15,7 @@ live, download a working Rust project.
 
 ## Status
 
-**Live.** Backend on [Fly.io](https://authkestra-playground-api.fly.dev),
+**Live.** Backend on Render (`authkestra-playground-api` service),
 frontend on [Vercel](https://playground-web-opal.vercel.app).
 
 | Scenario | State |
@@ -25,16 +25,16 @@ frontend on [Vercel](https://playground-web-opal.vercel.app).
 | OAuth (GitHub / Google / Discord) | Blocked on provider credentials |
 | Bot protection (Turnstile / hCaptcha / reCAPTCHA) | Blocked on captcha site keys |
 
-Two placeholder scenarios (`dummy_toggle`, `dummy_provider`) remain registered
-to cover control shapes no real scenario uses yet. They go when the OAuth
-scenario lands.
+Placeholder scenarios (`dummy_toggle`, `dummy_provider`) exist for testing but
+are not registered in the live service — only the real scenarios (TOTP, passkeys,
+OAuth) are available to visitors.
 
 `play.authkestra.com` is not wired up yet — see the open P0 issues.
 
 ## Layout
 
 ```
-apps/api/            Rust (Axum) backend, deploys to Fly.io
+apps/api/            Rust (Axum) backend, deploys to Render
 apps/web/            Next.js (App Router) frontend, deploys to Vercel
 packages/api-types/  TypeScript types generated from the Rust API contract
 docs/                playground docs, API contract, decision records
@@ -81,7 +81,7 @@ scenarios simply report themselves as not configured.
 | `ADMIN_TOKEN` | — | Enables `POST /admin/kill-switch`. **Unset means the endpoint is not mounted at all.** |
 | `OAUTH_STATE_KEY` | — | ≥32 bytes; keeps encrypted OAuth state valid across restarts |
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base for provider redirect URIs |
-| `TRUSTED_CLIENT_IP_HEADER` | `fly-client-ip` | Header carrying the true client IP. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. `cf-connecting-ip` behind Cloudflare; empty to fall back to `X-Forwarded-For`. |
+| `TRUSTED_CLIENT_IP_HEADER` | — | Header carrying the true client IP, set by the proxy in front. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. No portable default exists; set this to match your proxy (e.g. `cf-connecting-ip` behind Cloudflare). Use `GET /admin/client-ip` to verify which headers actually arrive and which to trust. Empty string (the safe default) falls back to the rightmost `X-Forwarded-For` entry. |
 | `CLIENT_IP_XFF_POSITION` | `rightmost` | Which `X-Forwarded-For` entry to trust. `rightmost` is unforgeable; `leftmost` is correct only where the proxy overwrites the header. Settle it with `GET /admin/client-ip` rather than guessing. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
 | `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
@@ -173,19 +173,29 @@ door:
 
 ## Deployment
 
-Backend to **Fly.io** (container built from `apps/api/Dockerfile`), frontend to
-**Vercel**, both on merge to `main`.
+Backend to **Render** (from `render.yaml`), frontend to
+**Vercel**, both on merge to `main`. Render redeploys whenever CI passes (`autoDeployTrigger: checksPass`),
+so a build that fails formatting, linting, tests, or dependency checks cannot reach production.
 
 Shuttle was the original plan; it was dropped after the project turned out to be
 abandoned — see
 [`docs/decisions/0003-hosting-platform.md`](docs/decisions/0003-hosting-platform.md).
 
-⚠️ **`fly.toml` pins `auto_stop_machines = false` and `min_machines_running = 1`
-for architectural reasons, not cost.** Demo sessions live in process memory and
-the expiry sweeper is a `tokio::interval`, so scale-to-zero would reset every
-visitor's config, and a second machine would serve different configs depending
-on which one a visitor reached. Don't relax these without moving the session
-store to Redis.
+⚠️ **The free Render plan spins the service down after inactivity**, so the first
+request after a quiet period pays a cold start of tens of seconds. That used to be
+disqualifying, when demo sessions lived in process memory; now that all state is in
+Redis it costs latency and nothing else — a visitor's configuration survives it. The
+frontend says so on its loading screen, because a silent minute reads as a broken site.
+
+Two other targets stay configured but dormant, both `workflow_dispatch` only:
+
+- **Cloud Run** (`.github/workflows/deploy-cloudrun.yml`) — scales to zero like
+  Render's free plan, but cold-starts this binary in about a second rather than ~50.
+  The trade-off is that GCP wants a billing account even for the free tier.
+- **Fly.io** (`.github/workflows/deploy.yml`, plus the now-unused `fly.toml`) — the
+  previous platform. Its trial ended, and a push-triggered deploy that always fails
+  leaves `main` red for reasons unrelated to the commit, so the trigger was removed
+  rather than the workflow. Making Fly the target again is a card and a `push` trigger.
 
 ### Vercel builds showing as "cancelled"
 
