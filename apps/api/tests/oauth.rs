@@ -548,14 +548,42 @@ async fn a_failed_callback_is_narrated_in_the_flow_log() {
     assert!(entry.detail.len() > 20, "{entry:?}");
 }
 
-/// Regression test for the upstream nonce bug.
+/// Regression test for the upstream nonce bug, inverted.
 ///
-/// `OAuth2Flow::initiate_login` sets a nonce unconditionally, and
-/// `finalize_login` then demands a matching one back — but the shipped plain
+/// In 0.8.0, `OAuth2Flow::initiate_login` set a nonce unconditionally and
+/// `finalize_login` then demanded a matching one back — but the shipped plain
 /// OAuth2 providers never return one, so every round trip failed with "Nonce
-/// mismatch". The login step must leave no nonce in the state.
+/// mismatch". This service carried a workaround that stripped the nonce back
+/// out of the state cookie.
+///
+/// 0.8.1 fixed it the other way round, which is the better fix: the nonce is
+/// still generated, and the *enforcement* is gated on
+/// `OAuthProvider::validates_nonce()`. A nonce sent to a provider that ignores
+/// it is harmless. So the workaround is gone, and what is worth pinning is the
+/// upstream behaviour this now depends on — if a future version enforced the
+/// nonce for a provider that cannot echo one, OAuth would break for every
+/// visitor again, and this is what would say so.
 #[tokio::test]
-async fn the_state_cookie_carries_no_unusable_nonce() {
+async fn the_shipped_providers_do_not_demand_a_nonce_back() {
+    use authkestra_engine::OAuthProvider;
+
+    let github = authkestra_providers::github::GithubProvider::new(
+        "id".to_string(),
+        "secret".to_string(),
+        "http://localhost/auth/callback/github".to_string(),
+    );
+
+    assert!(
+        !github.validates_nonce(),
+        "a plain OAuth2 provider that claims to validate a nonce will be held \
+         to one it can never return, and every callback fails"
+    );
+}
+
+/// The nonce is allowed to be there now. What must survive is everything that
+/// actually protects the flow.
+#[tokio::test]
+async fn the_state_cookie_keeps_its_csrf_state_and_pkce_verifier() {
     use authkestra_engine::state::OAuth2State;
 
     let st = state(&ALL);
@@ -587,20 +615,6 @@ async fn the_state_cookie_carries_no_unusable_nonce() {
         .unwrap();
     let decoded = OAuth2State::decrypt(value, &key).expect("state should decrypt");
 
-    assert!(
-        decoded.nonce.is_none(),
-        "a nonce the provider cannot echo back makes every callback fail"
-    );
-
-    // The parts that actually protect the flow must survive.
     assert!(!decoded.state.is_empty(), "CSRF state must remain");
-    assert!(
-        decoded.code_verifier.is_some(),
-        "the PKCE verifier must survive the rewrite"
-    );
-    assert_eq!(decoded.provider_id, "github");
-    assert!(
-        decoded.success_url.is_some(),
-        "the return URL must survive the rewrite"
-    );
+    assert!(decoded.code_verifier.is_some(), "PKCE verifier must remain");
 }

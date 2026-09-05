@@ -20,6 +20,6 @@ license = "MIT OR Apache-2.0"
 # `default-features = false` at the workspace level is what lets a member crate
 # turn a sibling's defaults off; Cargo ignores it on an inherited dependency
 # unless the workspace entry sets it too.
-authkestra-engine = { version = "0.8.0", default-features = false }
-authkestra-axum = { version = "0.8.0", default-features = false }
-authkestra-providers = { version = "0.8.0", default-features = false }
+authkestra-engine = { version = "0.8.1", default-features = false }
+authkestra-axum = { version = "0.8.1", default-features = false }
+authkestra-providers = { version = "0.8.1", default-features = false }

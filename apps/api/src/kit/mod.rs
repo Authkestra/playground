@@ -25,7 +25,7 @@ use crate::scenario::{
 /// download can never advertise a version the playground does not build
 /// against. Upstream's README says 0.7 while the crates are 0.8.0, which is
 /// exactly why this is not taken from prose.
-pub const AUTHKESTRA_VERSION: &str = "0.8.0";
+pub const AUTHKESTRA_VERSION: &str = "0.8.1";
 
 /// The generated project's crate name and directory.
 pub const PROJECT_NAME: &str = "authkestra-starter";

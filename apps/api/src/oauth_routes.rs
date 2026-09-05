@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
-use tower_cookies::{Cookie, Cookies};
+use tower_cookies::Cookies;
 
 use crate::error::ApiError;
 use crate::events::Step;
@@ -124,34 +124,6 @@ async fn login(
         &state.engines.session_config(),
         Some(success_url),
     );
-
-    // ---------------------------------------------------------------------
-    // Work around an upstream bug in authkestra 0.8.0.
-    //
-    // `OAuth2Flow::initiate_login` sets a nonce unconditionally
-    // (engine/src/flow/oauth2.rs:128), and `finalize_login` then requires the
-    // returned identity to carry a matching one. But a nonce is an OIDC
-    // ID-token concept: the shipped providers take `_nonce` as an unused
-    // parameter and build their identity with an empty attribute map, so it
-    // can never come back. The result is that every plain-OAuth2 round trip
-    // fails with "Nonce mismatch" — which is exactly what happened here for
-    // Google, GitHub and Discord alike.
-    //
-    // Clearing it is the correct semantics rather than a fudge: with no ID
-    // token there is nothing for a nonce to bind to. CSRF protection is the
-    // `state` parameter and PKCE, both of which are untouched.
-    //
-    // Fixed upstream in marcjazz/authkestra#318, which gates the *enforcement*
-    // check rather than the generation — merged 2026-09-04.
-    //
-    // That is not yet enough to remove this. We depend on `0.8.0` from
-    // crates.io, published 2026-09-03, so the fix is on `main` and in no
-    // release. Removing this on the strength of the merge alone would restore
-    // the bug for every visitor.
-    //
-    // The trigger is a *published* version carrying the fix: bump the
-    // workspace pin past 0.8.0, then delete this and `strip_unusable_nonce`.
-    strip_unusable_nonce(&state, &cookies);
 
     tracing::info!(?mode, "oauth login started");
     Ok(redirect.into_response())
@@ -332,47 +304,6 @@ async fn callback(
                 ),
             )
         }
-    }
-}
-
-/// Remove the nonce from the freshly written OAuth state cookie.
-///
-/// See the call site for why. Failures here are logged and ignored: leaving the
-/// nonce in place means the callback fails later with a clear message, which is
-/// strictly better than refusing to start the flow.
-fn strip_unusable_nonce(state: &AppState, cookies: &Cookies) {
-    use authkestra_engine::state::OAuth2State;
-
-    let key = state.engines.session_config().state_encryption_key;
-    let Some(existing) = cookies.get(STATE_COOKIE) else {
-        return;
-    };
-
-    let mut decoded = match OAuth2State::decrypt(existing.value(), &key) {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::warn!(error = %e, "could not read back the state cookie to clear its nonce");
-            return;
-        }
-    };
-    if decoded.nonce.take().is_none() {
-        return; // nothing to do
-    }
-
-    match decoded.encrypt(&key) {
-        Ok(encoded) => {
-            // Rebuilt with the same attributes the framework used, so the
-            // cookie's lifetime and scope are unchanged.
-            let mut cookie = Cookie::new(STATE_COOKIE, encoded);
-            cookie.set_http_only(true);
-            cookie.set_secure(state.settings.cookie_secure);
-            cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
-            cookie.set_path("/");
-            cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(900));
-            cookies.add(cookie);
-            tracing::debug!("cleared the unusable OIDC nonce from the OAuth state");
-        }
-        Err(e) => tracing::warn!(error = %e, "could not re-encrypt the state cookie"),
     }
 }
 
