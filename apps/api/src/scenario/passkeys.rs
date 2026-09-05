@@ -303,11 +303,16 @@ async fn passkey_register_start(
             let stored = serde_json::to_string(&registration)
                 .expect("webauthn registration state serialises");
             let ceremony_id = state.ceremonies.put(user_id, stored);
-            (
-                StatusCode::OK,
-                Json(json!({ "ceremony_id": ceremony_id, "options": challenge })),
-            )
-                .into_response()
+            // `ceremony_id` is merged in beside `publicKey` rather than
+            // wrapping it. The browser wants `{ publicKey }` exactly, and the
+            // playground returns it at the top level too — a different shape
+            // here would be a difference with no reason behind it.
+            let mut payload = serde_json::to_value(&challenge)
+                .expect("webauthn challenge serialises");
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("ceremony_id".to_string(), json!(ceremony_id));
+            }
+            (StatusCode::OK, Json(payload)).into_response()
         }
         Err(e) => {
             tracing::warn!(error = %e, "could not start passkey registration");
@@ -415,11 +420,16 @@ async fn passkey_login_start(
             let stored = serde_json::to_string(&authentication)
                 .expect("webauthn authentication state serialises");
             let ceremony_id = state.ceremonies.put(user_id, stored);
-            (
-                StatusCode::OK,
-                Json(json!({ "ceremony_id": ceremony_id, "options": challenge })),
-            )
-                .into_response()
+            // `ceremony_id` is merged in beside `publicKey` rather than
+            // wrapping it. The browser wants `{ publicKey }` exactly, and the
+            // playground returns it at the top level too — a different shape
+            // here would be a difference with no reason behind it.
+            let mut payload = serde_json::to_value(&challenge)
+                .expect("webauthn challenge serialises");
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("ceremony_id".to_string(), json!(ceremony_id));
+            }
+            (StatusCode::OK, Json(payload)).into_response()
         }
         Err(e) => {
             tracing::warn!(error = %e, "could not start passkey authentication");

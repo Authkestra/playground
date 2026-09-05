@@ -82,6 +82,10 @@ ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+# Only ever talks to http://127.0.0.1 in the parity test, so no TLS features:
+# adding a second rustls backend here is how this workspace got a
+# crypto-provider panic once already. See `install_crypto_provider`.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 # Generates valid TOTP codes so the verification path is tested for real
 # rather than only asserting that wrong codes fail.

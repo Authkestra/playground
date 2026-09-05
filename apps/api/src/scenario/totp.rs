@@ -139,6 +139,7 @@ impl Scenario for TotpScenario {
         Some(KitFragment {
             imports: vec![
                 "use authkestra_engine::auth::totp::TotpAuthMethod;".to_string(),
+                "use authkestra_engine::auth::store::CredentialStore;".to_string(),
                 "use authkestra_engine::auth::AuthInput;".to_string(),
                 "use authkestra_engine::auth::AuthMethod;".to_string(),
                 "use axum::extract::State;".to_string(),
@@ -176,6 +177,46 @@ async fn totp_enrol(
 ) -> impl IntoResponse {
     let method = TotpAuthMethod::new(SqlxCredentialStore::new(state.pool.clone()));
     let user_id = user_id_for(&body.username);
+
+    // Refuse a second enrolment rather than silently creating one that cannot
+    // work.
+    //
+    // `register_totp` saves under a fresh credential id every time, and
+    // `CredentialStore` exposes no way to remove one — only save, get and
+    // update. So a second enrolment leaves two secrets, and verification
+    // matches the *first*: the QR code just handed over is dead while the old
+    // authenticator, possibly on the phone being replaced, still works.
+    //
+    // Deleting the row directly would mean reaching past the trait into the
+    // store's schema. Refusing is honest and keeps the failure in front of the
+    // person who can act on it.
+    match SqlxCredentialStore::new(state.pool.clone())
+        .get_credentials(&user_id, "totp")
+        .await
+    {
+        Ok(existing) if !existing.is_empty() => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": "already enrolled",
+                    "detail": "An authenticator is already enrolled for this user. \
+                               Remove the stored credential before enrolling another — \
+                               the framework's CredentialStore has no delete, so that \
+                               is your application's job.",
+                })),
+            )
+                .into_response();
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(error = %e, "could not check for an existing authenticator");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not read credentials" })),
+            )
+                .into_response();
+        }
+    }
 
     match method
         .register_totp(&user_id, "Authkestra Starter", &body.username)

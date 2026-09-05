@@ -182,17 +182,65 @@ jobs:
             "--spec '${{ matrix.combination.spec }}' --out /tmp/kit" \
             "&& cargo check --manifest-path /tmp/kit/Cargo.toml"
 
+  # Compiling proves the download is valid. This proves it is the same thing
+  # the visitor just used, which is the actual promise being made.
+  parity:
+    name: Generated project behaves like the playground
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: generate-kit
+      - run: chmod +x ./generate-kit
+
+      - name: Generate a project with both ceremonies
+        run: ./generate-kit --name totp-passkeys --out generated
+
+      - name: Start it
+        working-directory: generated
+        env:
+          PORT: "8300"
+          DATABASE_URL: "sqlite://parity.db"
+          WEBAUTHN_ORIGIN: "http://localhost:8300"
+        run: |
+          cargo build
+          ./target/debug/authkestra-starter &
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8300/health >/dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::the generated project never became healthy"
+          exit 1
+
+      # The same assertions run against the playground in the `backend` job.
+      # PARITY_TARGET is required, not optional: a parity test that skips
+      # itself would report success for a comparison it never made.
+      - name: Run the shared contract against it
+        env:
+          PARITY_TARGET: http://127.0.0.1:8300
+        run: cargo test -p api --test parity -- --ignored
+
   # A single check to make required, so branch protection does not need
   # updating every time the matrix changes shape.
   result:
     name: Generated projects build
-    needs: build
+    needs: [build, parity]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verdict
         run: |
           case "${{ needs.build.result }}" in
-            success|skipped) echo "OK" ;;
+            success|skipped) ;;
             *) echo "At least one generated project failed to build."; exit 1 ;;
           esac
+          case "${{ needs.parity.result }}" in
+            success|skipped) ;;
+            *) echo "The generated project does not behave like the playground."; exit 1 ;;
+          esac
+          echo "OK"
