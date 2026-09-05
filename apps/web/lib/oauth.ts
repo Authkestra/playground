@@ -6,7 +6,7 @@ import { API_BASE } from "@/lib/api";
  * frontend's URL. See docs/api-contract.md#oauth-navigation-routes.
  */
 export type OAuthReturn =
-  | { status: "success"; provider: string }
+  | { status: "success"; provider: string; mode: OAuthMode | null }
   | { status: "denied"; provider: string; reason: string | null }
   | { status: "error"; provider: string; reason: string | null };
 
@@ -32,14 +32,19 @@ export function readOAuthReturn(search: string): OAuthReturn | null {
   const provider = params.get("provider");
   if (!outcome || !provider) return null;
 
-  if (outcome === "success") return { status: "success", provider };
+  if (outcome === "success") {
+    const modeParam = params.get("mode");
+    // Accept only the exact strings the API sends back.
+    const mode: OAuthMode | null = modeParam === "session" || modeParam === "jwt" ? modeParam : null;
+    return { status: "success", provider, mode };
+  }
   if (outcome === "denied") return { status: "denied", provider, reason: params.get("reason") };
   if (outcome === "error") return { status: "error", provider, reason: params.get("reason") };
   return null;
 }
 
 /**
- * Strips the `oauth`/`provider`/`reason` query params from the current URL
+ * Strips the `oauth`/`provider`/`reason`/`mode` query params from the current URL
  * without a navigation, so reloading or sharing the link doesn't replay the
  * same result.
  */
@@ -49,5 +54,6 @@ export function clearOAuthReturnParams(): void {
   url.searchParams.delete("oauth");
   url.searchParams.delete("provider");
   url.searchParams.delete("reason");
+  url.searchParams.delete("mode");
   window.history.replaceState(null, "", url.pathname + url.search + url.hash);
 }

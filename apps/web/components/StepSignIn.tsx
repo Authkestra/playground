@@ -52,6 +52,9 @@ export default function StepSignIn({
         case "demo_disabled":
           onDemoDisabled();
           return;
+        case "state_unavailable":
+          setEventsError(result.error.detail);
+          return;
         case "unavailable":
           setEventsError(
             "Can't reach the API right now. The flow log will pick back up once it responds.",
@@ -69,18 +72,35 @@ export default function StepSignIn({
     setEvents(result.data);
   }, [onDemoDisabled]);
 
-  // Poll while this step is mounted, and refetch immediately whenever a flow
-  // action (TOTP verify, passkey ceremony, ...) completes via `onAction`.
+  // Poll every 5 seconds, but skip fetches while the tab is hidden. When the
+  // tab becomes visible, fetch immediately to catch up on events. onAction
+  // already refetches after every ceremony step, so this is a safety net for
+  // events the client didn't initiate (e.g. the OAuth round trip).
   useEffect(() => {
     let cancelled = false;
     setEventsLoading(true);
     void fetchEvents().finally(() => {
       if (!cancelled) setEventsLoading(false);
     });
-    const interval = setInterval(() => void fetchEvents(), 2000);
+
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        void fetchEvents();
+      }
+    }, 5000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void fetchEvents();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchEvents]);
 
@@ -263,6 +283,14 @@ function describeOauthErrorReason(reason: string): string {
       return "that provider isn't configured on this deployment";
     case "exchange_failed":
       return "the code exchange with the provider failed";
+    case "state_missing":
+      return "the browser didn't send back the flow's state cookie — this usually means more than 15 minutes passed, cookies were blocked, or the flow was started in a different browser";
+    case "state_invalid":
+      return "the flow's state cookie was invalid or tampered with";
+    case "callback_failed":
+      return "the callback from the provider failed unexpectedly";
+    case "demo_disabled":
+      return "OAuth is temporarily switched off";
     default:
       return reason;
   }
@@ -284,7 +312,13 @@ function OAuthReturnBanner({
 
   let message: string;
   if (result.status === "success") {
-    message = `Signed in with ${result.provider}.`;
+    let modeDescription = "";
+    if (result.mode === "session") {
+      modeDescription = " A server-side session was established with its ID in a cookie.";
+    } else if (result.mode === "jwt") {
+      modeDescription = " A signed token (JWT) was issued with no server-side session.";
+    }
+    message = `Signed in with ${result.provider}.${modeDescription}`;
   } else if (result.status === "denied") {
     message = `You cancelled signing in with ${result.provider}. No harm done — try again whenever you're ready.`;
   } else {

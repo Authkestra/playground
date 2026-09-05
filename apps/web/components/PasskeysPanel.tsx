@@ -141,7 +141,8 @@ function encodeAssertion(credential: PublicKeyCredential): unknown {
 // ---------------------------------------------------------------------------
 
 type Capability = "checking" | "unsupported" | "supported";
-type UnsupportedReason = "no-webauthn" | "insecure-context" | "no-platform-authenticator";
+type UnsupportedReason = "no-webauthn" | "insecure-context";
+type AdvisoryReason = "no-platform-authenticator";
 
 const UNSUPPORTED_MESSAGES: Record<UnsupportedReason, string> = {
   "no-webauthn":
@@ -150,9 +151,12 @@ const UNSUPPORTED_MESSAGES: Record<UnsupportedReason, string> = {
   "insecure-context":
     "Passkeys require a secure context (HTTPS), and this page isn't loaded over one. " +
     "Try the \"Authenticator app (TOTP)\" scenario instead.",
+};
+
+const ADVISORY_MESSAGES: Record<AdvisoryReason, string> = {
   "no-platform-authenticator":
-    "No platform authenticator (like Touch ID, Windows Hello, or a fingerprint sensor) " +
-    "was detected on this device. Try the \"Authenticator app (TOTP)\" scenario instead.",
+    "This device doesn't have a built-in authenticator (like Touch ID, Windows Hello, or a fingerprint sensor). " +
+    "When registering or authenticating, the browser will offer a security key or a nearby phone instead.",
 };
 
 /** Narrow, optional-safe view of the bits of `PublicKeyCredential` we probe. */
@@ -205,6 +209,7 @@ function describeWebAuthnError(err: unknown): string {
 export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: Props) {
   const [capability, setCapability] = useState<Capability>("checking");
   const [unsupportedReason, setUnsupportedReason] = useState<UnsupportedReason | null>(null);
+  const [advisory, setAdvisory] = useState<AdvisoryReason | null>(null);
 
   const [registering, setRegistering] = useState(false);
   const [registerBanner, setRegisterBanner] = useState<string | null>(null);
@@ -225,21 +230,28 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
     }
 
     async function detect() {
+      // Hard block 1: WebAuthn API not available at all.
       if (typeof window === "undefined" || !("PublicKeyCredential" in window)) {
         markUnsupported("no-webauthn");
         return;
       }
 
+      // Hard block 2: Not in a secure context (HTTPS required).
       if (window.isSecureContext === false) {
         markUnsupported("insecure-context");
         return;
       }
 
       const statics = window.PublicKeyCredential as unknown as PublicKeyCredentialStatics;
+
+      // Soft block: No platform authenticator detected. We can still support
+      // passkeys via security keys or cross-device transport (e.g., phone),
+      // so we mark as supported but show an advisory.
       if (typeof statics.isUserVerifyingPlatformAuthenticatorAvailable !== "function") {
-        // The interface exists but not the capability check — too old/partial
-        // an implementation to trust with a real ceremony.
-        markUnsupported("no-webauthn");
+        if (!cancelled) {
+          setCapability("supported");
+          setAdvisory("no-platform-authenticator");
+        }
         return;
       }
 
@@ -247,12 +259,20 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
         const available = await statics.isUserVerifyingPlatformAuthenticatorAvailable();
         if (cancelled) return;
         if (!available) {
-          markUnsupported("no-platform-authenticator");
+          // No platform authenticator, but still support via security keys or phone.
+          setCapability("supported");
+          setAdvisory("no-platform-authenticator");
           return;
         }
+        // Has a platform authenticator — fully supported, no advisory needed.
         setCapability("supported");
       } catch {
-        markUnsupported("no-platform-authenticator");
+        // Error probing the platform authenticator. Assume we can still do
+        // WebAuthn via other means (security keys, cross-device).
+        if (!cancelled) {
+          setCapability("supported");
+          setAdvisory("no-platform-authenticator");
+        }
       }
     }
 
@@ -380,9 +400,22 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
 
   return (
     <div className="flex flex-col gap-5">
+      {advisory && (
+        <div className="rounded-md border border-slate-700 bg-slate-800 p-3">
+          <p className="text-xs text-slate-300">
+            {ADVISORY_MESSAGES[advisory]}
+          </p>
+        </div>
+      )}
       <div className="flex flex-col gap-2">
+        {/*
+          Deliberately not "this browser's platform authenticator": the panel
+          now also runs for devices that have none, where the browser offers a
+          security key or a nearby phone instead. Naming the platform one would
+          contradict the advisory shown directly above.
+        */}
         <p className="text-xs text-slate-400">
-          Registers a passkey with this browser&apos;s platform authenticator.
+          Registers a passkey with whichever authenticator this browser offers.
         </p>
         <div>
           <button

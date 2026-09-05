@@ -217,8 +217,16 @@ export default function Playground() {
 
   if (phase === "loading") {
     return (
-      <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
+      <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8" aria-busy="true" aria-label="Loading playground">
         <Header />
+        <div className="flex flex-col gap-3">
+          <div className="h-10 bg-slate-800/60 rounded animate-pulse" />
+          <div className="h-6 bg-slate-800/60 rounded animate-pulse w-3/4" />
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="h-5 bg-slate-800/60 rounded animate-pulse w-1/2" />
+          <div className="h-5 bg-slate-800/60 rounded animate-pulse w-2/3" />
+        </div>
         <p className="text-sm text-slate-500">
           Loading playground… The API runs on a free tier and can take up to a minute to wake
           up on its first request.
@@ -283,11 +291,16 @@ export default function Playground() {
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
       <Header />
-      {banner && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300">
-          {banner}
-        </div>
-      )}
+      <div
+        aria-live="polite"
+        className="min-h-10"
+      >
+        {banner && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300">
+            {banner}
+          </div>
+        )}
+      </div>
       <SessionBar
         session={session}
         onReset={() => void handleReset()}

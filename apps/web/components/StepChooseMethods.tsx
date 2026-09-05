@@ -42,7 +42,6 @@ export default function StepChooseMethods({
         disabled={false}
         onChange={onChange}
         showActionPanels={false}
-        showTryButton={false}
       />
 
       <section className="flex flex-col gap-3">

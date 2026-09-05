@@ -167,6 +167,12 @@ function describe(error: ApiError): string {
       // Handled by the caller, which switches the whole page into explainer
       // mode rather than reporting it here.
       return "Live flows are switched off right now.";
+    case "state_unavailable":
+      // Distinct from `demo_disabled` on purpose: the demo is not switched
+      // off, the store behind it is unreachable. Saying "temporarily" is the
+      // honest difference — this one is worth retrying, and it is an outage
+      // rather than an intentional state.
+      return "The playground's state store is temporarily unreachable, so the project could not be generated. Try again in a moment.";
     case "http_error":
       return `The download failed (${error.status}). ${error.detail}`;
   }

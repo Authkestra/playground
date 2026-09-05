@@ -5,11 +5,6 @@ import type { ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-typ
 import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 
-export interface TryResultState {
-  outcome: string;
-  detail: string;
-}
-
 interface ActionPanelProps {
   scenarioId: string;
   onDemoDisabled: () => void;
@@ -31,14 +26,9 @@ interface Props {
   disabled: boolean;
   disabledReason?: string;
   onChange: (id: string, value: ControlValue) => void;
-  onTry?: (id: string) => void;
-  tryingIds?: Set<string>;
-  tryResults?: Record<string, TryResultState>;
   onDemoDisabled?: () => void;
   /** Show the per-scenario ceremony UI (TOTP/passkeys) inline. Defaults to true. */
   showActionPanels?: boolean;
-  /** Show the debug "Try it" button/result. Defaults to true. */
-  showTryButton?: boolean;
 }
 
 /** Whether a control's current value counts as "the visitor turned this on". */
@@ -67,12 +57,8 @@ export default function ScenarioPanel({
   disabled,
   disabledReason,
   onChange,
-  onTry,
-  tryingIds = new Set(),
-  tryResults = {},
   onDemoDisabled,
   showActionPanels = true,
-  showTryButton = true,
 }: Props) {
   if (scenarios.length === 0) {
     return <p className="text-sm text-slate-500">No scenarios published yet.</p>;
@@ -91,7 +77,6 @@ export default function ScenarioPanel({
         const isPending = pendingIds.has(scenario.id);
         const controlDisabled =
           disabled || !scenario.available || unmetDeps.length > 0 || isPending;
-        const tryResult = tryResults[scenario.id];
         const actions = scenario.actions ?? [];
         const ActionPanel =
           showActionPanels && actions.length > 0 ? ACTION_PANELS[scenario.id] : undefined;
@@ -111,14 +96,22 @@ export default function ScenarioPanel({
               <div>
                 <h3 className="font-medium text-slate-100">{scenario.name}</h3>
                 <p className="text-sm text-slate-400">{scenario.summary}</p>
-                {!scenario.available && (
+                {/*
+                  Not gated on `!available`: the two states are independent.
+                  The kill switch clears `available`, but a scenario can also be
+                  unusable while still "available" — OAuth with no provider
+                  credentials is exactly that, and it is the live case today.
+                  Gating on `available` would leave that one silently unexplained,
+                  which is the dead end this field exists to prevent.
+                */}
+                {scenario.unavailable_reason && (
                   <p className="mt-1 text-xs text-amber-400">
-                    Disabled by kill switch.
+                    {scenario.unavailable_reason}
                   </p>
                 )}
                 {scenario.available && unmetDeps.length > 0 && (
                   <p className="mt-1 text-xs text-amber-400">
-                    Requires: {unmetDeps.join(", ")}
+                    Requires: {unmetDeps.map((id) => scenarios.find((s) => s.id === id)?.name ?? id).join(", ")}
                   </p>
                 )}
               </div>
@@ -131,28 +124,6 @@ export default function ScenarioPanel({
                 />
               </div>
             </div>
-
-            {showTryButton && (
-              <div className="mt-3 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => onTry?.(scenario.id)}
-                  disabled={disabled || !scenario.available || tryingIds.has(scenario.id)}
-                  className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {tryingIds.has(scenario.id) ? "Trying…" : "Try it"}
-                </button>
-                {tryResult && (
-                  <span
-                    className={`text-xs ${
-                      tryResult.outcome === "ok" ? "text-emerald-400" : "text-amber-400"
-                    }`}
-                  >
-                    {tryResult.detail}
-                  </span>
-                )}
-              </div>
-            )}
 
             {showActionPanel && ActionPanel && (
               <div className="mt-4 border-t border-slate-800 pt-4">
@@ -214,6 +185,9 @@ function ScenarioControl({
 
   if (control.kind === "select_one") {
     const selected = value?.kind === "select_one" ? value.selected : null;
+    if (control.options.length === 0) {
+      return <EmptyControlNote scenario={scenario} />;
+    }
     return (
       <div className="flex flex-col gap-1">
         {control.options.map((option) => (
@@ -237,6 +211,9 @@ function ScenarioControl({
 
   // select_many
   const selected = value?.kind === "select_many" ? value.selected : [];
+  if (control.options.length === 0) {
+    return <EmptyControlNote scenario={scenario} />;
+  }
   return (
     <div className="flex flex-col gap-1">
       {control.options.map((option) => {
@@ -262,5 +239,24 @@ function ScenarioControl({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Stands in for a control that has nothing to offer — an OAuth picker on a
+ * deployment with no provider credentials, say. Without it the card renders a
+ * heading and summary above an empty box, which reads as broken rather than as
+ * a property of this deployment.
+ *
+ * The `unavailable_reason` itself is already shown in amber above the control,
+ * so this only accounts for the empty space rather than repeating it.
+ */
+function EmptyControlNote({ scenario }: { scenario: ScenarioSpec }) {
+  return (
+    <p className="text-xs text-slate-500">
+      {scenario.unavailable_reason
+        ? "Nothing to choose from here."
+        : "Nothing to choose from on this deployment."}
+    </p>
   );
 }

@@ -6,8 +6,6 @@ import type {
   FlowEvent,
   HealthResponse,
   ScenarioSpec,
-  TryBody,
-  TryResult,
 } from "@playground/api-types";
 
 export const API_BASE =
@@ -16,6 +14,7 @@ export const API_BASE =
 export type ApiError =
   | { kind: "unavailable" } // network failure, DNS error, connection refused, ...
   | { kind: "demo_disabled" } // 503 { error: "demo_disabled" }
+  | { kind: "state_unavailable"; detail: string } // 503 { error: "state_unavailable" }
   | { kind: "rate_limited"; detail: string } // 429 { error: "rate_limited", detail }
   | { kind: "http_error"; status: number; detail: string };
 
@@ -42,27 +41,9 @@ async function request<T>(
     return { ok: false, error: { kind: "unavailable" } };
   }
 
-  if (res.status === 503) {
-    return { ok: false, error: { kind: "demo_disabled" } };
-  }
-
-  if (res.status === 429) {
-    const body = await safeJson(res);
-    const detail =
-      typeof body?.detail === "string"
-        ? body.detail
-        : "You're sending requests a bit too fast. Please slow down and try again shortly.";
-    return { ok: false, error: { kind: "rate_limited", detail } };
-  }
-
   if (!res.ok) {
-    const body = await safeJson(res);
-    const detail =
-      (typeof body?.detail === "string" && body.detail) ||
-      (typeof body?.error === "string" && body.error) ||
-      res.statusText ||
-      "Request failed";
-    return { ok: false, error: { kind: "http_error", status: res.status, detail } };
+    const error = await handleErrorResponse(res);
+    return { ok: false, error };
   }
 
   const data = await safeJson(res);
@@ -82,6 +63,50 @@ async function safeJson(res: Response): Promise<any | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Handle non-ok HTTP responses: check status codes and parse response bodies
+ * to produce an ApiError. This factors out the shared 503/429/!ok logic that
+ * would otherwise be duplicated across request handlers.
+ */
+async function handleErrorResponse(res: Response): Promise<ApiError> {
+  const body = await safeJson(res);
+
+  // 503 can mean two different things: the demo is switched off, or the state
+  // backend is unreachable. Read the error field to discriminate.
+  if (res.status === 503) {
+    const error = typeof body?.error === "string" ? body.error : "";
+    if (error === "state_unavailable") {
+      const detail =
+        typeof body?.detail === "string"
+          ? body.detail
+          : "The playground's state store is unreachable. This is temporary.";
+      return { kind: "state_unavailable", detail };
+    }
+    if (error === "demo_disabled") {
+      return { kind: "demo_disabled" };
+    }
+    // Unrecognized 503 (neither demo_disabled nor state_unavailable) falls
+    // through to be treated as a generic http_error.
+  }
+
+  // 429: rate limited.
+  if (res.status === 429) {
+    const detail =
+      typeof body?.detail === "string"
+        ? body.detail
+        : "You're sending requests a bit too fast. Please slow down and try again shortly.";
+    return { kind: "rate_limited", detail };
+  }
+
+  // Other HTTP errors (4xx, 5xx).
+  const detail =
+    (typeof body?.detail === "string" && body.detail) ||
+    (typeof body?.error === "string" && body.error) ||
+    res.statusText ||
+    "Request failed";
+  return { kind: "http_error", status: res.status, detail };
 }
 
 export function getHealth(): Promise<ApiResult<HealthResponse>> {
@@ -116,20 +141,6 @@ export function configureScenario(
     `/api/scenarios/${encodeURIComponent(id)}/configure`,
     { method: "POST", body: JSON.stringify(body) },
   );
-}
-
-export function getScenarioDiff(id: string): Promise<ApiResult<ConfigDiff>> {
-  return request<ConfigDiff>(`/api/scenarios/${encodeURIComponent(id)}/diff`);
-}
-
-export function tryScenario(
-  id: string,
-  body: TryBody = {},
-): Promise<ApiResult<TryResult>> {
-  return request<TryResult>(`/api/scenarios/${encodeURIComponent(id)}/try`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
 }
 
 /**
@@ -167,27 +178,9 @@ export async function downloadStarterKit(): Promise<ApiResult<StarterKitDownload
     return { ok: false, error: { kind: "unavailable" } };
   }
 
-  if (res.status === 503) {
-    return { ok: false, error: { kind: "demo_disabled" } };
-  }
-
-  if (res.status === 429) {
-    const body = await safeJson(res);
-    const detail =
-      typeof body?.detail === "string"
-        ? body.detail
-        : "You're sending requests a bit too fast. Please slow down and try again shortly.";
-    return { ok: false, error: { kind: "rate_limited", detail } };
-  }
-
   if (!res.ok) {
-    const body = await safeJson(res);
-    const detail =
-      (typeof body?.detail === "string" && body.detail) ||
-      (typeof body?.error === "string" && body.error) ||
-      res.statusText ||
-      "The download failed";
-    return { ok: false, error: { kind: "http_error", status: res.status, detail } };
+    const error = await handleErrorResponse(res);
+    return { ok: false, error };
   }
 
   return { ok: true, data: { blob: await res.blob(), filename: filenameFrom(res) } };
