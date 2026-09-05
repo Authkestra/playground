@@ -520,20 +520,51 @@ async fn a_failed_callback_is_narrated_in_the_flow_log() {
 /// nonce for a provider that cannot echo one, OAuth would break for every
 /// visitor again, and this is what would say so.
 #[tokio::test]
-async fn the_shipped_providers_do_not_demand_a_nonce_back() {
+async fn no_shipped_provider_demands_a_nonce_back() {
     use authkestra_engine::OAuthProvider;
 
-    let github = authkestra_providers::github::GithubProvider::new(
-        "id".to_string(),
-        "secret".to_string(),
-        "http://localhost/auth/callback/github".to_string(),
-    );
+    let redirect = "http://localhost/auth/callback/x".to_string();
+    let id = "id".to_string();
+    let secret = "secret".to_string();
 
-    assert!(
-        !github.validates_nonce(),
-        "a plain OAuth2 provider that claims to validate a nonce will be held \
-         to one it can never return, and every callback fails"
-    );
+    // Every provider this service constructs, not just one. They inherit the
+    // trait default today; a provider that started overriding it would break
+    // only its own sign-in, which is exactly the kind of partial outage that
+    // takes a while to notice.
+    let providers: Vec<(&str, bool)> = vec![
+        (
+            "github",
+            authkestra_providers::github::GithubProvider::new(
+                id.clone(),
+                secret.clone(),
+                redirect.clone(),
+            )
+            .validates_nonce(),
+        ),
+        (
+            "google",
+            authkestra_providers::google::GoogleProvider::new(
+                id.clone(),
+                secret.clone(),
+                redirect.clone(),
+            )
+            .validates_nonce(),
+        ),
+        (
+            "discord",
+            authkestra_providers::discord::DiscordProvider::new(id, secret, redirect)
+                .validates_nonce(),
+        ),
+    ];
+
+    for (name, validates) in providers {
+        assert!(
+            !validates,
+            "{name} claims to validate a nonce, but the shipped providers build \
+             their identity with no `nonce` attribute — the engine would hold it \
+             to one it can never return and every {name} callback would fail"
+        );
+    }
 }
 
 /// The nonce is allowed to be there now. What must survive is everything that
