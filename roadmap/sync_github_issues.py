@@ -126,11 +126,14 @@ def main():
         print(f"{tag}milest. + {title}")
 
     # ---- issues ----
+    # Read the existing titles even on a dry run. Skipping this made the
+    # preview claim every issue was new, which is the one thing a dry run
+    # exists to tell you the truth about — and acting on it would have opened
+    # 48 duplicates. Reading is not a write.
     existing_titles = set()
-    if not dry:
-        for i in paged(f"{base}/issues", token, params={"state": "all"}):
-            if "pull_request" not in i:
-                existing_titles.add(i["title"])
+    for i in paged(f"{base}/issues", token, params={"state": "all"}):
+        if "pull_request" not in i:
+            existing_titles.add(i["title"])
 
     created = skipped = 0
     for issue in data["issues"]:

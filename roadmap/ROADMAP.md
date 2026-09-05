@@ -8,13 +8,13 @@
 |---|---|---|---|
 | `P0` | Foundations | 7 | Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet. |
 | `P1` | Playground core | 7 | The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows. |
-| `P2` | Scenarios | 6 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
+| `P2` | Scenarios | 7 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
-| `P4` | Downloadable starter kit | 8 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
+| `P4` | Downloadable starter kit | 10 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
 | `P6` | Post-launch / wizard path | 4 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**45 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**48 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -369,6 +369,30 @@ Shipped as a single `CaptchaVerifier` with a `CaptchaProvider` enum (`Turnstile`
 ### Acceptance
 Each of the three providers verifies a real token against its live siteverify endpoint, and a failed verification is demonstrable.
 
+#### Resource-server scenario (validate a token on a protected route)
+
+`area:scenario` `area:api` `type:feature`
+
+`authkestra-resource` ships in 0.8.x and the playground never mentions it exists. Being able to *validate* tokens — not just issue them — is a capability most auth libraries leave to the application, and the playground currently undersells it by omission.
+
+It was not left out deliberately: P2 was framed as "login methods", and a resource server is a server role rather than a way to sign in, so it never got a slot. There is no ADR recording the exclusion.
+
+It demos well, which is why this one is worth doing before the OP server: issue a token, call a protected route with it, call the same route without it, watch the 401. That is a complete story with no second application required.
+
+### Tasks
+- [ ] Toggle that mounts a protected route on the demo API
+- [ ] Show the visitor their current token, and let them call the route with and without it
+- [ ] Surface the failure modes distinctly — absent, malformed, expired, wrong audience — rather than a flat 401
+- [ ] Flow-log entries for each outcome, as the other scenarios have
+- [ ] Diff naming `authkestra-resource` and the adapter's `resource` feature
+- [ ] Starter-kit fragment so a downloaded project has the protected route too
+
+### Acceptance
+A visitor can call a protected route with a valid token and get through, and can see each distinct rejection reason without guessing.
+
+### Not in scope
+The OP server (`authkestra-op`). Demonstrating it properly needs a client application to complete a flow against, so it belongs on its own page rather than as a step-1 toggle. Worth a separate issue once this lands.
+
 #### Scenario conformance tests
 
 `area:scenario` `type:test`
@@ -658,6 +682,51 @@ The implicit promise of the download is "this is what you just used". If they di
 
 ### Acceptance
 Each scenario passes the same behavioral assertions in both places, or the difference is explicitly documented.
+
+#### Emit passkey and TOTP HTTP endpoints in the generated project
+
+`area:starter-kit` `area:api` `type:feature`
+
+The generator wires passkeys and TOTP into the engine builder but emits no HTTP surface for them, so a downloaded project can verify a credential and has no way to receive one. The visitor has to write the ceremony handlers themselves, which is the hardest part and the part the playground already solved.
+
+This is a framework gap the kit can paper over: the adapters wire only three routes — `/auth/login/{provider}`, `/auth/callback/{provider}`, `/auth/logout` — all browser redirects. Passkeys and TOTP have no wired endpoints at all, so every application writes its own. The playground's own handlers are the reference.
+
+### Tasks
+- [ ] `KitFragment::routes`/`handlers` populated for passkeys: registration start/finish, authentication start/finish
+- [ ] Same for TOTP: provision (returning the `otpauth://` URI) and verify
+- [ ] Ceremony state stored the way the fragment's chosen store implies, not invented per handler
+- [ ] Handlers return the same JSON shapes the playground uses, so the two cannot drift
+- [ ] Extend the #32 compile matrix to assert the routes are present, not just that it builds
+
+### Acceptance
+A downloaded project with passkeys or TOTP selected can complete a full enrolment and verification against its own endpoints, with no handler written by hand.
+
+### Note
+Prerequisite for the OpenAPI/TS-client issue: there is nothing to describe or call until these exist.
+
+#### Opt-in OpenAPI spec and typed TS client in the generated project
+
+`area:starter-kit` `area:docs` `type:feature`
+
+A downloaded project hands you a Rust backend and leaves the frontend entirely to you — hand-written `fetch` calls against endpoints whose shapes you have to read out of the source.
+
+Deliberately scoped to this repository rather than the framework. authkestra's own wired surface is three browser redirects with no JSON shapes worth generating, and where it does have a JSON API (the OP) OIDC discovery already describes it. The shapes worth typing are the ceremony endpoints the *generator* emits, so the generator is the right place to describe them.
+
+**Opt-in, not default.** A visitor who wants a Rust service should not be handed a TypeScript toolchain and an extra dependency they did not ask for.
+
+### Tasks
+- [ ] `utoipa` annotations on the generated ceremony handlers, behind a generated Cargo feature so the dependency is absent when unused
+- [ ] Serve the spec from the generated project, and say where in the README
+- [ ] Emit a small typed TS client for the passkey and TOTP endpoints — hand-written template, not a generator dependency
+- [ ] The client covers the browser half honestly: `navigator.credentials` calls need base64url encode/decode around the JSON, which is where most passkey integrations go wrong
+- [ ] Surface the choice on step 3 (download) rather than step 1: it is a property of the kit, not an authentication method, and putting it among the login toggles would misrepresent both
+- [ ] Compile matrix covers the opt-in on and off
+
+### Acceptance
+A visitor who opts in gets a project serving its own OpenAPI spec and a TS client that completes a passkey ceremony without hand-written encoding. A visitor who does not opt in gets no `utoipa` in their dependency tree.
+
+### Depends on
+The ceremony endpoints issue — there is nothing to describe until those exist.
 
 #### Ask for a GitHub star on download, without gating on it
 
