@@ -58,7 +58,7 @@ interface AuthenticateStartResponse {
  * we translate the alphabet back and restore padding to a multiple of 4
  * before decoding.
  */
-function base64UrlToBuffer(value: string): Uint8Array<ArrayBuffer> {
+export function base64UrlToBuffer(value: string): Uint8Array<ArrayBuffer> {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
   const padLength = (4 - (base64.length % 4)) % 4;
   const padded = base64 + "=".repeat(padLength);
@@ -72,7 +72,7 @@ function base64UrlToBuffer(value: string): Uint8Array<ArrayBuffer> {
 }
 
 /** ArrayBuffer -> base64url (see base64UrlToBuffer for the alphabet note). */
-function bufferToBase64Url(buffer: ArrayBuffer): string {
+export function bufferToBase64Url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {

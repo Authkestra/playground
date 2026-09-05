@@ -181,5 +181,8 @@ jobs:
       - name: Lint
         run: pnpm --filter ./apps/web run lint
 
+      - name: Test
+        run: pnpm --filter ./apps/web run test
+
       - name: Build
         run: pnpm --filter ./apps/web run build

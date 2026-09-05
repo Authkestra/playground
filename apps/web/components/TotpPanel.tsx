@@ -13,7 +13,7 @@ interface Props {
   onAction?: () => void;
 }
 
-function normalizeCode(raw: string): string {
+export function normalizeCode(raw: string): string {
   // Accept spaces/dashes as visual separators (e.g. "123 456"), strip them,
   // then keep only digits and cap at 6 (TOTP codes are 6 digits).
   return raw.replace(/[\s-]/g, "").replace(/\D/g, "").slice(0, 6);
