@@ -104,13 +104,13 @@ async fn resolve_session(state: &AppState, cookies: &Cookies) -> Result<DemoSess
 /// Attach the kill switch's current view of availability to each spec.
 /// When the kill switch has disabled the scenario, the reason is that live flows
 /// are switched off; otherwise fall through to the scenario's unavailable_reason.
-fn specs_for(state: &AppState) -> Vec<ScenarioSpec> {
+fn specs_for(state: &AppState, switch: &crate::killswitch::KillSwitchState) -> Vec<ScenarioSpec> {
     state
         .sessions
         .registry()
         .iter()
         .map(|s| {
-            let unavailable_reason = if state.kill_switch.scenario_enabled(s.id()) {
+            let unavailable_reason = if switch.scenario_enabled(s.id()) {
                 s.unavailable_reason()
             } else {
                 Some("Live flows are switched off.".to_string())
@@ -121,7 +121,7 @@ fn specs_for(state: &AppState) -> Vec<ScenarioSpec> {
                 summary: s.summary().to_string(),
                 control: s.control(),
                 depends_on: s.depends_on(),
-                available: state.kill_switch.scenario_enabled(s.id()),
+                available: switch.scenario_enabled(s.id()),
                 actions: s.actions().iter().map(|a| a.to_string()).collect(),
                 unavailable_reason,
             }
@@ -133,10 +133,11 @@ fn specs_for(state: &AppState) -> Vec<ScenarioSpec> {
 
 #[tracing::instrument(skip_all)]
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let switch = state.kill_switch.snapshot().await;
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        demo_enabled: state.kill_switch.demo_enabled(),
+        demo_enabled: switch.demo_enabled(),
     })
 }
 
@@ -174,7 +175,8 @@ async fn session_events(
 
 #[tracing::instrument(skip_all)]
 async fn list_scenarios(State(state): State<AppState>) -> Json<Vec<ScenarioSpec>> {
-    Json(specs_for(&state))
+    let switch = state.kill_switch.snapshot().await;
+    Json(specs_for(&state, &switch))
 }
 
 #[tracing::instrument(skip_all, fields(scenario = %id))]
@@ -239,7 +241,8 @@ async fn scenario_action(
 
     // Ceremonies create credentials and can reach third parties, so they are
     // gated by the kill switch exactly like `try`.
-    if !state.kill_switch.scenario_enabled(&id) {
+    let switch = state.kill_switch.snapshot().await;
+    if !switch.scenario_enabled(&id) {
         return Err(ApiError::DemoDisabled);
     }
 
@@ -291,18 +294,30 @@ async fn admin_kill_switch(
 ) -> Result<impl IntoResponse, ApiError> {
     authorize_admin(&state, &headers)?;
 
+    // Read the current state, apply the requested changes, and persist.
+    let mut new_state = state.kill_switch.snapshot().await;
+
     if let Some(enabled) = body.demo_enabled {
-        state.kill_switch.set_demo_enabled(enabled);
+        new_state.demo_enabled = enabled;
+        tracing::warn!(enabled, "demo kill switch flipped");
     }
     for (id, enabled) in body.scenarios {
-        state.kill_switch.set_scenario_enabled(&id, enabled);
+        if enabled {
+            new_state.disabled_scenarios.remove(&id);
+        } else {
+            new_state.disabled_scenarios.insert(id.clone());
+        }
+        tracing::warn!(scenario = id, enabled, "scenario kill switch flipped");
     }
+
+    // Persist the new state to the store (and update the cache).
+    state.kill_switch.set_state(new_state.clone()).await;
 
     Ok((
         StatusCode::OK,
         Json(serde_json::json!({
-            "demo_enabled": state.kill_switch.demo_enabled(),
-            "disabled_scenarios": state.kill_switch.disabled_scenarios(),
+            "demo_enabled": new_state.demo_enabled(),
+            "disabled_scenarios": new_state.disabled_scenarios(),
         })),
     ))
 }

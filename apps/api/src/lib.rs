@@ -307,7 +307,6 @@ pub enum StateError {
 /// Build application state from the environment.
 pub async fn state_from_env() -> Result<AppState, StateError> {
     let settings = Arc::new(Settings::from_env());
-    let kill_switch = Arc::new(KillSwitch::from_env());
 
     // The OAuth control must only offer providers this deployment can actually
     // complete, so credentials are read before the registry is built.
@@ -315,6 +314,11 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
     let registry = ScenarioRegistry::with_providers(provider_credentials.configured());
 
     let kv = open_state_store().await?;
+
+    // Initialize the kill switch with the store, so its state is durable.
+    // The environment variables seed it only on the first boot; after that,
+    // the stored state is authoritative and survives restarts.
+    let kill_switch = Arc::new(KillSwitch::from_env(Some(kv.clone())));
 
     // Credentials and the flow log share the session's lifetime, so they expire
     // with it. That is the entire cleanup story — nothing runs on a timer.

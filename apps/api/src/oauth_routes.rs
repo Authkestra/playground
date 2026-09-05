@@ -93,7 +93,8 @@ async fn login(
     Query(query): Query<LoginQuery>,
     cookies: Cookies,
 ) -> Result<Response, ApiError> {
-    if !state.kill_switch.scenario_enabled("oauth") {
+    let switch = state.kill_switch.snapshot().await;
+    if !switch.scenario_enabled("oauth") {
         return Err(ApiError::DemoDisabled);
     }
 
@@ -180,7 +181,8 @@ async fn callback(
     // Check the kill switch: if OAuth is disabled mid-flow, redirect back rather
     // than completing the round trip. Same gate as the login step, so flipping it
     // mid-flow does not silently complete an in-flight callback.
-    if !state.kill_switch.scenario_enabled("oauth") {
+    let switch = state.kill_switch.snapshot().await;
+    if !switch.scenario_enabled("oauth") {
         return result_redirect(
             &state,
             &format!(

@@ -175,9 +175,12 @@ async fn login_for_an_unconfigured_provider_is_refused_clearly() {
 
 #[tokio::test]
 async fn the_kill_switch_stops_oauth_logins() {
+    use api::killswitch::KillSwitchState;
+
     let mut st = state(&ALL);
-    let ks = KillSwitch::default();
-    ks.set_scenario_enabled("oauth", false);
+    let mut switch_state = KillSwitchState::default();
+    switch_state.disabled_scenarios.insert("oauth".to_string());
+    let ks = KillSwitch::new(None, switch_state);
     st.kill_switch = Arc::new(ks);
 
     let resp = api::build_router(st)

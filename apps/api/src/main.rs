@@ -27,9 +27,13 @@ async fn main() {
         Err(e) => panic!("failed to initialise application state: {e}"),
     };
 
+    // Snapshot the kill switch state for the startup log. The snapshot reads
+    // from the store, establishing the initial state and seeding it if needed.
+    let switch = state.kill_switch.snapshot().await;
+
     tracing::info!(
         scenarios = ?state.sessions.registry().ids(),
-        demo_enabled = state.kill_switch.demo_enabled(),
+        demo_enabled = switch.demo_enabled(),
         "starting playground api"
     );
 

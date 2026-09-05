@@ -245,9 +245,14 @@ async fn ceremonies_are_refused_until_the_scenario_is_enabled() {
 
 #[tokio::test]
 async fn the_kill_switch_stops_passkey_ceremonies() {
+    use api::killswitch::KillSwitchState;
+
     let mut st = state().await;
-    let ks = KillSwitch::default();
-    ks.set_scenario_enabled("passkeys", false);
+    let mut switch_state = KillSwitchState::default();
+    switch_state
+        .disabled_scenarios
+        .insert("passkeys".to_string());
+    let ks = KillSwitch::new(None, switch_state);
     st.kill_switch = Arc::new(ks);
     let app = api::build_router(st);
 

@@ -1,7 +1,7 @@
 //! Scenario conformance harness (roadmap P2).
 //!
-//! Every scenario exposes the same contract — `configure`, `diff`, `try`, and
-//! optionally `action` — so it is tested uniformly rather than ad hoc. Each
+//! Every scenario exposes the same contract — `configure`, and optionally
+//! `action` — so it is tested uniformly rather than ad hoc. Each
 //! scenario-specific test file covers that scenario's *behaviour*; this file
 //! covers the properties all of them must share.
 //!
@@ -469,9 +469,14 @@ async fn conflicting_configurations_do_not_interfere() {
 /// still be readable, so listing and configuring keep working.
 #[tokio::test]
 async fn the_kill_switch_stops_ceremonies_uniformly() {
+    use api::killswitch::KillSwitchState;
+
     let mut st = state().await;
-    let ks = KillSwitch::default();
-    ks.set_demo_enabled(false);
+    let switch_state = KillSwitchState {
+        demo_enabled: false,
+        ..Default::default()
+    };
+    let ks = KillSwitch::new(None, switch_state);
     st.kill_switch = Arc::new(ks);
     let app = api::build_router(st);
 

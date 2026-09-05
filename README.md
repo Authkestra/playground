@@ -11,7 +11,7 @@ live, download a working Rust project.
 > the adapters — lives at [`marcjazz/authkestra`](https://github.com/marcjazz/authkestra)
 > and has its own roadmap. This repo is only the playground that demonstrates it
 > and the generator that emits starter projects. Everything here is scoped to
-> capabilities already shipped in authkestra 0.8.0.
+> capabilities already shipped in authkestra 0.8.1.
 
 ## Status
 
@@ -76,8 +76,8 @@ scenarios simply report themselves as not configured.
 | `COOKIE_SECURE` | `false` | Mark the session cookie `Secure` (set in production) |
 | `COOKIE_SAMESITE` | `none` when secure, else `lax` | **Load-bearing for a cross-site deployment.** `Lax` cookies are not sent on cross-site fetches, so if the frontend and API are on different registrable domains the session silently never persists. `None` requires `Secure`. Once both share a domain (`play.` and `api.play.`), `lax` is correct and stricter. |
 | `SESSION_TTL_HOURS` | `12` | Demo session lifetime |
-| `DEMO_ENABLED` | `true` | Global kill switch for live flows |
-| `DEMO_DISABLED_SCENARIOS` | — | Comma-separated scenario ids to disable |
+| `DEMO_ENABLED` | `true` | Seed value for the global kill switch. **Initial value only** — on first boot, this value is written to the store and then ignored on restarts. The stored state is authoritative and survives restarts, making the switch durable across deployments. Changes via `POST /admin/kill-switch` are persisted. |
+| `DEMO_DISABLED_SCENARIOS` | — | Seed value for per-scenario disables (comma-separated scenario ids). **Initial value only** — like `DEMO_ENABLED`, this seeds the store on first boot and is then ignored on subsequent restarts. |
 | `ADMIN_TOKEN` | — | Enables `POST /admin/kill-switch`. **Unset means the endpoint is not mounted at all.** |
 | `OAUTH_STATE_KEY` | — | ≥32 bytes; keeps encrypted OAuth state valid across restarts |
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base for provider redirect URIs |
@@ -167,9 +167,15 @@ door:
   the leftmost entry — the obvious choice, and what `SmartIpKeyExtractor` does —
   is a bypass: proxies *append*, so the leftmost value is whatever the client
   sent. Set this correctly whenever the proxy in front changes.
-- **Kill switch** — `DEMO_ENABLED` plus per-scenario disable, flippable at
-  runtime through `POST /admin/kill-switch` without a redeploy. With flows off
-  the site degrades to explainer-only mode rather than looking broken.
+- **Kill switch** — `DEMO_ENABLED` plus per-scenario disable, durable and
+  flippable at runtime through `POST /admin/kill-switch` without a redeploy. The
+  environment variables seed the state on first boot only; the stored state is
+  authoritative and survives restarts. A flip takes up to 5 seconds to be seen
+  everywhere (the in-process cache TTL), which is an acceptable price for an
+  emergency stop that happens maybe twice a year. With flows off the site
+  degrades to explainer-only mode rather than looking broken. If Redis becomes
+  unreachable, the switch falls back to the last known cached value and never
+  fails open.
 
 ## Deployment
 

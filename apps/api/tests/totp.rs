@@ -251,9 +251,12 @@ async fn an_unknown_action_is_a_404() {
 
 #[tokio::test]
 async fn the_kill_switch_stops_ceremonies() {
+    use api::killswitch::KillSwitchState;
+
     let mut st = state().await;
-    let ks = KillSwitch::default();
-    ks.set_scenario_enabled("totp", false);
+    let mut switch_state = KillSwitchState::default();
+    switch_state.disabled_scenarios.insert("totp".to_string());
+    let ks = KillSwitch::new(None, switch_state);
     st.kill_switch = Arc::new(ks);
     let app = api::build_router(st);
 

@@ -311,8 +311,13 @@ async fn an_unknown_option_is_rejected() {
 
 #[tokio::test]
 async fn the_kill_switch_leaves_the_site_readable() {
-    let ks = KillSwitch::default();
-    ks.set_demo_enabled(false);
+    use api::killswitch::KillSwitchState;
+
+    let switch_state = KillSwitchState {
+        demo_enabled: false,
+        ..Default::default()
+    };
+    let ks = KillSwitch::new(None, switch_state);
     let app = app(ks, None).await;
 
     // Explainer-only mode still needs real content, so listing scenarios must
@@ -333,8 +338,13 @@ async fn the_kill_switch_leaves_the_site_readable() {
 
 #[tokio::test]
 async fn one_scenario_can_be_disabled_without_touching_the_others() {
-    let ks = KillSwitch::default();
-    ks.set_scenario_enabled("dummy_toggle", false);
+    use api::killswitch::KillSwitchState;
+
+    let mut switch_state = KillSwitchState::default();
+    switch_state
+        .disabled_scenarios
+        .insert("dummy_toggle".to_string());
+    let ks = KillSwitch::new(None, switch_state);
     let app = app(ks, None).await;
 
     let specs = body_json(
@@ -413,7 +423,8 @@ async fn admin_can_flip_the_switch_at_runtime() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // No redeploy: the very next request already sees the kill switch.
-    assert!(!state.kill_switch.demo_enabled());
+    let snap = state.kill_switch.snapshot().await;
+    assert!(!snap.demo_enabled());
 }
 
 // -------------------------------------------------------------- rate limiting
@@ -801,4 +812,129 @@ async fn the_download_is_rate_limited() {
     }
 
     assert!(limited, "the download endpoint is not rate limited");
+}
+
+// --------------------------------------------------------- kill switch durability
+
+/// Prove that kill switch state survives a restart.
+///
+/// This is the core durability requirement: flip the switch off, then simulate
+/// a cold start by building a fresh AppState with the same store, and verify
+/// the switch is still off. Without this, the service would silently reset to
+/// DEMO_ENABLED on restart (as it did before moving state to the store).
+#[tokio::test]
+async fn kill_switch_state_survives_a_cold_start() {
+    use api::killswitch::KillSwitchState;
+
+    // Build an initial state with a shared store.
+    let shared_store = api::testing::shared_store();
+    let init_ks = api::testing::test_state_with_shared_store(
+        shared_store.clone(),
+        KillSwitchState::default(),
+    );
+
+    // Check the initial state: should be enabled (the seed value).
+    let snap = init_ks.kill_switch.snapshot().await;
+    assert!(
+        snap.demo_enabled(),
+        "fresh state should seed with DEMO_ENABLED=true from env"
+    );
+
+    // Flip it off by calling set_state directly on the kill switch.
+    let off_state = KillSwitchState {
+        demo_enabled: false,
+        ..Default::default()
+    };
+    init_ks.kill_switch.set_state(off_state).await;
+
+    // Build a fresh state from the same store (simulating a cold start).
+    // The kill switch will read from the store and should find it still off.
+    let restarted_ks =
+        api::testing::test_state_with_shared_store(shared_store, KillSwitchState::default());
+
+    // Now the switch should still be off, because the store persisted it.
+    let snap_after_restart = restarted_ks.kill_switch.snapshot().await;
+    assert!(
+        !snap_after_restart.demo_enabled(),
+        "kill switch state should survive a cold start; was resurrected from environment seed"
+    );
+}
+
+/// Prove that per-scenario disables also survive restarts.
+#[tokio::test]
+async fn per_scenario_disable_survives_a_cold_start() {
+    use api::killswitch::KillSwitchState;
+
+    let shared_store = api::testing::shared_store();
+
+    // Build initial state.
+    let init_ks = api::testing::test_state_with_shared_store(
+        shared_store.clone(),
+        KillSwitchState::default(),
+    );
+
+    // Disable a specific scenario.
+    let mut disabled_state = KillSwitchState::default();
+    disabled_state
+        .disabled_scenarios
+        .insert("oauth".to_string());
+    init_ks.kill_switch.set_state(disabled_state).await;
+
+    // Restart: build fresh state with the same store.
+    let restarted_ks =
+        api::testing::test_state_with_shared_store(shared_store, KillSwitchState::default());
+
+    // Verify the scenario is still disabled.
+    let snap = restarted_ks.kill_switch.snapshot().await;
+    assert!(
+        !snap.scenario_enabled("oauth"),
+        "per-scenario disable should survive a cold start"
+    );
+    assert!(
+        snap.scenario_enabled("dummy_toggle"),
+        "other scenarios should remain enabled"
+    );
+}
+
+/// The same durability property, but driven the way an operator actually
+/// drives it: over HTTP, through `/admin/kill-switch`.
+///
+/// The direct-`set_state` tests above would still pass if the admin handler
+/// mutated a local copy and never persisted it, which is exactly the regression
+/// worth guarding — the endpoint is the only way the switch is ever flipped in
+/// production.
+#[tokio::test]
+async fn a_switch_flipped_over_http_survives_a_cold_start() {
+    use api::killswitch::KillSwitchState;
+
+    let store = api::testing::shared_store();
+    let before = api::testing::test_state_with_shared_store_and_admin(
+        store.clone(),
+        KillSwitchState::default(),
+        Some("s3cret"),
+    );
+
+    let resp = api::build_router(before)
+        .oneshot(
+            req("POST", "/admin/kill-switch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer s3cret")
+                .body(Body::from(r#"{"demo_enabled":false}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // A fresh AppState over the same store: what a Render cold start produces,
+    // seeded from an environment that still says enabled.
+    let after = api::testing::test_state_with_shared_store_and_admin(
+        store,
+        KillSwitchState::default(),
+        Some("s3cret"),
+    );
+    assert!(
+        !after.kill_switch.snapshot().await.demo_enabled(),
+        "a switch flipped through the admin endpoint must outlive the process that served it"
+    );
 }
