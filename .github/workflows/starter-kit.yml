@@ -1,0 +1,182 @@
+# Does what visitors download actually compile?
+#
+# The starter kit's credibility rests entirely on this: a generated project
+# that does not build is worse than no generator at all. So CI generates real
+# projects with the same code the service runs, and builds them.
+#
+# Two sets, because the combinatorial space grows with every scenario and a
+# matrix slow enough to be annoying is one people learn to ignore:
+#
+#   pull requests  - the representative set (~8): nothing on, each method
+#                    alone, one per provider, and everything at once
+#   nightly        - the full product (32), with dependencies updated first,
+#                    so a newly published authkestra that breaks generated
+#                    code is caught here rather than by whoever downloads next
+#
+# The list itself lives in `apps/api/src/kit/matrix.rs` and is read from the
+# binary below. It is deliberately not repeated in this file: a matrix that
+# disagrees with the generator is worse than no matrix, because it reports
+# success for projects nobody built.
+name: Starter kit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # 04:20 UTC daily. Nothing depends on the exact time; it is offset from the
+    # hour because everyone schedules on the hour and the runners are busier.
+    - cron: "20 4 * * *"
+  workflow_dispatch:
+    inputs:
+      exhaustive:
+        description: "Build the full product rather than the representative set"
+        type: boolean
+        default: false
+
+concurrency:
+  group: starter-kit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Same `changes` + `if:` pattern as ci.yml rather than `on.*.paths`, for the
+  # reason documented there: a path-gated job never reports a check run, and a
+  # required check that never reports blocks the PR forever.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      generator: ${{ steps.filter.outputs.generator }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            generator:
+              - 'apps/api/src/kit/**'
+              - 'apps/api/src/scenario/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/starter-kit.yml'
+
+  plan:
+    name: Plan the matrix
+    needs: changes
+    if: needs.changes.outputs.generator == 'true' || github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      combinations: ${{ steps.list.outputs.combinations }}
+      exhaustive: ${{ steps.mode.outputs.exhaustive }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+
+      - name: Decide which set to build
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] \
+            || [ "${{ inputs.exhaustive }}" = "true" ]; then
+            echo "exhaustive=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exhaustive=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Built once and shared. Compiling the api crate in each matrix leg would
+      # dominate the run and tell us nothing new each time.
+      - name: Build the generator
+        run: cargo build -p api --bin generate-kit
+
+      - name: Read the combination list from the generator
+        id: list
+        run: |
+          if [ "${{ steps.mode.outputs.exhaustive }}" = "true" ]; then
+            list=$(./target/debug/generate-kit --list-json --exhaustive)
+          else
+            list=$(./target/debug/generate-kit --list-json)
+          fi
+          echo "combinations=$list" >> "$GITHUB_OUTPUT"
+          echo "Building $(echo "$list" | grep -o '"name"' | wc -l) combination(s)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generate-kit
+          path: target/debug/generate-kit
+          retention-days: 1
+
+  build:
+    name: ${{ matrix.combination.name }}
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      # Every broken combination is worth knowing about in one run. Stopping at
+      # the first turns "three fragments regressed" into three separate pushes.
+      fail-fast: false
+      matrix:
+        combination: ${{ fromJSON(needs.plan.outputs.combinations) }}
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: generate-kit
+      - run: chmod +x ./generate-kit
+
+      # Generated projects share almost all of their dependency graph, so one
+      # shared cache serves every leg.
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: generated-project
+          workspaces: generated
+
+      - name: Generate
+        run: ./generate-kit --spec "${{ matrix.combination.spec }}" --out generated
+
+      - name: Show what was generated
+        run: |
+          echo "::group::Cargo.toml"
+          cat generated/Cargo.toml
+          echo "::endgroup::"
+
+      # Only on the nightly: resolve dependencies afresh so a newly published
+      # authkestra within the pinned range is exercised here. On pull requests
+      # the lockless build already picks the newest compatible version, but the
+      # nightly is what makes "upstream released something that breaks
+      # generated code" a CI failure rather than a support request.
+      - name: Update dependencies
+        if: needs.plan.outputs.exhaustive == 'true'
+        working-directory: generated
+        run: cargo update
+
+      - name: Build it
+        working-directory: generated
+        run: cargo check --all-targets
+
+      - name: Say which combination broke
+        if: failure()
+        run: |
+          echo "::error title=Generated project failed to build::" \
+            "combination '${{ matrix.combination.name }}'" \
+            "(spec: '${{ matrix.combination.spec }}') does not compile." \
+            "Reproduce locally with:" \
+            "cargo run -p api --bin generate-kit --" \
+            "--spec '${{ matrix.combination.spec }}' --out /tmp/kit" \
+            "&& cargo check --manifest-path /tmp/kit/Cargo.toml"
+
+  # A single check to make required, so branch protection does not need
+  # updating every time the matrix changes shape.
+  result:
+    name: Generated projects build
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verdict
+        run: |
+          case "${{ needs.build.result }}" in
+            success|skipped) echo "OK" ;;
+            *) echo "At least one generated project failed to build."; exit 1 ;;
+          esac

@@ -11,6 +11,7 @@
 
 use crate::demo_config::DemoConfig;
 mod archive;
+pub mod matrix;
 
 pub use archive::ArchiveError;
 
