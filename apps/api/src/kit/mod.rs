@@ -331,6 +331,14 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+# Stands alone, deliberately.
+#
+# Without this, unzipping anywhere inside an existing Cargo workspace — a
+# monorepo, or a checkout you happened to be standing in — fails with "current
+# package believes it's in a workspace when it's not", before a line of this
+# project is compiled. An empty table opts out.
+[workspace]
+
 [dependencies]
 # Direct sub-crate dependencies, NOT the `authkestra` facade.
 #
@@ -1526,6 +1534,20 @@ mod tests {
             !consequences.crates.iter().any(|c| c.name == "uuid"),
             "uuid is a handler dependency, not something authkestra asks for"
         );
+    }
+
+    /// A download unzipped inside someone's monorepo must still build. Without
+    /// an empty `[workspace]`, cargo refuses before compiling anything, with an
+    /// error about a workspace the reader never asked to be part of.
+    #[test]
+    fn the_generated_project_stands_outside_any_workspace() {
+        for kit in [base(), full_kit()] {
+            let manifest = contents(&kit, "Cargo.toml");
+            assert!(
+                manifest.contains("\n[workspace]\n"),
+                "the manifest would inherit a surrounding workspace:\n{manifest}"
+            );
+        }
     }
 
     #[test]
