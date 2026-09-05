@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
-use tower_cookies::Cookies;
+use tower_cookies::{Cookie, Cookies};
 
 use crate::error::ApiError;
 use crate::events::Step;
@@ -26,6 +26,24 @@ use crate::scenario::oauth::OAuthMode;
 
 /// Cookie the framework keeps the encrypted OAuth state in.
 const STATE_COOKIE: &str = "ak_state";
+
+/// Cookie carrying the identity mode the visitor picked at login.
+///
+/// The mode is chosen on the login route but only becomes visible on the
+/// callback, and the two are separated by a round trip through the provider —
+/// so it has to travel with the browser. It rides in its own cookie rather
+/// than in the framework's encrypted `state`, which the callback helper
+/// consumes before we could read anything out of it.
+const MODE_COOKIE: &str = "ak_oauth_mode";
+
+/// The wire spelling of a mode: what the login route stores and the callback
+/// hands back to the frontend on the redirect query string.
+fn mode_str(mode: OAuthMode) -> &'static str {
+    match mode {
+        OAuthMode::Jwt => "jwt",
+        OAuthMode::Session => "session",
+    }
+}
 
 /// Query parameters accepted by the login route.
 #[derive(Debug, Deserialize)]
@@ -89,6 +107,20 @@ async fn login(
     }
 
     let mode = OAuthMode::parse(query.mode.as_deref());
+
+    // The mode is picked here but only observable on the callback, on the far
+    // side of a round trip through the provider — so it travels with the
+    // browser. Same attributes and lifetime as the framework's own state
+    // cookie, so the two expire together and a stale mode can never outlive
+    // the flow that chose it.
+    let mut mode_cookie = Cookie::new(MODE_COOKIE, mode_str(mode));
+    mode_cookie.set_http_only(true);
+    mode_cookie.set_secure(state.settings.cookie_secure);
+    mode_cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
+    mode_cookie.set_path("/");
+    mode_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(900));
+    cookies.add(mode_cookie);
+
     let engine = state.engines.auth_engine();
     let flow = engine
         .providers
@@ -105,16 +137,18 @@ async fn login(
         .collect();
     let scopes: Vec<&str> = scopes_owned.iter().map(|s| s.as_str()).collect();
 
-    // Carried through the encrypted state cookie and used by the callback, so
-    // the visitor lands back on the page they started from.
+    // Handed to the framework, which stores it in the encrypted state cookie as
+    // the redirect to follow on success.
+    //
+    // The callback does not actually use it — it builds its own redirect so it
+    // can report denied and failed outcomes in the same shape — but supplying
+    // it keeps the state cookie self-describing, and it is what the flow would
+    // fall back to if the callback ever stopped overriding it.
     let success_url = format!(
         "{}/?oauth=success&provider={}&mode={}",
         frontend_base(&state),
-        provider,
-        match mode {
-            OAuthMode::Jwt => "jwt",
-            OAuthMode::Session => "session",
-        }
+        urlencode(&provider),
+        mode_str(mode)
     );
 
     let redirect = authkestra_axum::helpers::initiate_oauth_login(
@@ -142,6 +176,33 @@ async fn callback(
         .get(crate::session::COOKIE_NAME)
         .and_then(|c| uuid::Uuid::parse_str(c.value()).ok())
         .unwrap_or_else(uuid::Uuid::nil);
+
+    // Check the kill switch: if OAuth is disabled mid-flow, redirect back rather
+    // than completing the round trip. Same gate as the login step, so flipping it
+    // mid-flow does not silently complete an in-flight callback.
+    if !state.kill_switch.scenario_enabled("oauth") {
+        return result_redirect(
+            &state,
+            &format!(
+                "oauth=error&provider={}&reason=demo_disabled",
+                urlencode(&provider)
+            ),
+        );
+    }
+
+    // Which identity mode the login step recorded. Parsed rather than echoed:
+    // the value ends up in a redirect the browser follows, and re-parsing it
+    // means only the two strings this service emits can ever appear there,
+    // whatever a cookie happens to contain. An absent cookie means `session`,
+    // which is also the login route's default.
+    let mode_cookie = cookies.get(MODE_COOKIE);
+    let identity_mode = OAuthMode::parse(mode_cookie.as_ref().map(|c| c.value()));
+
+    // Removed here rather than left to expire, so a later flow started without
+    // an explicit `?mode=` cannot inherit this one's choice.
+    let mut remove_mode = Cookie::from(MODE_COOKIE);
+    remove_mode.set_path("/");
+    cookies.remove(remove_mode);
 
     // A declined consent screen is the single most common outcome after the
     // happy path, and it is not an error on our side — send the visitor back
@@ -244,24 +305,46 @@ async fn callback(
     match outcome {
         Ok(_) => {
             tracing::info!("oauth round trip completed");
+
+            // Both modes run the same exchange; they differ only in what is
+            // kept afterwards, which is the whole reason the toggle is offered.
+            // Saying which one ran is what makes the choice mean something to
+            // the visitor rather than being an inert control.
+            let detail = match identity_mode {
+                OAuthMode::Jwt => {
+                    "The state cookie verified, the authorization code was exchanged \
+                     for a token, and the provider returned an identity. That identity \
+                     was signed into a JWT and handed back — nothing about this sign-in \
+                     was written server-side, so no store has to be consulted to trust \
+                     it later."
+                }
+                OAuthMode::Session => {
+                    "The state cookie verified, the authorization code was exchanged \
+                     for a token, and the provider returned an identity. A server-side \
+                     session was created and its id put in a cookie. State and nonce \
+                     lived in an encrypted cookie throughout, so nothing had to be \
+                     written to a database to make the round trip itself work."
+                }
+            };
+
             state
                 .events
                 .record(
                     session_id,
                     Step::success("oauth", "provider round trip completed")
-                        .detail(
-                            "The state cookie verified, the authorization code was exchanged \
-                             for a token, and the provider returned an identity. State and \
-                             nonce lived in an encrypted cookie throughout — nothing was \
-                             written to a database to make this work.",
-                        )
+                        .detail(detail)
                         .fact("provider", provider.clone())
+                        .fact("identity mode", mode_str(identity_mode))
                         .build(),
                 )
                 .await;
             result_redirect(
                 &state,
-                &format!("oauth=success&provider={}", urlencode(&provider)),
+                &format!(
+                    "oauth=success&provider={}&mode={}",
+                    urlencode(&provider),
+                    mode_str(identity_mode)
+                ),
             )
         }
         Err((status, message)) => {
@@ -308,12 +391,19 @@ async fn callback(
 }
 
 /// Minimal percent-encoding for the values put into our own redirect query.
+///
+/// Percent-encodes every byte that is not in the unreserved set (A-Za-z0-9-._~).
+/// Takes the UTF-8 byte representation, not the Unicode code point, so that
+/// multi-byte characters like `é` (UTF-8: 0xC3 0xA9) encode correctly as `%C3%A9`.
 fn urlencode(value: &str) -> String {
     value
-        .chars()
-        .map(|c| match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-            other => format!("%{:02X}", other as u32),
+        .as_bytes()
+        .iter()
+        .map(|&b| match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{:02X}", b),
         })
         .collect()
 }
@@ -326,4 +416,45 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/login/{provider}", get(login))
         .route("/auth/callback/{provider}", get(callback))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn urlencode_ascii_pass_through() {
+        // Unreserved characters should pass through unchanged.
+        assert_eq!(
+            urlencode("hello-world_2025.test~name"),
+            "hello-world_2025.test~name"
+        );
+        assert_eq!(urlencode("abc123-._~ABC123"), "abc123-._~ABC123");
+    }
+
+    #[test]
+    fn urlencode_reserved_chars() {
+        // Reserved characters like &, =, /, ?, # should be percent-encoded.
+        assert_eq!(urlencode("a&b"), "a%26b");
+        assert_eq!(urlencode("key=value"), "key%3Dvalue");
+        assert_eq!(urlencode("a/b"), "a%2Fb");
+        assert_eq!(urlencode("a?b"), "a%3Fb");
+        assert_eq!(urlencode("a#b"), "a%23b");
+    }
+
+    #[test]
+    fn urlencode_two_byte_char() {
+        // The character é (U+00E9) encodes in UTF-8 as bytes 0xC3 0xA9.
+        // It should produce %C3%A9, not %E9.
+        assert_eq!(urlencode("café"), "caf%C3%A9");
+        assert_eq!(urlencode("é"), "%C3%A9");
+    }
+
+    #[test]
+    fn urlencode_four_byte_emoji() {
+        // The emoji 😀 (U+1F600) encodes in UTF-8 as bytes 0xF0 0x9F 0x98 0x80.
+        // It should produce %F0%9F%98%80.
+        assert_eq!(urlencode("😀"), "%F0%9F%98%80");
+        assert_eq!(urlencode("hello😀"), "hello%F0%9F%98%80");
+    }
 }
