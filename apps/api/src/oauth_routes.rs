@@ -141,7 +141,16 @@ async fn login(
     // token there is nothing for a nonce to bind to. CSRF protection is the
     // `state` parameter and PKCE, both of which are untouched.
     //
-    // Remove this once the framework only sets a nonce where it is validated.
+    // Fixed upstream in marcjazz/authkestra#318, which gates the *enforcement*
+    // check rather than the generation — merged 2026-09-04.
+    //
+    // That is not yet enough to remove this. We depend on `0.8.0` from
+    // crates.io, published 2026-09-03, so the fix is on `main` and in no
+    // release. Removing this on the strength of the merge alone would restore
+    // the bug for every visitor.
+    //
+    // The trigger is a *published* version carrying the fix: bump the
+    // workspace pin past 0.8.0, then delete this and `strip_unusable_nonce`.
     strip_unusable_nonce(&state, &cookies);
 
     tracing::info!(?mode, "oauth login started");
