@@ -181,9 +181,9 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "authkestra-axum"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feaecf2240c0098cde2c63431e059b6b482e61cd7c0e8c9fc31bb9e086b5e9a0"
+checksum = "ad28a4ace6a51192fb2b44eb46082fa313611fd558a2aa22edab3854d94b2069"
 dependencies = [
  "authkestra-engine",
  "authkestra-macros",
@@ -202,9 +202,9 @@ dependencies = [
 
 [[package]]
 name = "authkestra-crypto-util"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaaee4c20281a183930e73df748b7b27158bfd598e87b9c54870397a8e923ca7"
+checksum = "267bd63bd9e8dd03b89f4c17df26823e027eaf4efa6755cd9f5a0c6561413772"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -214,9 +214,9 @@ dependencies = [
 
 [[package]]
 name = "authkestra-engine"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b41f2264e95e87248639daed2fab020f4bdc6d52f4cb988633cbe90130ff69a"
+checksum = "577eab80280da8156e19ed216380452972ccce54a7947227a969dd9b091f6e10"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -245,9 +245,9 @@ dependencies = [
 
 [[package]]
 name = "authkestra-macros"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02e105590f287136d6df29e60023a6e07598510e7cc50d76a32d9bce2f1fd01b"
+checksum = "83e48288c17057ed298a765a74389ea50611f5d90000278c143126d0e8391d94"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -256,9 +256,9 @@ dependencies = [
 
 [[package]]
 name = "authkestra-op"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b74f815bc41278b32ca588a665e4b2d6f6c87518369702a69da4594fbc7588b1"
+checksum = "82c7a862b3bcb21704a0415c5431730b879ec0729863c6e6fdfd1cbaff5951af"
 dependencies = [
  "async-trait",
  "authkestra-crypto-util",
@@ -280,9 +280,9 @@ dependencies = [
 
 [[package]]
 name = "authkestra-providers"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45db6333a3592eb3d8451764edd6b8a1e9d5cacfbf1c1d7f0fc89b4292bf58c7"
+checksum = "9c944416b48b3c16d4efda76725fb7cbe04a5affc9772595059e208b7f13cfe0"
 dependencies = [
  "async-trait",
  "authkestra-engine",
@@ -295,9 +295,9 @@ dependencies = [
 
 [[package]]
 name = "authkestra-resource"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f16a405ced14aaec6f8a6e0cb8f1eb136c0a78435cd22390994c4a68b4752251"
+checksum = "81ec06674a82f636c95c5a119c17f5fc7aff45fa9c825128556f7d579b1d5d75"
 dependencies = [
  "async-trait",
  "authkestra-engine",

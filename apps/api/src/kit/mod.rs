@@ -26,7 +26,7 @@ use crate::scenario::{
 /// download can never advertise a version the playground does not build
 /// against. Upstream's README says 0.7 while the crates are 0.8.0, which is
 /// exactly why this is not taken from prose.
-pub const AUTHKESTRA_VERSION: &str = "0.8.1";
+pub const AUTHKESTRA_VERSION: &str = "0.9.0";
 
 /// The generated project's crate name and directory.
 pub const PROJECT_NAME: &str = "authkestra-starter";
@@ -391,15 +391,6 @@ fn third_party_deps(plan: &Plan) -> String {
         // property of how the generated project drives it, not of the scenario.
         if req.name == "sqlx" && !features.iter().any(|f| f.starts_with("runtime-")) {
             features.push("runtime-tokio-rustls".to_string());
-        }
-        // Upstream bug: `authkestra-providers` uses `urlencoding` in the macro
-        // that generates *every* provider, but declares it optional behind the
-        // `discord` feature alone. So `features = ["github"]` fails to compile
-        // inside the dependency. Enabling `discord` is the only lever a
-        // downstream crate has — it costs an unused provider and nothing else.
-        // Remove once upstream gates or un-gates it properly.
-        if req.name == "authkestra-providers" && !features.iter().any(|f| f == "discord") {
-            features.push("discord".to_string());
         }
         features.sort();
 
@@ -1242,11 +1233,17 @@ mod tests {
         assert!(env.contains("GITHUB_CLIENT_SECRET=\n"), "{env}");
     }
 
-    /// Upstream declares `urlencoding` behind the `discord` feature while using
-    /// it for every provider, so `features = ["github"]` fails to compile
-    /// inside the dependency.
+    /// The inverse of the test this replaces.
+    ///
+    /// Until 0.9.0, `authkestra-providers` declared `urlencoding` behind the
+    /// `discord` feature while using it for every provider, so a project
+    /// selecting only GitHub failed to compile inside the dependency and the
+    /// generator had to enable `discord` as a workaround. Fixed upstream in
+    /// marcjazz/authkestra#322, so a selection now asks for exactly what it
+    /// selected — and quietly reacquiring the extra provider would be a
+    /// regression nobody would notice.
     #[test]
-    fn the_provider_crate_carries_the_feature_that_makes_it_compile() {
+    fn a_selection_asks_for_only_the_providers_it_chose() {
         let kit = kit_with(&[(
             "oauth",
             ControlValue::SelectMany {
@@ -1258,9 +1255,10 @@ mod tests {
             .lines()
             .find(|l| l.starts_with("authkestra-providers"))
             .expect("providers dependency");
+        assert!(line.contains("\"github\""), "{line}");
         assert!(
-            line.contains("\"discord\""),
-            "without this the generated project does not build: {line}"
+            !line.contains("\"discord\""),
+            "the discord workaround is back: {line}"
         );
     }
 
