@@ -151,6 +151,22 @@ jobs:
         working-directory: generated
         run: cargo update
 
+      # Compiling proves the project is valid, not that it is complete: a
+      # fragment that dropped its routes would still build. Cheap to assert,
+      # and it fails in seconds rather than after a full build.
+      - name: Check the ceremony routes are there
+        run: |
+          case "${{ matrix.combination.spec }}" in
+            *passkeys*)
+              grep -q '/auth/passkey/register/start' generated/src/main.rs \
+                || { echo "::error::passkeys selected but no ceremony routes generated"; exit 1; } ;;
+          esac
+          case "${{ matrix.combination.spec }}" in
+            *totp*)
+              grep -q '/auth/totp/enroll' generated/src/main.rs \
+                || { echo "::error::totp selected but no ceremony routes generated"; exit 1; } ;;
+          esac
+
       - name: Build it
         working-directory: generated
         run: cargo check --all-targets

@@ -177,7 +177,23 @@ impl Scenario for PasskeysScenario {
             return None;
         }
         Some(KitFragment {
-            imports: vec!["use webauthn_rs::prelude::WebauthnBuilder;".to_string()],
+            imports: vec![
+                "use authkestra_engine::auth::store::CredentialStore;".to_string(),
+                "use authkestra_engine::auth::webauthn::WebAuthnAuthMethod;".to_string(),
+                "use authkestra_engine::auth::AuthInput;".to_string(),
+                "use authkestra_engine::auth::AuthMethod;".to_string(),
+                "use authkestra_engine::auth::WebAuthnStarter;".to_string(),
+                "use axum::extract::State;".to_string(),
+                "use axum::routing::post;".to_string(),
+                "use std::collections::HashMap;".to_string(),
+                "use std::sync::Mutex;".to_string(),
+                "use std::time::{Duration, Instant};".to_string(),
+                "use uuid::Uuid;".to_string(),
+                "use webauthn_rs::prelude::Passkey;".to_string(),
+                "use webauthn_rs::prelude::PasskeyRegistration;".to_string(),
+                "use webauthn_rs::prelude::RegisterPublicKeyCredential;".to_string(),
+                "use webauthn_rs::prelude::WebauthnBuilder;".to_string(),
+            ],
             prelude: vec![
                 r#"    // The relying party must match the origin the browser actually uses.
     // A mismatch fails inside the browser with a deliberately vague error, so
@@ -189,21 +205,343 @@ impl Scenario for PasskeysScenario {
     let rp_origin = url::Url::parse(&rp_origin).expect("WEBAUTHN_ORIGIN must be a URL");
     let rp_id = std::env::var("WEBAUTHN_RP_ID")
         .unwrap_or_else(|_| rp_origin.host_str().unwrap_or("localhost").to_string());
-    let webauthn = WebauthnBuilder::new(&rp_id, &rp_origin)
+    // Built as an `Arc` up front: the engine takes one, and the handlers
+    // below need one too.
+    let webauthn = std::sync::Arc::new(
+        WebauthnBuilder::new(&rp_id, &rp_origin)
         .expect("the RP ID must be a registrable suffix of the origin")
-        .rp_name("Authkestra Starter")
-        .build()
-        .expect("valid WebAuthn configuration");"#
-                    .to_string(),
+            .rp_name("Authkestra Starter")
+            .build()
+            .expect("valid WebAuthn configuration"),
+    );"#
+                .to_string(),
             ],
             builder_calls: vec![
                 "        // Passkeys as a first factor. The private key never leaves the
         // authenticator; only its public key is stored here.
-        .with_webauthn(std::sync::Arc::new(webauthn), SqlxCredentialStore::new(pool.clone()))"
+        .with_webauthn(webauthn.clone(), SqlxCredentialStore::new(pool.clone()))"
                     .to_string(),
             ],
-            routes: Vec::new(),
-            handlers: Vec::new(),
+            routes: vec![
+                r#"        // Passkey enrolment and sign-in. The framework wires `/auth/login/*`
+        // for OAuth redirects but nothing for WebAuthn, because the ceremony
+        // is a conversation with the browser rather than a redirect.
+        .route("/auth/passkey/register/start", post(passkey_register_start))
+        .route("/auth/passkey/register/finish", post(passkey_register_finish))
+        .route("/auth/passkey/login/start", post(passkey_login_start))
+        .route("/auth/passkey/login/finish", post(passkey_login_finish))"#
+                    .to_string(),
+            ],
+            handlers: vec![
+                r##"/// A WebAuthn ceremony in flight, waiting for the browser's second request.
+///
+/// Held in memory on purpose: a starter kit should not need Redis to try a
+/// passkey. The cost is real and worth knowing — ceremonies do not survive a
+/// restart, and do not work at all across more than one instance. Move this
+/// into your session store before you scale out.
+#[derive(Clone, Default)]
+struct Ceremonies(Arc<Mutex<HashMap<String, (Ceremony, Instant)>>>);
+
+#[derive(Clone)]
+struct Ceremony {
+    /// Captured when the ceremony starts, so the second request cannot switch
+    /// identity halfway through by sending a different username.
+    user_id: String,
+    state: String,
+}
+
+impl Ceremonies {
+    /// Long enough to find your phone, short enough that an abandoned
+    /// challenge is not left lying around.
+    const TTL: Duration = Duration::from_secs(300);
+
+    fn put(&self, user_id: String, state: String) -> String {
+        let id = Uuid::new_v4().to_string();
+        let mut map = self.0.lock().expect("ceremony lock poisoned");
+        // Lazy expiry: cheap, and there is no sweeper to forget to start.
+        map.retain(|_, (_, at)| at.elapsed() < Self::TTL);
+        map.insert(id.clone(), (Ceremony { user_id, state }, Instant::now()));
+        id
+    }
+
+    /// Removes as it reads. A challenge that can be answered twice is a replay.
+    fn take(&self, id: &str) -> Option<Ceremony> {
+        let mut map = self.0.lock().expect("ceremony lock poisoned");
+        let (ceremony, at) = map.remove(id)?;
+        (at.elapsed() < Self::TTL).then_some(ceremony)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PasskeyStart {
+    username: String,
+}
+
+#[derive(serde::Deserialize)]
+struct PasskeyFinish {
+    ceremony_id: String,
+    /// The raw `PublicKeyCredential` from `navigator.credentials`, as JSON.
+    credential: serde_json::Value,
+}
+
+fn passkey_method(state: &AppState) -> WebAuthnAuthMethod<SqlxCredentialStore<sqlx::Sqlite>> {
+    WebAuthnAuthMethod::new(
+        state.webauthn.clone(),
+        SqlxCredentialStore::new(state.pool.clone()),
+    )
+}
+
+/// Begin enrolment: hand the browser a challenge to sign.
+async fn passkey_register_start(
+    State(state): State<AppState>,
+    Json(body): Json<PasskeyStart>,
+) -> impl IntoResponse {
+    let user_id = user_id_for(&body.username);
+
+    match passkey_method(&state).start_register(&user_id, &body.username) {
+        Ok((challenge, registration)) => {
+            let stored = serde_json::to_string(&registration)
+                .expect("webauthn registration state serialises");
+            let ceremony_id = state.ceremonies.put(user_id, stored);
+            (
+                StatusCode::OK,
+                Json(json!({ "ceremony_id": ceremony_id, "options": challenge })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not start passkey registration");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not start registration" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Finish enrolment: verify what the authenticator produced and store it.
+async fn passkey_register_finish(
+    State(state): State<AppState>,
+    Json(body): Json<PasskeyFinish>,
+) -> impl IntoResponse {
+    // Parse before consuming the ceremony. Taking the challenge first would
+    // mean a malformed body costs the visitor their challenge and forces them
+    // to restart, over a mistake that never reached any cryptography.
+    let credential: RegisterPublicKeyCredential = match serde_json::from_value(body.credential) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "malformed credential", "detail": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let Some(ceremony) = state.ceremonies.take(&body.ceremony_id) else {
+        return (
+            StatusCode::GONE,
+            Json(json!({ "error": "that challenge has expired or was already used" })),
+        )
+            .into_response();
+    };
+
+    let registration: PasskeyRegistration = match serde_json::from_str(&ceremony.state) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "stored ceremony state is unreadable");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "ceremony state is unreadable" })),
+            )
+                .into_response();
+        }
+    };
+
+    match passkey_method(&state)
+        .finish_register(&ceremony.user_id, credential, registration)
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(json!({ "enrolled": true }))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "enrolled": false, "detail": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Begin sign-in: challenge the passkeys this user has already enrolled.
+async fn passkey_login_start(
+    State(state): State<AppState>,
+    Json(body): Json<PasskeyStart>,
+) -> impl IntoResponse {
+    let user_id = user_id_for(&body.username);
+
+    let stored = match SqlxCredentialStore::new(state.pool.clone())
+        .get_credentials(&user_id, "webauthn")
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read stored passkeys");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not read credentials" })),
+            )
+                .into_response();
+        }
+    };
+
+    let passkeys: Vec<Passkey> = stored
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect();
+
+    if passkeys.is_empty() {
+        // Deliberately explicit. A real deployment may prefer to answer
+        // identically whether or not the account exists, to avoid confirming
+        // which usernames are enrolled.
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no passkey is enrolled for that username" })),
+        )
+            .into_response();
+    }
+
+    match passkey_method(&state).start_authentication(&passkeys) {
+        Ok((challenge, authentication)) => {
+            let stored = serde_json::to_string(&authentication)
+                .expect("webauthn authentication state serialises");
+            let ceremony_id = state.ceremonies.put(user_id, stored);
+            (
+                StatusCode::OK,
+                Json(json!({ "ceremony_id": ceremony_id, "options": challenge })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not start passkey authentication");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not start authentication" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// The browser's assertion, in the shape `navigator.credentials.get()` produces
+/// once serialised. Deserialised explicitly so a malformed body is a 400 rather
+/// than a panic deep in the engine, and because `AuthInput` wants base64url
+/// strings rather than `webauthn-rs`'s decoded types.
+#[derive(serde::Deserialize)]
+struct Assertion {
+    id: String,
+    response: AssertionResponse,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AssertionResponse {
+    /// Spelled `clientDataJSON`, with `JSON` fully capitalised.
+    ///
+    /// This is a genuine quirk of the WebAuthn spec and the one field
+    /// `rename_all = "camelCase"` gets wrong — it would produce
+    /// `clientDataJson`, which no browser ever sends. Registration is
+    /// unaffected because it deserialises into `webauthn-rs`'s own type, so
+    /// only sign-in breaks, and it breaks on shape before any cryptography
+    /// runs. Do not "tidy" this rename away.
+    #[serde(rename = "clientDataJSON")]
+    client_data_json: String,
+    authenticator_data: String,
+    signature: String,
+    #[serde(default)]
+    user_handle: Option<String>,
+}
+
+/// Finish sign-in: verify the signature and open a session.
+async fn passkey_login_finish(
+    State(state): State<AppState>,
+    Json(body): Json<PasskeyFinish>,
+) -> impl IntoResponse {
+    let assertion: Assertion = match serde_json::from_value(body.credential) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "malformed credential", "detail": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let Some(ceremony) = state.ceremonies.take(&body.ceremony_id) else {
+        return (
+            StatusCode::GONE,
+            Json(json!({ "error": "that challenge has expired or was already used" })),
+        )
+            .into_response();
+    };
+
+    // Goes through `AuthMethod::authenticate` rather than
+    // `finish_authentication` directly, because only this path advances and
+    // persists the signature counter. A counter that fails to advance is how a
+    // cloned authenticator is detected, so skipping it silently gives up the
+    // guarantee.
+    let result = passkey_method(&state)
+        .authenticate(AuthInput::WebAuthnAuthentication {
+            user_id: ceremony.user_id,
+            credential_id: assertion.id,
+            client_data_json: assertion.response.client_data_json,
+            authenticator_data: assertion.response.authenticator_data,
+            signature: assertion.response.signature,
+            user_handle: assertion.response.user_handle,
+            auth_state_json: Some(ceremony.state),
+        })
+        .await;
+
+    let identity = match result {
+        Ok(identity) => identity,
+        Err(e) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "verified": false, "detail": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    match state.auth.create_session(identity).await {
+        Ok(session) => (
+            StatusCode::OK,
+            Json(json!({ "verified": true, "session_id": session.id })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "signature verified but the session could not be created");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not create a session" })),
+            )
+                .into_response()
+        }
+    }
+}"##
+                .to_string(),
+            ],
+            state_fields: vec![r#"    /// The relying party, shared by every ceremony.
+    webauthn: Arc<webauthn_rs::Webauthn>,
+    ceremonies: Ceremonies,"#
+                .to_string()],
+            state_init: vec![r#"        webauthn: webauthn.clone(),
+        ceremonies: Ceremonies::default(),"#
+                .to_string()],
+            crates: vec![
+                CrateRequirement::new("uuid", &["v4", "v5"]),
+                CrateRequirement::new("serde", &["derive"]),
+            ],
             env: vec![
                 KitEnvVar::with_default(
                     "WEBAUTHN_ORIGIN",
@@ -225,6 +563,18 @@ impl Scenario for PasskeysScenario {
                 "The signature counter is stored alongside the credential and must be \
                  persisted: a counter that fails to advance is how a cloned authenticator is \
                  detected."
+                    .to_string(),
+                "The four ceremony routes are generated for you: \
+                 `POST /auth/passkey/register/start` and `/register/finish` to enrol, \
+                 `/login/start` and `/login/finish` to sign in. The framework wires \
+                 `/auth/login/{provider}` for OAuth redirects but nothing for WebAuthn, \
+                 because a passkey ceremony is a conversation with the browser rather \
+                 than a redirect — so these are yours, and yours to change."
+                    .to_string(),
+                "Each pair parses the request body *before* consuming the stored \
+                 challenge. Consuming first means a typo costs the visitor their \
+                 challenge and forces them to restart, over a mistake that never \
+                 reached any cryptography."
                     .to_string(),
             ],
             setup: vec![KitSetup::new(

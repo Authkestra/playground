@@ -268,6 +268,17 @@ pub struct KitFragment {
     pub routes: Vec<String>,
     /// Whole `fn` definitions appended after `main`.
     pub handlers: Vec<String>,
+    /// Extra fields on the generated `AppState`, as `name: Type,` lines.
+    /// Handlers need somewhere to reach the credential pool and any ceremony
+    /// state, and `AppState` is the only thing axum hands them.
+    pub state_fields: Vec<String>,
+    /// The matching `name: value,` lines where `AppState` is constructed.
+    pub state_init: Vec<String>,
+    /// Crates the *generated handlers* need, as opposed to the ones the
+    /// framework needs. Kept apart from `Consequences::crates` because the
+    /// playground's diff answers "what does turning this on require of
+    /// authkestra", and `uuid` is not part of that answer.
+    pub crates: Vec<CrateRequirement>,
     /// Environment variables this scenario reads, for `.env.example`.
     pub env: Vec<KitEnvVar>,
     /// Paragraphs for the generated README.

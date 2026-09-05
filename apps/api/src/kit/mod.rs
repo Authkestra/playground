@@ -152,11 +152,32 @@ impl Plan {
             }
         }
 
+        // Fragment crates are merged in after the framework's own, so a
+        // generated handler's dependency is emitted without appearing in the
+        // diff as something authkestra asked for.
+        let mut crates = consequences.crates;
+        for fragment in &fragments {
+            for req in &fragment.crates {
+                match crates.iter_mut().find(|c| c.name == req.name) {
+                    Some(existing) => {
+                        for f in &req.features {
+                            if !existing.features.contains(f) {
+                                existing.features.push(f.clone());
+                            }
+                        }
+                        existing.features.sort();
+                    }
+                    None => crates.push(req.clone()),
+                }
+            }
+        }
+        crates.sort_by(|a, b| a.name.cmp(&b.name));
+
         Self {
             active,
             labels,
             selection,
-            crates: consequences.crates,
+            crates,
             fragments,
         }
     }
@@ -346,6 +367,8 @@ fn third_party_deps(plan: &Plan) -> String {
             // Every other authkestra crate is pinned to the same version.
             n if n.starts_with("authkestra-") => AUTHKESTRA_VERSION,
             "webauthn-rs" => "0.5",
+            "uuid" => "1",
+            "serde" => "1",
             "sqlx" => "0.8",
             "url" => "2.5",
             other => {
@@ -404,6 +427,23 @@ fn third_party_deps(plan: &Plan) -> String {
         format!("{}\n", lines.join("\n"))
     }
 }
+
+/// The user id a generated project stores credentials against.
+///
+/// authkestra deliberately owns no user table, so there is nothing to look
+/// this up in — which is exactly the decision the README explains. Deriving it
+/// from the username keeps a starter self-contained and stable across
+/// restarts.
+const USER_ID_HELPER: &str = r#"/// The user id your application would supply from its own users table.
+///
+/// authkestra deliberately owns no users, so there is nothing to look this up
+/// in. Deriving it from the username keeps this project self-contained and
+/// stable across restarts. **Replace it with your own primary key** — every
+/// credential is stored against whatever this returns, so changing it later
+/// orphans everything already enrolled.
+fn user_id_for(username: &str) -> String {
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, username.as_bytes()).to_string()
+}"#;
 
 fn main_rs(plan: &Plan) -> String {
     let note = if plan.is_empty() {
@@ -499,11 +539,55 @@ fn main_rs(plan: &Plan) -> String {
     };
 
     let extra_handlers = {
-        let fns: Vec<String> = plan.collect(|f| &f.handlers).cloned().collect();
+        let mut fns: Vec<String> = Vec::new();
+        // Any method that stores a credential needs a user id to store it
+        // against, so this belongs to the store rather than to one method.
+        if plan.needs_credential_store() {
+            fns.push(USER_ID_HELPER.to_string());
+        }
+        fns.extend(plan.collect(|f| &f.handlers).cloned());
+        let fns: Vec<String> = fns;
         if fns.is_empty() {
             String::new()
         } else {
             format!("\n{}\n", fns.join("\n\n"))
+        }
+    };
+
+    let state_fields = {
+        let mut lines: Vec<String> = Vec::new();
+        // Emitted once, by whoever needs credentials at all, rather than by
+        // each method — two methods sharing one store must not declare the
+        // field twice.
+        if plan.needs_credential_store() {
+            lines.push(
+                "    /// The credential pool. `SqlxCredentialStore` is not `Clone`, so\n\
+                 \x20   /// handlers build one per use; construction just wraps an\n\
+                 \x20   /// already-`Arc`ed pool.\n\
+                 \x20   pool: sqlx::SqlitePool,"
+                    .to_string(),
+            );
+        }
+        lines.extend(plan.collect(|f| &f.state_fields).cloned());
+        let lines: Vec<String> = lines;
+        if lines.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", lines.join("\n"))
+        }
+    };
+
+    let state_init = {
+        let mut lines: Vec<String> = Vec::new();
+        if plan.needs_credential_store() {
+            lines.push("        pool: pool.clone(),".to_string());
+        }
+        lines.extend(plan.collect(|f| &f.state_init).cloned());
+        let lines: Vec<String> = lines;
+        if lines.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", lines.join("\n"))
         }
     };
 
@@ -525,7 +609,7 @@ fn main_rs(plan: &Plan) -> String {
 #[derive(Clone, AxumState)]
 struct AppState {{
     #[authkestra(engine)]
-    auth: AkWebAppEngine,
+    auth: AkWebAppEngine,{state_fields}
 }}
 
 #[tokio::main]
@@ -562,7 +646,7 @@ async fn main() {{
         .build();
 
     let state = AppState {{
-        auth: engine.clone(),
+        auth: engine.clone(),{state_init}
     }};
 
     let app = Router::new()
@@ -1288,6 +1372,102 @@ mod tests {
             .expect("the README summarises the selection");
         assert!(summary.contains("Passkeys"), "{summary}");
         assert!(!summary.contains("**passkeys**"), "{summary}");
+    }
+
+    // ---- P4 #48: the generated project has an HTTP surface for its
+    // ceremonies, not just a wired engine. ----
+
+    #[test]
+    fn selecting_passkeys_generates_the_four_ceremony_routes() {
+        let main = contents(&kit_with(&[("passkeys", on())]), "src/main.rs");
+        for route in [
+            "/auth/passkey/register/start",
+            "/auth/passkey/register/finish",
+            "/auth/passkey/login/start",
+            "/auth/passkey/login/finish",
+        ] {
+            assert!(main.contains(route), "missing {route}");
+        }
+        // A route with no handler behind it is a compile error, but asserting
+        // the pair keeps the failure legible when only one is dropped.
+        for handler in [
+            "async fn passkey_register_start",
+            "async fn passkey_register_finish",
+            "async fn passkey_login_start",
+            "async fn passkey_login_finish",
+        ] {
+            assert!(main.contains(handler), "missing {handler}");
+        }
+    }
+
+    #[test]
+    fn selecting_totp_generates_its_two_routes() {
+        let main = contents(&kit_with(&[("totp", on())]), "src/main.rs");
+        for expected in [
+            "/auth/totp/enroll",
+            "/auth/totp/verify",
+            "async fn totp_enrol",
+            "async fn totp_verify",
+        ] {
+            assert!(main.contains(expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn a_project_without_a_method_has_no_ceremony_routes() {
+        let main = contents(&base(), "src/main.rs");
+        assert!(!main.contains("/auth/passkey/"), "{main}");
+        assert!(!main.contains("/auth/totp/"), "{main}");
+        // And nothing that only exists to serve them.
+        assert!(!main.contains("fn user_id_for"), "{main}");
+        assert!(!main.contains("struct Ceremonies"), "{main}");
+    }
+
+    /// Both methods store credentials against a user id and share one pool.
+    /// Emitting either twice is a compile error in the generated project, and
+    /// the compile matrix would catch it — but only after a full build.
+    #[test]
+    fn shared_scaffolding_is_emitted_once_for_two_methods() {
+        let main = contents(
+            &kit_with(&[("passkeys", on()), ("totp", on())]),
+            "src/main.rs",
+        );
+        assert_eq!(main.matches("fn user_id_for").count(), 1);
+        assert_eq!(main.matches("pool: sqlx::SqlitePool,").count(), 1);
+        assert_eq!(main.matches("pool: pool.clone(),").count(), 1);
+    }
+
+    /// The one field `rename_all = "camelCase"` gets wrong. It cost this
+    /// playground a silent sign-in outage; a generated project must not
+    /// inherit the same bug.
+    #[test]
+    fn the_generated_assertion_spells_client_data_json_correctly() {
+        let main = contents(&kit_with(&[("passkeys", on())]), "src/main.rs");
+        assert!(
+            main.contains(r#"#[serde(rename = "clientDataJSON")]"#),
+            "the generated assertion type would reject every real sign-in"
+        );
+    }
+
+    /// Handlers need `uuid` and `serde` derive; the framework does not. The
+    /// distinction matters because the playground's diff answers "what does
+    /// authkestra require", and these are not part of that answer.
+    #[test]
+    fn handler_dependencies_are_emitted_without_entering_the_diff() {
+        use crate::scenario::ScenarioRegistry;
+
+        let kit = kit_with(&[("passkeys", on())]);
+        let manifest = contents(&kit, "Cargo.toml");
+        assert!(manifest.contains("uuid"), "{manifest}");
+        assert!(manifest.contains("serde = "), "{manifest}");
+
+        let registry = ScenarioRegistry::with_providers(Vec::new());
+        let scenario = registry.get("passkeys").expect("passkeys is registered");
+        let consequences = scenario.consequences(&on());
+        assert!(
+            !consequences.crates.iter().any(|c| c.name == "uuid"),
+            "uuid is a handler dependency, not something authkestra asks for"
+        );
     }
 
     #[test]

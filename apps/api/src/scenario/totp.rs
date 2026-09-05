@@ -137,16 +137,111 @@ impl Scenario for TotpScenario {
         };
 
         Some(KitFragment {
-            imports: Vec::new(),
+            imports: vec![
+                "use authkestra_engine::auth::totp::TotpAuthMethod;".to_string(),
+                "use authkestra_engine::auth::AuthInput;".to_string(),
+                "use authkestra_engine::auth::AuthMethod;".to_string(),
+                "use axum::extract::State;".to_string(),
+                "use axum::routing::post;".to_string(),
+                "use uuid::Uuid;".to_string(),
+            ],
             prelude: Vec::new(),
             builder_calls: vec![call.to_string()],
-            routes: Vec::new(),
-            handlers: Vec::new(),
+            routes: vec![
+                r#"        // TOTP enrolment and verification. Like WebAuthn, the framework wires
+        // no routes for this: the ceremony is yours to expose.
+        .route("/auth/totp/enroll", post(totp_enrol))
+        .route("/auth/totp/verify", post(totp_verify))"#
+                    .to_string(),
+            ],
+            handlers: vec![r##"#[derive(serde::Deserialize)]
+struct TotpEnrol {
+    username: String,
+}
+
+#[derive(serde::Deserialize)]
+struct TotpVerify {
+    username: String,
+    code: String,
+}
+
+/// Enrol an authenticator app.
+///
+/// Returns the secret and an `otpauth://` URI. Render the URI as a QR code;
+/// show the secret only as the manual fallback. It is a credential, not a
+/// profile field — do not log it, and do not return it again afterwards.
+async fn totp_enrol(
+    State(state): State<AppState>,
+    Json(body): Json<TotpEnrol>,
+) -> impl IntoResponse {
+    let method = TotpAuthMethod::new(SqlxCredentialStore::new(state.pool.clone()));
+    let user_id = user_id_for(&body.username);
+
+    match method
+        .register_totp(&user_id, "Authkestra Starter", &body.username)
+        .await
+    {
+        Ok((secret, uri)) => (StatusCode::OK, Json(json!({ "secret": secret, "uri": uri })))
+            .into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not provision TOTP");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not provision an authenticator" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Check a six-digit code.
+///
+/// A wrong code is an ordinary outcome, not a server fault, so it answers 401
+/// with `verified: false` rather than an error shape the caller has to
+/// special-case.
+async fn totp_verify(
+    State(state): State<AppState>,
+    Json(body): Json<TotpVerify>,
+) -> impl IntoResponse {
+    let method = TotpAuthMethod::new(SqlxCredentialStore::new(state.pool.clone()));
+    let user_id = user_id_for(&body.username);
+
+    match method
+        .authenticate(AuthInput::Totp {
+            user_id,
+            code: body.code,
+        })
+        .await
+    {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({ "verified": true, "detail": "code accepted" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "verified": false, "detail": e.to_string() })),
+        )
+            .into_response(),
+    }
+}"##
+            .to_string()],
+            state_fields: Vec::new(),
+            state_init: Vec::new(),
+            crates: vec![
+                CrateRequirement::new("uuid", &["v4", "v5"]),
+                CrateRequirement::new("serde", &["derive"]),
+            ],
             env: Vec::new(),
             notes: vec![
                 note.to_string(),
                 "Enrolment generates one secret per user and returns an `otpauth://` URI for \
                  a QR code. Treat the secret as a credential, not a profile field."
+                    .to_string(),
+                "Two routes are generated for you: `POST /auth/totp/enroll` returns the \
+                 secret and URI, and `POST /auth/totp/verify` checks a code. Verification \
+                 goes through `AuthMethod::authenticate`, which is what advances the \
+                 replay window — a code accepted twice would otherwise be a valid replay."
                     .to_string(),
             ],
             // Nothing to register anywhere: enrolment happens in your own app,
