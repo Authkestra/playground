@@ -271,41 +271,6 @@ async fn the_kill_switch_stops_ceremonies() {
 }
 
 #[tokio::test]
-async fn try_reports_enrolment_state() {
-    let app = api::build_router(state().await);
-    let cookie = enable_totp(&app).await;
-
-    let before = body_json(
-        app.clone()
-            .oneshot(
-                req("POST", "/api/scenarios/totp/try")
-                    .header(header::COOKIE, &cookie)
-                    .body(Body::from("{}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(before["outcome"], "not_configured");
-
-    provision(&app, &cookie).await;
-
-    let after = body_json(
-        app.oneshot(
-            req("POST", "/api/scenarios/totp/try")
-                .header(header::COOKIE, &cookie)
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap(),
-    )
-    .await;
-    assert_eq!(after["outcome"], "ok");
-}
-
-#[tokio::test]
 async fn the_diff_names_the_engine_crate_not_the_facade() {
     let app = api::build_router(state().await);
 

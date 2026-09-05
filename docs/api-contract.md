@@ -15,8 +15,6 @@ regenerating (CI enforces this — see P0 "Mirror the framework's CI quality bar
 | GET    | `/api/session/events`         | —               | `FlowEvent[]`     |
 | GET    | `/api/scenarios`              | —               | `ScenarioSpec[]`  |
 | POST   | `/api/scenarios/:id/configure`| `ConfigureBody` | `ConfigureResponse` |
-| GET    | `/api/scenarios/:id/diff`     | —               | `ConfigDiff`      |
-| POST   | `/api/scenarios/:id/try`      | `TryBody`       | `TryResult`       |
 | POST   | `/api/scenarios/:id/action/:action` | scenario-specific | scenario-specific |
 
 The demo session id travels in an HttpOnly cookie (`ak_demo`). Every endpoint under
@@ -47,7 +45,7 @@ up. `POST /api/session/reset` clears it.
 
 ## Ceremony actions
 
-Registration and verification are multi-round-trip, which `configure`/`diff`/`try`
+Registration and verification are multi-round-trip, which `configure` alone
 does not cover. Rather than giving each scenario its own routes — which would put
 a per-scenario branch back into the HTTP layer — every step goes through one
 generic endpoint:
@@ -72,7 +70,7 @@ responses are scenario-specific and typed in `packages/api-types`.
 The `oauth` scenario has **no** actions, because OAuth is a navigation rather
 than an XHR ceremony — see below.
 
-Action endpoints share the tighter rate limit with `try`, since they create
+Action endpoints share the tighter rate limit with starter-kit generation, since they create
 credentials and reach third parties.
 
 **A rejected credential is not an error.** `TotpVerification.verified: false` and
@@ -97,6 +95,7 @@ interface ScenarioSpec {
   control: ControlShape;
   depends_on: string[];
   available: boolean;   // false when the kill switch has disabled this scenario
+  unavailable_reason: string | null;  // why this scenario cannot be used; null means usable
 }
 
 type ControlValue =
@@ -134,10 +133,6 @@ interface ConfigDiff { entries: DiffEntry[]; consequences: Consequences }
 
 interface ConfigureBody { value: ControlValue }
 interface ConfigureResponse { config: DemoConfig; diff: ConfigDiff }
-
-interface TryBody { /* scenario-specific, opaque in v0 */ }
-type TryOutcome = "ok" | "disabled" | "not_configured";
-interface TryResult { outcome: TryOutcome; detail: string }
 
 interface HealthResponse { status: string; version: string; demo_enabled: boolean }
 ```

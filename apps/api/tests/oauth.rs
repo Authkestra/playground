@@ -89,21 +89,14 @@ async fn with_no_credentials_the_control_offers_nothing() {
     let s = spec(&app, "oauth").await;
     assert!(s["control"]["options"].as_array().unwrap().is_empty());
 
-    // And `try` explains why rather than looking broken.
-    let resp = app
-        .oneshot(
-            req("POST", "/api/scenarios/oauth/try")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let result = body_json(resp).await;
-    assert_eq!(result["outcome"], "not_configured");
+    // An empty control on its own reads as broken, so the spec has to carry the
+    // reason. This is the live case: the deployment has no provider credentials.
+    let reason = s["unavailable_reason"]
+        .as_str()
+        .expect("an offerless control must explain itself");
     assert!(
-        result["detail"].as_str().unwrap().contains("credentials"),
-        "detail should say credentials are missing: {}",
-        result["detail"]
+        reason.contains("credentials"),
+        "the reason should say credentials are missing: {reason}"
     );
 }
 
@@ -416,46 +409,6 @@ async fn multiple_providers_surface_the_account_linking_decision() {
         requirements.contains("two of them") || requirements.contains("link"),
         "should raise account linking: {requirements}"
     );
-}
-
-#[tokio::test]
-async fn try_lists_every_selected_provider() {
-    let app = app(&ALL);
-    let configured = app
-        .clone()
-        .oneshot(
-            req("POST", "/api/scenarios/oauth/configure")
-                .body(Body::from(
-                    r#"{"value":{"kind":"select_many","selected":["github","google","discord"]}}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let cookie = configured
-        .headers()
-        .get(header::SET_COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(';').next())
-        .unwrap()
-        .to_string();
-
-    let tried = app
-        .oneshot(
-            req("POST", "/api/scenarios/oauth/try")
-                .header(header::COOKIE, &cookie)
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    let result = body_json(tried).await;
-    assert_eq!(result["outcome"], "ok");
-    let detail = result["detail"].as_str().unwrap();
-    for label in ["GitHub", "Google", "Discord"] {
-        assert!(detail.contains(label), "{label} missing from: {detail}");
-    }
 }
 
 /// Three unrelated causes used to collapse into one `exchange_failed`, which

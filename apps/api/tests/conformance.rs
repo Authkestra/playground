@@ -259,10 +259,9 @@ async fn every_scenario_rejects_an_unknown_option() {
     }
 }
 
-/// The uniform contract, driven over HTTP for every scenario:
-/// configure → diff → try.
+/// The uniform contract, driven over HTTP for every scenario: configure.
 #[tokio::test]
-async fn every_scenario_supports_configure_diff_and_try() {
+async fn every_scenario_supports_configure() {
     let app = api::build_router(state().await);
 
     for (id, shape, _) in registered() {
@@ -286,51 +285,14 @@ async fn every_scenario_supports_configure_diff_and_try() {
             StatusCode::OK,
             "{id}: configure failed"
         );
-        let cookie = cookie_of(&configured).expect("configure issues a session");
+        // The value is not needed here — this asserts only that configuring a
+        // scenario is enough to establish a session, which every later step in
+        // this suite relies on.
+        cookie_of(&configured).expect("configure issues a session");
         let payload = body_json(configured).await;
         assert!(
             payload["config"]["scenarios"][&id].is_object(),
             "{id}: configure did not persist the value"
-        );
-
-        let diffed = app
-            .clone()
-            .oneshot(
-                req_from(&ip_for(&id), "GET", &format!("/api/scenarios/{id}/diff"))
-                    .header(header::COOKIE, &cookie)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(diffed.status(), StatusCode::OK, "{id}: diff failed");
-        let diff = body_json(diffed).await;
-        assert!(
-            diff["entries"].as_array().is_some_and(|e| !e.is_empty()),
-            "{id}: turning the scenario on produced no diff entries"
-        );
-
-        let tried = app
-            .clone()
-            .oneshot(
-                req_from(&ip_for(&id), "POST", &format!("/api/scenarios/{id}/try"))
-                    .header(header::COOKIE, &cookie)
-                    .body(Body::from("{}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(tried.status(), StatusCode::OK, "{id}: try failed");
-        let result = body_json(tried).await;
-        assert!(
-            ["ok", "disabled", "not_configured"]
-                .contains(&result["outcome"].as_str().unwrap_or("")),
-            "{id}: unexpected try outcome {:?}",
-            result["outcome"]
-        );
-        assert!(
-            result["detail"].as_str().is_some_and(|d| !d.is_empty()),
-            "{id}: try must explain its outcome"
         );
     }
 }
@@ -503,10 +465,10 @@ async fn conflicting_configurations_do_not_interfere() {
     }
 }
 
-/// With the kill switch off, no scenario may run a flow — but the site must
-/// still be readable, so listing and diffing keep working.
+/// With the kill switch off, ceremonies must not run — but the site must
+/// still be readable, so listing and configuring keep working.
 #[tokio::test]
-async fn the_kill_switch_stops_every_scenario_uniformly() {
+async fn the_kill_switch_stops_ceremonies_uniformly() {
     let mut st = state().await;
     let ks = KillSwitch::default();
     ks.set_demo_enabled(false);
@@ -528,25 +490,9 @@ async fn the_kill_switch_stops_every_scenario_uniformly() {
             )
             .await
             .unwrap();
-        // Configuring stays allowed: a visitor can still explore the diff.
+        // Configuring stays allowed: a visitor can still explore the consequences.
         assert_eq!(configured.status(), StatusCode::OK, "{id}");
         let cookie = cookie_of(&configured).unwrap();
-
-        let tried = app
-            .clone()
-            .oneshot(
-                req_from(&ip_for(&id), "POST", &format!("/api/scenarios/{id}/try"))
-                    .header(header::COOKIE, &cookie)
-                    .body(Body::from("{}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            tried.status(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "{id}: try ran while the demo was disabled"
-        );
 
         for action in actions {
             let resp = app

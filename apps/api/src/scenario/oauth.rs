@@ -26,9 +26,8 @@ use ts_rs::TS;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
-    KitLink, KitSetup, Scenario, ScenarioContext, ScenarioOption, TryOutcome, TryResult,
+    KitLink, KitSetup, Scenario, ScenarioOption,
 };
-use crate::error::ApiError;
 
 /// Providers this scenario knows how to configure.
 ///
@@ -361,42 +360,11 @@ impl Scenario for OAuthScenario {
         })
     }
 
-    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
-        let selected = selected_providers(ctx.value);
-
-        if selected.is_empty() {
-            return Ok(TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: if self.configured.is_empty() {
-                    "No provider credentials are configured on this deployment yet.".to_string()
-                } else {
-                    "Pick at least one provider.".to_string()
-                },
-            });
+    fn unavailable_reason(&self) -> Option<String> {
+        if self.configured.is_empty() {
+            Some("No provider credentials are configured on this deployment yet.".to_string())
+        } else {
+            None
         }
-
-        let unconfigured: Vec<&str> = selected
-            .iter()
-            .filter(|p| !self.configured.iter().any(|c| c == *p))
-            .map(|p| p.as_str())
-            .collect();
-        if !unconfigured.is_empty() {
-            return Ok(TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: format!(
-                    "No credentials configured for {} on this deployment.",
-                    join_human(&unconfigured)
-                ),
-            });
-        }
-
-        let labels: Vec<&str> = selected.iter().map(|p| Self::label_for(p)).collect();
-        Ok(TryResult {
-            outcome: TryOutcome::Ok,
-            detail: format!(
-                "Ready. Your sign-in page would offer {}.",
-                join_human(&labels)
-            ),
-        })
     }
 }

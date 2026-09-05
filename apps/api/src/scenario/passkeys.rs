@@ -32,7 +32,7 @@ use webauthn_rs::WebauthnBuilder;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
-    KitLink, KitSetup, Scenario, ScenarioContext, TryOutcome, TryResult,
+    KitLink, KitSetup, Scenario, ScenarioContext,
 };
 use crate::ceremony::CeremonyKind;
 use crate::error::ApiError;
@@ -248,31 +248,6 @@ impl Scenario for PasskeysScenario {
                 KitLink::example("crates/authkestra-engine/examples/totp_webauthn.rs"),
             ],
             needs_credential_store: true,
-        })
-    }
-
-    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
-        if !ctx.value.is_active() {
-            return Ok(TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: "Turn passkeys on first.".to_string(),
-            });
-        }
-
-        let count = stored_passkeys(ctx).await?.len();
-        Ok(if count > 0 {
-            TryResult {
-                outcome: TryOutcome::Ok,
-                detail: format!(
-                    "{count} passkey{} registered for this session. Try signing in with it.",
-                    if count == 1 { "" } else { "s" }
-                ),
-            }
-        } else {
-            TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: "Register a passkey first — your device will prompt you.".to_string(),
-            }
         })
     }
 

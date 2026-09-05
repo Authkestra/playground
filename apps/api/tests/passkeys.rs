@@ -279,25 +279,6 @@ async fn two_visitors_do_not_share_ceremony_state() {
 }
 
 #[tokio::test]
-async fn try_reports_that_nothing_is_enrolled_yet() {
-    let app = api::build_router(state().await);
-    let cookie = enable(&app).await;
-
-    let resp = app
-        .oneshot(
-            req("POST", "/api/scenarios/passkeys/try")
-                .header(header::COOKIE, &cookie)
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_json(resp).await["outcome"], "not_configured");
-}
-
-#[tokio::test]
 async fn the_diff_names_the_engine_webauthn_feature_not_the_facade() {
     let app = api::build_router(state().await);
 

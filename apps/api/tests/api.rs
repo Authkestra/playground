@@ -307,74 +307,13 @@ async fn an_unknown_option_is_rejected() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
-#[tokio::test]
-async fn try_succeeds_once_the_scenario_is_configured() {
-    let app = app(KillSwitch::default(), None).await;
-
-    let configured = app
-        .clone()
-        .oneshot(
-            req("POST", "/api/scenarios/dummy_toggle/configure")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"value":{"kind":"toggle","enabled":true}}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let cookie = session_cookie(&configured).expect("cookie");
-
-    let tried = app
-        .oneshot(
-            req("POST", "/api/scenarios/dummy_toggle/try")
-                .header(header::COOKIE, &cookie)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(tried.status(), StatusCode::OK);
-    assert_eq!(body_json(tried).await["outcome"], "ok");
-}
-
-#[tokio::test]
-async fn try_reports_not_configured_before_the_toggle_is_on() {
-    let resp = app(KillSwitch::default(), None)
-        .await
-        .oneshot(
-            req("POST", "/api/scenarios/dummy_toggle/try")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_json(resp).await["outcome"], "not_configured");
-}
-
 // --------------------------------------------------------------- kill switch
 
 #[tokio::test]
-async fn the_kill_switch_stops_try_but_leaves_the_site_readable() {
+async fn the_kill_switch_leaves_the_site_readable() {
     let ks = KillSwitch::default();
     ks.set_demo_enabled(false);
     let app = app(ks, None).await;
-
-    let tried = app
-        .clone()
-        .oneshot(
-            req("POST", "/api/scenarios/dummy_toggle/try")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(tried.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body_json(tried).await["error"], "demo_disabled");
 
     // Explainer-only mode still needs real content, so listing scenarios must
     // keep working — flagged unavailable rather than withheld.
@@ -390,17 +329,6 @@ async fn the_kill_switch_stops_try_but_leaves_the_site_readable() {
         .unwrap()
         .iter()
         .all(|s| s["available"] == false));
-
-    // And the diff still computes, so the explainer can show consequences.
-    let diffed = app
-        .oneshot(
-            req("GET", "/api/scenarios/dummy_toggle/diff")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(diffed.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -484,24 +412,14 @@ async fn admin_can_flip_the_switch_at_runtime() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // No redeploy: the very next request already sees flows disabled.
+    // No redeploy: the very next request already sees the kill switch.
     assert!(!state.kill_switch.demo_enabled());
-    let tried = app
-        .oneshot(
-            req("POST", "/api/scenarios/dummy_toggle/try")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(tried.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 // -------------------------------------------------------------- rate limiting
 
 #[tokio::test]
-async fn abusing_the_try_endpoint_is_throttled_with_a_renderable_429() {
+async fn abusing_expensive_endpoints_is_throttled_with_a_renderable_429() {
     let app = app(KillSwitch::default(), None).await;
 
     let mut statuses = Vec::new();
@@ -512,7 +430,7 @@ async fn abusing_the_try_endpoint_is_throttled_with_a_renderable_429() {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/scenarios/dummy_toggle/try")
+                    .uri("/api/scenarios/dummy_toggle/action/does_not_matter")
                     // A single abusive client IP.
                     .header("x-forwarded-for", "198.51.100.7")
                     .header(header::CONTENT_TYPE, "application/json")
@@ -530,7 +448,7 @@ async fn abusing_the_try_endpoint_is_throttled_with_a_renderable_429() {
 
     assert!(
         statuses.contains(&StatusCode::TOO_MANY_REQUESTS),
-        "scripted abuse of /try was never throttled: {statuses:?}"
+        "scripted abuse of expensive endpoints was never throttled: {statuses:?}"
     );
 
     // The UI renders this, so it must be JSON with the documented shape.

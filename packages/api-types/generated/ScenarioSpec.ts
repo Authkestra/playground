@@ -19,4 +19,10 @@ available: boolean,
  * Ceremony steps this scenario accepts at
  * `POST /api/scenarios/:id/action/:action`.
  */
-actions: Array<string>, };
+actions: Array<string>, 
+/**
+ * Why this scenario cannot be used on this deployment right now, when it cannot.
+ * The kill switch and a missing credential are different reasons; the UI renders
+ * whichever applies. None means usable.
+ */
+unavailable_reason: string | null, };

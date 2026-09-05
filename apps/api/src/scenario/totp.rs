@@ -23,7 +23,7 @@ use ts_rs::TS;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitFragment, KitLink,
-    Scenario, ScenarioContext, TryOutcome, TryResult,
+    Scenario, ScenarioContext,
 };
 use crate::error::ApiError;
 use crate::events::Step;
@@ -157,34 +157,6 @@ impl Scenario for TotpScenario {
                 KitLink::example("crates/authkestra-engine/examples/totp_webauthn.rs"),
             ],
             needs_credential_store: true,
-        })
-    }
-
-    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
-        if !ctx.value.is_active() {
-            return Ok(TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: "Turn TOTP on first.".to_string(),
-            });
-        }
-
-        let method = TotpAuthMethod::new(ctx.credentials());
-        let enrolled = method
-            .has_enrolled(&ctx.user_id())
-            .await
-            .map_err(|e| ApiError::Scenario(e.to_string()))?;
-
-        Ok(if enrolled {
-            TryResult {
-                outcome: TryOutcome::Ok,
-                detail: "An authenticator is enrolled for this session. Enter a code to verify it."
-                    .to_string(),
-            }
-        } else {
-            TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: "Scan the QR code with an authenticator app to enrol first.".to_string(),
-            }
         })
     }
 

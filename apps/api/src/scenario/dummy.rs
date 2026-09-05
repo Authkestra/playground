@@ -1,15 +1,15 @@
 //! Placeholder scenarios proving the registry works for both control shapes.
 //!
-//! P1's acceptance criterion is that "a dummy scenario can be registered,
-//! configured, diffed and 'tried' without touching shared code paths". These
-//! two exist to demonstrate exactly that — one boolean, one provider-select —
-//! and are deleted once the real scenarios land in P2.
+//! P1's acceptance criterion was that a dummy scenario can be registered,
+//! configured and diffed without touching shared code paths. These two exist to
+//! demonstrate exactly that — one boolean, one provider-select.
+//!
+//! They are **not** registered for visitors: `ScenarioRegistry::for_tests` adds
+//! them, `with_providers` does not. They survive the real scenarios landing
+//! because they carry no behaviour of their own, so a test that needs "some
+//! toggle" does not end up depending on whatever TOTP happens to do.
 
-use super::{
-    Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioContext,
-    ScenarioOption, TryOutcome, TryResult,
-};
-use crate::error::ApiError;
+use super::{Consequences, ControlShape, ControlValue, CrateRequirement, Scenario, ScenarioOption};
 
 /// A boolean control, shaped like the eventual passkeys / TOTP scenarios.
 pub struct DummyToggleScenario;
@@ -49,19 +49,6 @@ impl Scenario for DummyToggleScenario {
                 &["session", "token"],
             )],
         }
-    }
-
-    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
-        if !ctx.value.is_active() {
-            return Ok(TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: "Turn the example toggle on first.".to_string(),
-            });
-        }
-        Ok(TryResult {
-            outcome: TryOutcome::Ok,
-            detail: "The example toggle is on.".to_string(),
-        })
     }
 }
 
@@ -121,23 +108,5 @@ impl Scenario for DummyProviderScenario {
             )],
             crates: vec![CrateRequirement::new("authkestra-providers", &[provider])],
         }
-    }
-
-    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError> {
-        Ok(match ctx.value {
-            ControlValue::SelectOne {
-                selected: Some(provider),
-            } => TryResult {
-                outcome: TryOutcome::Ok,
-                detail: format!(
-                    "`{provider}` is selected. Live provider round-trips arrive in P2, \
-                     once credentials are registered."
-                ),
-            },
-            _ => TryResult {
-                outcome: TryOutcome::NotConfigured,
-                detail: "Pick a provider first.".to_string(),
-            },
-        })
     }
 }

@@ -128,6 +128,10 @@ pub struct ScenarioSpec {
     /// Ceremony steps this scenario accepts at
     /// `POST /api/scenarios/:id/action/:action`.
     pub actions: Vec<String>,
+    /// Why this scenario cannot be used on this deployment right now, when it cannot.
+    /// The kill switch and a missing credential are different reasons; the UI renders
+    /// whichever applies. None means usable.
+    pub unavailable_reason: Option<String>,
 }
 
 /// A crate + feature set a real project would need for the current config.
@@ -200,23 +204,6 @@ impl Consequences {
             c.features.sort();
         }
     }
-}
-
-/// Outcome of a `try` call.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export)]
-pub enum TryOutcome {
-    Ok,
-    Disabled,
-    NotConfigured,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub struct TryResult {
-    pub outcome: TryOutcome,
-    pub detail: String,
 }
 
 /// Everything a scenario needs to do real work for one visitor.
@@ -437,9 +424,12 @@ pub trait Scenario: Send + Sync {
     /// Returns empty consequences when the scenario is not active.
     fn consequences(&self, value: &ControlValue) -> Consequences;
 
-    /// Exercise the scenario without running a full ceremony — used by the
-    /// `try` endpoint to report readiness.
-    async fn try_run(&self, ctx: &ScenarioContext<'_>) -> Result<TryResult, ApiError>;
+    /// Why this scenario cannot be used on this deployment right now, when it cannot.
+    /// `None` means usable. It exists so the UI can explain an empty or inert control
+    /// instead of rendering a dead end.
+    fn unavailable_reason(&self) -> Option<String> {
+        None
+    }
 
     /// Handle one step of a multi-step ceremony.
     ///

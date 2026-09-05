@@ -19,7 +19,7 @@ use crate::engine::EngineFactory;
 use crate::error::ApiError;
 use crate::killswitch::KillSwitch;
 use crate::kit::StarterKit;
-use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec, TryResult};
+use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec};
 use crate::session::{DemoSession, DemoSessionStore, DemoSessionView, COOKIE_NAME};
 use crate::settings::Settings;
 
@@ -59,10 +59,6 @@ pub struct ConfigureResponse {
     pub config: DemoConfig,
     pub diff: ConfigDiff,
 }
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub struct TryBody {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminKillSwitchBody {
@@ -106,19 +102,29 @@ async fn resolve_session(state: &AppState, cookies: &Cookies) -> Result<DemoSess
 }
 
 /// Attach the kill switch's current view of availability to each spec.
+/// When the kill switch has disabled the scenario, the reason is that live flows
+/// are switched off; otherwise fall through to the scenario's unavailable_reason.
 fn specs_for(state: &AppState) -> Vec<ScenarioSpec> {
     state
         .sessions
         .registry()
         .iter()
-        .map(|s| ScenarioSpec {
-            id: s.id().to_string(),
-            name: s.name().to_string(),
-            summary: s.summary().to_string(),
-            control: s.control(),
-            depends_on: s.depends_on(),
-            available: state.kill_switch.scenario_enabled(s.id()),
-            actions: s.actions().iter().map(|a| a.to_string()).collect(),
+        .map(|s| {
+            let unavailable_reason = if state.kill_switch.scenario_enabled(s.id()) {
+                s.unavailable_reason()
+            } else {
+                Some("Live flows are switched off.".to_string())
+            };
+            ScenarioSpec {
+                id: s.id().to_string(),
+                name: s.name().to_string(),
+                summary: s.summary().to_string(),
+                control: s.control(),
+                depends_on: s.depends_on(),
+                available: state.kill_switch.scenario_enabled(s.id()),
+                actions: s.actions().iter().map(|a| a.to_string()).collect(),
+                unavailable_reason,
+            }
         })
         .collect()
 }
@@ -211,64 +217,6 @@ async fn configure_scenario(
         config: updated.config,
         diff: d,
     }))
-}
-
-#[tracing::instrument(skip_all, fields(scenario = %id))]
-async fn scenario_diff(
-    State(state): State<AppState>,
-    cookies: Cookies,
-    Path(id): Path<String>,
-) -> Result<Json<ConfigDiff>, ApiError> {
-    let registry = state.sessions.registry();
-    let scenario = registry
-        .get(&id)
-        .ok_or_else(|| ApiError::UnknownScenario(id.clone()))?;
-
-    let session = resolve_session(&state, &cookies).await?;
-
-    // Isolate this scenario's contribution: the current config against the same
-    // config with this one scenario back at its default.
-    let after = session.config.clone();
-    let mut baseline = after.clone();
-    baseline.set(&id, scenario.default_value());
-
-    Ok(Json(diff::diff(&baseline, &after, registry)))
-}
-
-#[tracing::instrument(skip_all, fields(scenario = %id))]
-async fn try_scenario(
-    State(state): State<AppState>,
-    cookies: Cookies,
-    Path(id): Path<String>,
-) -> Result<Json<TryResult>, ApiError> {
-    let registry = state.sessions.registry();
-    let scenario = registry
-        .get(&id)
-        .ok_or_else(|| ApiError::UnknownScenario(id.clone()))?;
-
-    if !state.kill_switch.scenario_enabled(&id) {
-        return Err(ApiError::DemoDisabled);
-    }
-
-    let session = resolve_session(&state, &cookies).await?;
-    let value = session
-        .config
-        .get(&id)
-        .cloned()
-        .unwrap_or_else(|| scenario.default_value());
-
-    // The engine this visitor's config implies.
-    let _engine = state.engines.engine_for(&session.config);
-
-    let ctx = ScenarioContext {
-        session_id: session.id,
-        value: &value,
-        credentials: &state.credentials,
-        relying_party: &state.settings.relying_party,
-        ceremonies: &state.ceremonies,
-        events: &state.events,
-    };
-    Ok(Json(scenario.try_run(&ctx).await?))
 }
 
 /// One step of a scenario's ceremony.
@@ -424,9 +372,7 @@ async fn download_starter_kit(
 /// tighter rate limit.
 pub fn sensitive_router() -> Router<AppState> {
     Router::new()
-        .route("/api/scenarios/{id}/try", post(try_scenario))
-        // Ceremony steps create credentials and call third parties, so they
-        // belong on the tighter bucket alongside `try`.
+        // Ceremony steps create credentials and call third parties.
         .route("/api/scenarios/{id}/action/{action}", post(scenario_action))
         // Generating and compressing a project is the most expensive request
         // this service serves, so it shares the tighter bucket.
@@ -442,7 +388,6 @@ pub fn standard_router() -> Router<AppState> {
         .route("/api/session/events", get(session_events))
         .route("/api/scenarios", get(list_scenarios))
         .route("/api/scenarios/{id}/configure", post(configure_scenario))
-        .route("/api/scenarios/{id}/diff", get(scenario_diff))
 }
 
 /// Admin routes, mounted only when an admin token is configured.
