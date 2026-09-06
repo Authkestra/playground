@@ -27,7 +27,7 @@ use crate::scenario::{
 /// download can never advertise a version the playground does not build
 /// against. Upstream's README says 0.7 while the crates are 0.8.0, which is
 /// exactly why this is not taken from prose.
-pub const AUTHKESTRA_VERSION: &str = "0.9.0";
+pub const AUTHKESTRA_VERSION: &str = "0.9.2";
 
 /// The generated project's crate name and directory.
 pub const PROJECT_NAME: &str = "authkestra-starter";
@@ -984,20 +984,6 @@ fn differences_section(plan: &Plan) -> String {
             .to_string(),
     ];
 
-    if plan.is_active("totp") {
-        items.push(
-            "**Re-enrolling TOTP is refused rather than replacing.** The \
-             playground's own credential store overwrites, because it defines the \
-             storage id itself. `SqlxCredentialStore` appends, and \
-             `CredentialStore` has no delete — so a second enrolment would leave \
-             two secrets, and verification matches the first. The new QR code \
-             would be dead on arrival while the old authenticator kept working. \
-             `POST /auth/totp/enroll` answers `409` instead. Removing the old \
-             credential is your application's job."
-                .to_string(),
-        );
-    }
-
     items.push(
         "**Sessions and credentials outlive a restart differently.** The \
          playground keeps demo state in Redis with a twelve-hour expiry, because \
@@ -1874,6 +1860,32 @@ mod tests {
         let readme = contents(&kit_with_options(&[("totp", on())], BOTH), "README.md");
         assert!(readme.contains("GET /openapi.json"), "{readme}");
         assert!(readme.contains(client::CLIENT_PATH), "{readme}");
+    }
+
+    /// Re-enrolment must clear the previous secret before issuing one.
+    ///
+    /// Without the delete, `register_totp` appends and verification matches
+    /// the oldest credential: the QR code just handed over is dead while the
+    /// device being replaced keeps working. That shipped once, and the order
+    /// matters as much as the call.
+    #[test]
+    fn totp_enrolment_clears_the_previous_authenticator_first() {
+        let main = contents(&kit_with(&[("totp", on())]), "src/main.rs");
+
+        // Matched as calls, not as words: both names appear in the comment
+        // above them explaining why the order is what it is, and a substring
+        // search would compare the positions of the prose instead.
+        let delete = main
+            .find(".delete_credentials(")
+            .expect("enrolment should clear the previous credential");
+        let register = main
+            .find(".register_totp(")
+            .expect("enrolment should register a new credential");
+
+        assert!(
+            delete < register,
+            "the old credential must be cleared before the new one is saved"
+        );
     }
 
     #[test]

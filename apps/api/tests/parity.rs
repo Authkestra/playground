@@ -168,14 +168,15 @@ async fn a_malformed_credential_is_a_client_error<T: Target>(t: &mut T) {
 
 /// Whatever secret you were handed last is the one that works.
 ///
-/// The two reach this differently and both are defensible: the playground's
-/// store replaces the credential, so re-enrolling issues a new working secret;
-/// the generated project refuses a second enrolment, because the framework's
-/// `SqlxCredentialStore` appends and `CredentialStore` has no delete, so a
-/// second secret would be dead on arrival while the old one kept working.
+/// Both sides now reach this the same way — by replacing the previous
+/// credential. They did not always: `CredentialStore` had no delete until
+/// 0.9.2 (marcjazz/authkestra#326), so the generated project could only refuse
+/// a second enrolment while the playground's own store overwrote.
 ///
-/// What neither may do is hand over a QR code that cannot verify. This test
-/// caught exactly that in the generated project.
+/// The assertion is unchanged through all of that, which is the point of
+/// phrasing it as an outcome rather than as a mechanism. What neither may do
+/// is hand over a QR code that cannot verify — this test caught exactly that
+/// in the generated project.
 async fn the_last_issued_secret_is_the_one_that_works<T: Target>(t: &mut T) {
     let first = enrolment_returns_a_usable_secret(t).await;
 

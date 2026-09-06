@@ -224,9 +224,9 @@ export interface TotpEnrolment {
 /**
  * Enrol an authenticator app.
  *
- * Throws `AuthError` with status 409 when one is already enrolled — this
- * project refuses to issue a second secret, because the framework's credential
- * store has no delete and the newer secret would be the one that does not work.
+ * Enrolling again replaces any previous authenticator, so the secret returned
+ * here is always the live one. Show the URI as a QR code and the secret only
+ * as the manual fallback.
  */
 export async function enrolTotp(username: string, base?: string): Promise<TotpEnrolment> {
   return post<TotpEnrolment>("/auth/totp/enroll", { username }, base);

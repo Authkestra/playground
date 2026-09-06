@@ -178,44 +178,30 @@ async fn totp_enrol(
     let method = TotpAuthMethod::new(SqlxCredentialStore::new(state.pool.clone()));
     let user_id = user_id_for(&body.username);
 
-    // Refuse a second enrolment rather than silently creating one that cannot
-    // work.
+    // Replace any existing authenticator rather than adding a second one.
     //
-    // `register_totp` saves under a fresh credential id every time, and
-    // `CredentialStore` exposes no way to remove one — only save, get and
-    // update. So a second enrolment leaves two secrets, and verification
-    // matches the *first*: the QR code just handed over is dead while the old
-    // authenticator, possibly on the phone being replaced, still works.
+    // `register_totp` saves under a fresh credential id every time and the SQL
+    // store appends, so without this a second enrolment leaves two secrets and
+    // verification matches the *first*: the QR code just handed over is dead
+    // while the old authenticator — quite possibly on the phone being replaced
+    // — keeps working.
     //
-    // Deleting the row directly would mean reaching past the trait into the
-    // store's schema. Refusing is honest and keeps the failure in front of the
-    // person who can act on it.
-    match SqlxCredentialStore::new(state.pool.clone())
-        .get_credentials(&user_id, "totp")
+    // `delete_credentials` arrived in 0.9.2 (marcjazz/authkestra#326). Before
+    // it, `CredentialStore` had no delete at all and this endpoint could only
+    // refuse the second enrolment.
+    if let Err(e) = SqlxCredentialStore::new(state.pool.clone())
+        .delete_credentials(&user_id, "totp")
         .await
     {
-        Ok(existing) if !existing.is_empty() => {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({
-                    "error": "already enrolled",
-                    "detail": "An authenticator is already enrolled for this user. \
-                               Remove the stored credential before enrolling another — \
-                               the framework's CredentialStore has no delete, so that \
-                               is your application's job.",
-                })),
-            )
-                .into_response();
-        }
-        Ok(_) => {}
-        Err(e) => {
-            tracing::warn!(error = %e, "could not check for an existing authenticator");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "could not read credentials" })),
-            )
-                .into_response();
-        }
+        tracing::warn!(error = %e, "could not clear the previous authenticator");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "could not replace the existing authenticator",
+                "detail": e.to_string(),
+            })),
+        )
+            .into_response();
     }
 
     match method
@@ -275,8 +261,8 @@ async fn totp_verify(
     path = "/auth/totp/enroll",
     request_body = TotpEnrol,
     responses(
-            (status = 200, description = "The secret and an otpauth:// URI for a QR code"),
-            (status = 409, description = "An authenticator is already enrolled for this user"),
+            (status = 200, description = "The secret and an otpauth:// URI for a QR code, replacing any previous one"),
+            (status = 500, description = "The previous authenticator could not be cleared"),
     ),
     tag = "totp",
 )]"##
@@ -314,6 +300,11 @@ async fn totp_verify(
                  secret and URI, and `POST /auth/totp/verify` checks a code. Verification \
                  goes through `AuthMethod::authenticate`, which is what advances the \
                  replay window — a code accepted twice would otherwise be a valid replay."
+                    .to_string(),
+                "Enrolling again **replaces** the previous authenticator. It has to: the \
+                 store appends rather than overwrites, and verification matches the \
+                 oldest credential, so leaving both would hand someone a QR code that \
+                 can never work while the device they are replacing keeps working."
                     .to_string(),
             ],
             // Nothing to register anywhere: enrolment happens in your own app,
