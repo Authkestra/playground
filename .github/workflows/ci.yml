@@ -53,6 +53,7 @@ jobs:
               - '.github/workflows/ci.yml'
             frontend:
               - 'apps/web/**'
+              - 'scripts/contrast-audit.mjs'
               - 'packages/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -183,6 +184,13 @@ jobs:
 
       - name: Test
         run: pnpm --filter ./apps/web run test
+
+      # Auth flows are where unreadable text stops being cosmetic: the message
+      # that fails contrast is usually the one explaining why someone could not
+      # sign in. Reads the classes actually used rather than a hand-kept list,
+      # so it cannot drift.
+      - name: Colour contrast
+        run: node scripts/contrast-audit.mjs
 
       - name: Build
         run: pnpm --filter ./apps/web run build

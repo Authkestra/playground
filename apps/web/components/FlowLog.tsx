@@ -66,7 +66,7 @@ export default function FlowLog({ events, loading, error }: Props) {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4" style={{ maxHeight: 480 }}>
         {events.length === 0 ? (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-400">
             {loading
               ? "Loading the flow log…"
               : "Nothing yet — actions you take on the left (signing in, verifying a code, registering a passkey) will appear here as they happen."}
@@ -87,7 +87,7 @@ export default function FlowLog({ events, loading, error }: Props) {
                     <span className="text-sm font-medium text-slate-100">{event.step}</span>
                     <span className="sr-only">({LEVEL_LABEL[event.level]})</span>
                   </div>
-                  <span className="shrink-0 text-xs text-slate-500" title={event.at}>
+                  <span className="shrink-0 text-xs text-slate-400" title={event.at}>
                     {formatRelativeTime(event.at)}
                   </span>
                 </div>

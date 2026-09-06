@@ -92,7 +92,7 @@ export default function SessionBar({ session, onReset, resetting }: Props) {
               : `Expires ${new Date(session.expires_at).toLocaleString()}`}
           </span>
         ) : (
-          <span className="text-slate-500">No session yet</span>
+          <span className="text-slate-400">No session yet</span>
         )}
       </div>
       <button

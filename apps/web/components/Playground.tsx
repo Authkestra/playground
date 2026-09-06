@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ConfigDiff,
   ControlValue,
@@ -44,10 +44,27 @@ export default function Playground() {
   const [maxReached, setMaxReached] = useState<Step>(1);
   const [oauthReturn, setOauthReturn] = useState<OAuthReturn | null>(null);
 
+  // Focus moves into the step that just appeared.
+  //
+  // The wizard swaps content without a navigation, so a keyboard user who
+  // presses "Continue" is left with focus on a button that no longer exists,
+  // and a screen reader announces nothing — the page silently became a
+  // different page. Focusing the new step's heading puts them at the top of
+  // what they just asked for.
+  const stepHeadingRef = useRef<HTMLDivElement>(null);
+  const [pendingFocus, setPendingFocus] = useState(false);
+
   const goToStep = useCallback((next: Step) => {
     setStep(next);
     setMaxReached((prev) => (next > prev ? next : prev));
+    setPendingFocus(true);
   }, []);
+
+  useEffect(() => {
+    if (!pendingFocus) return;
+    stepHeadingRef.current?.focus();
+    setPendingFocus(false);
+  }, [pendingFocus, step]);
 
   const load = useCallback(async () => {
     setPhase("loading");
@@ -227,7 +244,7 @@ export default function Playground() {
           <div className="h-5 bg-slate-800/60 rounded animate-pulse w-1/2" />
           <div className="h-5 bg-slate-800/60 rounded animate-pulse w-2/3" />
         </div>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-slate-400">
           Loading playground… The API runs on a free tier and can take up to a minute to wake
           up on its first request.
         </p>
@@ -309,6 +326,9 @@ export default function Playground() {
 
       <StepIndicator current={step} maxReached={maxReached} onNavigate={goToStep} />
 
+      {/* The focus target for a step change. `tabIndex={-1}` makes it
+          programmatically focusable without adding a tab stop of its own. */}
+      <div ref={stepHeadingRef} tabIndex={-1} className="focus-visible:outline-none">
       {step === 1 && (
         <StepChooseMethods
           scenarios={scenarios}
@@ -341,6 +361,7 @@ export default function Playground() {
           onBack={() => goToStep(2)}
         />
       )}
+      </div>
     </main>
   );
 }

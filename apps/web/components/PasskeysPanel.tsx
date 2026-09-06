@@ -385,7 +385,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
   }, [scenarioId, onDemoDisabled, onAction]);
 
   if (capability === "checking") {
-    return <p className="text-xs text-slate-500">Checking passkey support in this browser…</p>;
+    return <p className="text-xs text-slate-400">Checking passkey support in this browser…</p>;
   }
 
   if (capability === "unsupported") {
@@ -455,10 +455,21 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
             {authenticating ? "Authenticating…" : "Authenticate with a passkey"}
           </button>
         </div>
-        {authBanner && (
-          <p className="flex items-center gap-1.5 text-xs text-amber-400">{authBanner}</p>
-        )}
-        {authResult && (
+        {/* A passkey ceremony hands control to the browser and the
+            authenticator, so nothing on screen changes for seconds at a time.
+            Sighted users have the button's "Authenticating…" label; without a
+            live region a screen-reader user gets silence, then a result they
+            did not know was coming. */}
+        <div aria-live="polite" role="status">
+          {authenticating && (
+            <p className="text-xs text-slate-400">
+              Waiting for your authenticator…
+            </p>
+          )}
+          {authBanner && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-400">{authBanner}</p>
+          )}
+          {authResult && (
           <div
             className={`flex flex-col gap-1 text-xs ${
               authResult.verified ? "text-emerald-400" : "text-slate-300"
@@ -469,14 +480,15 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled, onAction }: 
               {authResult.detail}
             </p>
             {authResult.counter !== null && (
-              <p className="text-slate-500">
+              <p className="text-slate-400">
                 Signature counter: {authResult.counter}. A counter that fails to
                 advance between authentications is how cloned authenticators are
                 detected.
               </p>
             )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

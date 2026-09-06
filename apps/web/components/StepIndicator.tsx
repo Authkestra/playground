@@ -77,7 +77,7 @@ function StepBadge({
           ? "bg-slate-200 text-slate-900"
           : isComplete
             ? "bg-slate-700 text-slate-200"
-            : "bg-slate-800 text-slate-500"
+            : "bg-slate-800 text-slate-400"
       }`}
     >
       {isComplete ? "✓" : id}

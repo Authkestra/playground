@@ -116,7 +116,7 @@ export default function StepDownload({
 
         <fieldset className="mt-5 border-t border-slate-800 pt-4">
           <legend className="sr-only">Optional extras</legend>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
             Optional
           </p>
 
@@ -131,7 +131,7 @@ export default function StepDownload({
             />
             <span className="text-sm text-slate-300">
               OpenAPI document
-              <span className="block text-xs text-slate-500">
+              <span className="block text-xs text-slate-400">
                 Annotates the handlers and serves the spec at{" "}
                 <code className="font-mono">/openapi.json</code>. Adds{" "}
                 <code className="font-mono">utoipa</code>.
@@ -150,7 +150,7 @@ export default function StepDownload({
             />
             <span className="text-sm text-slate-300">
               TypeScript client
-              <span className="block text-xs text-slate-500">
+              <span className="block text-xs text-slate-400">
                 A dependency-free client that handles the base64url conversion{" "}
                 <code className="font-mono">navigator.credentials</code> needs.
                 No Rust dependency.

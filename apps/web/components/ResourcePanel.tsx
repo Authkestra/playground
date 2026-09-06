@@ -119,11 +119,11 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled, onAction }: 
 
       {issued && (
         <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-400">
             Audience <code className="font-mono text-slate-400">{issued.audience}</code> ·
             expires in {issued.expires_in}s
           </p>
-          <label className="mt-2 block text-xs text-slate-500" htmlFor="token">
+          <label className="mt-2 block text-xs text-slate-400" htmlFor="token">
             Edit it before calling to see the other failures — change a character for a bad
             signature, or delete a segment for a malformed one.
           </label>

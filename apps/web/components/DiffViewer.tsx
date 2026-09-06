@@ -19,7 +19,7 @@ const KIND_SYMBOL: Record<DiffKind, string> = {
 export default function DiffViewer({ diff }: Props) {
   if (!diff) {
     return (
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-slate-400">
         Configure a scenario above to see how it changes the config.
       </p>
     );
@@ -35,7 +35,7 @@ export default function DiffViewer({ diff }: Props) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1 font-mono text-xs">
         {entries.length === 0 ? (
-          <span className="text-slate-500">No changes.</span>
+          <span className="text-slate-400">No changes.</span>
         ) : (
           entries.map((entry, i) => (
             <div
@@ -62,14 +62,14 @@ export default function DiffViewer({ diff }: Props) {
               Crates
             </h4>
             {consequences.crates.length === 0 ? (
-              <p className="text-xs text-slate-500">None</p>
+              <p className="text-xs text-slate-400">None</p>
             ) : (
               <ul className="flex flex-col gap-1 text-xs text-slate-300">
                 {consequences.crates.map((c) => (
-                  <li key={c.name}>
+                  <li key={c.name} className="break-words">
                     <span className="font-mono">{c.name}</span>
                     {c.features.length > 0 && (
-                      <span className="text-slate-500"> [{c.features.join(", ")}]</span>
+                      <span className="text-slate-400"> [{c.features.join(", ")}]</span>
                     )}
                   </li>
                 ))}
@@ -89,11 +89,11 @@ function ConsequenceList({ title, items }: { title: string; items: string[] }) {
         {title}
       </h4>
       {items.length === 0 ? (
-        <p className="text-xs text-slate-500">None</p>
+        <p className="text-xs text-slate-400">None</p>
       ) : (
         <ul className="flex flex-col gap-1 text-xs text-slate-300">
           {items.map((item) => (
-            <li key={item} className="font-mono">
+            <li key={item} className="break-all font-mono">
               {item}
             </li>
           ))}

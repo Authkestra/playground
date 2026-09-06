@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DemoConfig, FlowEvent, OAuthMode, ScenarioSpec } from "@playground/api-types";
 import { getSessionEvents } from "@/lib/api";
 import { loginUrl, type OAuthReturn } from "@/lib/oauth";
@@ -172,7 +172,7 @@ export default function StepSignIn({
                       Continue with {option.label}
                     </button>
                   ))}
-                  <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-500">
+                  <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-400">
                     <span>Identity mode:</span>
                     <div className="inline-flex rounded-md border border-slate-800 p-0.5">
                       <ModeButton
@@ -284,7 +284,7 @@ function ModeButton({
 
 function Divider() {
   return (
-    <div className="flex items-center gap-3 text-xs text-slate-500">
+    <div className="flex items-center gap-3 text-xs text-slate-400">
       <div className="h-px flex-1 bg-slate-700" />
       or
       <div className="h-px flex-1 bg-slate-700" />
@@ -344,9 +344,24 @@ function OAuthReturnBanner({
     }.`;
   }
 
+  // The visitor left for the provider and came back. The browser drops focus
+  // at the top of a freshly loaded document, so without moving it the outcome
+  // of the thing they just did is somewhere below, unannounced — and for a
+  // screen-reader user, the round trip appears to have done nothing.
+  //
+  // `role="status"` announces it; the ref focuses it, so keyboard users
+  // continue from the result rather than tabbing back to it.
+  const bannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bannerRef.current?.focus();
+  }, []);
+
   return (
     <div
-      className={`mb-4 flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm ${styles[result.status]}`}
+      ref={bannerRef}
+      tabIndex={-1}
+      role="status"
+      className={`mb-4 flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current ${styles[result.status]}`}
     >
       <p>{message}</p>
       <button

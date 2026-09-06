@@ -153,7 +153,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
             ) : qrError ? (
               <span className="p-2 text-center text-xs text-amber-400">{qrError}</span>
             ) : (
-              <span className="text-xs text-slate-500">Rendering…</span>
+              <span className="text-xs text-slate-400">Rendering…</span>
             )}
           </div>
           <div className="flex flex-1 flex-col gap-1">
@@ -198,16 +198,18 @@ export default function TotpPanel({ scenarioId, onDemoDisabled, onAction }: Prop
             </button>
           </div>
 
-          {verifyResult && (
-            <p
-              className={`flex items-center gap-1.5 text-xs ${
-                verifyResult.verified ? "text-emerald-400" : "text-slate-300"
-              }`}
-            >
-              <span aria-hidden="true">{verifyResult.verified ? "✓" : "•"}</span>
-              {verifyResult.detail}
-            </p>
-          )}
+          <div aria-live="polite" role="status">
+            {verifyResult && (
+              <p
+                className={`flex items-center gap-1.5 text-xs ${
+                  verifyResult.verified ? "text-emerald-400" : "text-slate-300"
+                }`}
+              >
+                <span aria-hidden="true">{verifyResult.verified ? "✓" : "•"}</span>
+                {verifyResult.detail}
+              </p>
+            )}
+          </div>
         </form>
       )}
     </div>

@@ -61,7 +61,7 @@ export default function ScenarioPanel({
   showActionPanels = true,
 }: Props) {
   if (scenarios.length === 0) {
-    return <p className="text-sm text-slate-500">No scenarios published yet.</p>;
+    return <p className="text-sm text-slate-400">No scenarios published yet.</p>;
   }
 
   return (
@@ -253,7 +253,7 @@ function ScenarioControl({
  */
 function EmptyControlNote({ scenario }: { scenario: ScenarioSpec }) {
   return (
-    <p className="text-xs text-slate-500">
+    <p className="text-xs text-slate-400">
       {scenario.unavailable_reason
         ? "Nothing to choose from here."
         : "Nothing to choose from on this deployment."}
