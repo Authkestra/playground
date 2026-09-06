@@ -54,6 +54,7 @@ jobs:
             frontend:
               - 'apps/web/**'
               - 'scripts/contrast-audit.mjs'
+              - 'scripts/bundle-budget.mjs'
               - 'packages/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -194,3 +195,10 @@ jobs:
 
       - name: Build
         run: pnpm --filter ./apps/web run build
+
+      # After the build, because it measures the built output. Gates the thing
+      # that actually regresses — how much JavaScript a visitor downloads
+      # before the page works — rather than lab timings, which are too noisy on
+      # a shared runner to gate on without teaching people to ignore CI.
+      - name: JavaScript budget
+        run: node scripts/bundle-budget.mjs
