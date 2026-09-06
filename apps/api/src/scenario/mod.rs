@@ -12,6 +12,7 @@
 pub mod dummy;
 pub mod oauth;
 pub mod passkeys;
+pub mod resource;
 pub mod totp;
 
 use std::collections::HashMap;
@@ -546,6 +547,7 @@ impl ScenarioRegistry {
         r.register(Arc::new(passkeys::PasskeysScenario));
         r.register(Arc::new(oauth::OAuthScenario::new(configured_providers)));
         r.register(Arc::new(totp::TotpScenario));
+        r.register(Arc::new(resource::ResourceScenario));
         r
     }
 

@@ -28,3 +28,6 @@ export type { ScenarioOption } from "./generated/ScenarioOption";
 export type { ScenarioSpec } from "./generated/ScenarioSpec";
 export type { TotpProvision } from "./generated/TotpProvision";
 export type { TotpVerification } from "./generated/TotpVerification";
+export type { IssuedToken } from "./generated/IssuedToken";
+export type { ProtectedCall } from "./generated/ProtectedCall";
+export type { TokenVerdict } from "./generated/TokenVerdict";

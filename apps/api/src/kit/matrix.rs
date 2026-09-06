@@ -56,6 +56,7 @@ pub fn representative() -> Vec<Combination> {
         Combination::new("base", ""),
         Combination::new("passkeys", "passkeys"),
         Combination::new("totp", "totp"),
+        Combination::new("resource", "resource"),
     ];
     for p in PROVIDERS {
         out.push(Combination::new(
@@ -66,7 +67,7 @@ pub fn representative() -> Vec<Combination> {
     out.push(Combination::new("totp-passkeys", "passkeys,totp"));
     out.push(Combination::new(
         "all",
-        &format!("passkeys,totp,oauth={}", PROVIDERS.join("+")),
+        &format!("passkeys,totp,resource,oauth={}", PROVIDERS.join("+")),
     ));
     // The opt-ins, on. Every other leg covers them off. Only OpenAPI changes
     // what the compiler sees — the TypeScript client is a file the Rust build
@@ -87,7 +88,7 @@ pub fn representative() -> Vec<Combination> {
 /// against every subset of the providers.
 pub fn exhaustive() -> Vec<Combination> {
     let mut out = Vec::new();
-    for toggles in 0..4u8 {
+    for toggles in 0..8u8 {
         for providers in 0..(1 << PROVIDERS.len()) {
             let mut parts = Vec::new();
             let mut name = Vec::new();
@@ -98,6 +99,10 @@ pub fn exhaustive() -> Vec<Combination> {
             if toggles & 2 != 0 {
                 parts.push("totp".to_string());
                 name.push("totp");
+            }
+            if toggles & 4 != 0 {
+                parts.push("resource".to_string());
+                name.push("resource");
             }
             let chosen: Vec<&str> = PROVIDERS
                 .iter()
@@ -224,8 +229,8 @@ mod tests {
 
     #[test]
     fn the_exhaustive_set_is_the_whole_product() {
-        // two toggles x every subset of three providers
-        assert_eq!(exhaustive().len(), 4 * 8);
+        // three toggles x every subset of three providers
+        assert_eq!(exhaustive().len(), 8 * 8);
         // and it contains every *selection* the pull-request set builds; the
         // opt-in legs differ by options rather than by scenarios
         let all: Vec<String> = exhaustive().into_iter().map(|c| c.spec).collect();

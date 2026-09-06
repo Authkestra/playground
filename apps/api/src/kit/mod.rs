@@ -249,6 +249,20 @@ impl Plan {
     }
 
     /// Only worth serving a spec when something asked to be in it.
+    /// Which engine alias the generated `AppState` should name.
+    ///
+    /// Only `session_store` and `token_manager` move the typestate, so the
+    /// alias follows whether a token manager was supplied. Naming the wrong
+    /// one is a type error in the generated project rather than something
+    /// subtle, but it is a confusing one to land on.
+    fn engine_alias(&self) -> &'static str {
+        if self.is_active("resource") {
+            "AkEngine"
+        } else {
+            "AkWebAppEngine"
+        }
+    }
+
     fn wants_openapi(&self) -> bool {
         self.options.openapi && !self.openapi_paths().is_empty()
     }
@@ -522,7 +536,10 @@ fn main_rs(plan: &Plan) -> String {
     let mut imports: Vec<String> = vec![
         "use authkestra_axum::{AuthSession, AxumError, AxumExt, AxumState};".to_string(),
         "use authkestra_engine::store::memory::MemoryStore;".to_string(),
-        "use authkestra_engine::{AkWebAppEngine, Engine, SessionConfig, SessionStore};".to_string(),
+        format!(
+            "use authkestra_engine::{{{}, Engine, SessionConfig, SessionStore}};",
+            plan.engine_alias()
+        ),
         "use axum::http::StatusCode;".to_string(),
         "use axum::response::IntoResponse;".to_string(),
         "use axum::routing::get;".to_string(),
@@ -683,6 +700,8 @@ async fn openapi_spec() -> impl IntoResponse {{
         String::new()
     };
 
+    let engine_alias = plan.engine_alias();
+
     let state_fields = {
         let mut lines: Vec<String> = Vec::new();
         // Emitted once, by whoever needs credentials at all, rather than by
@@ -732,13 +751,13 @@ async fn openapi_spec() -> impl IntoResponse {{
 
 {imports}
 
-/// `AkWebAppEngine` is the alias for a session-configured engine. Using the
+/// `{engine_alias}` is the alias for the engine this project builds. Using the
 /// alias rather than spelling out the typestate generics keeps the compile
 /// error legible when a required builder call is missing.
 #[derive(Clone, AxumState)]
 struct AppState {{
     #[authkestra(engine)]
-    auth: AkWebAppEngine,{state_fields}
+    auth: {engine_alias},{state_fields}
 }}
 
 #[tokio::main]

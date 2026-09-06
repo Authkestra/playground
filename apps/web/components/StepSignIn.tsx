@@ -7,6 +7,7 @@ import { loginUrl, type OAuthReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
 import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
+import ResourcePanel from "@/components/ResourcePanel";
 import FlowLog from "@/components/FlowLog";
 
 interface Props {
@@ -113,6 +114,7 @@ export default function StepSignIn({
   const oauthAvailable = oauthScenario?.available !== false && activeOauthOptions.length > 0;
 
   const passkeysActive = isControlValueActive(config?.scenarios.passkeys);
+  const resourceActive = isControlValueActive(config?.scenarios?.["resource"]);
   const totpActive = isControlValueActive(config?.scenarios.totp);
 
   const hasAnyMethod = oauthAvailable || passkeysActive || totpActive;
@@ -208,6 +210,21 @@ export default function StepSignIn({
                   <h4 className="mb-2 text-sm font-medium text-slate-200">Authenticator app</h4>
                   <TotpPanel
                     scenarioId="totp"
+                    onDemoDisabled={onDemoDisabled}
+                    onAction={fetchEvents}
+                  />
+                </div>
+              )}
+
+              {totpActive && resourceActive && <Divider />}
+
+              {resourceActive && (
+                <div className="rounded-md border border-slate-800 p-4">
+                  <h4 className="mb-2 text-sm font-medium text-slate-200">
+                    Protected API route
+                  </h4>
+                  <ResourcePanel
+                    scenarioId="resource"
                     onDemoDisabled={onDemoDisabled}
                     onAction={fetchEvents}
                   />
