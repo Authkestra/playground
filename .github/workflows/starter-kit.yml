@@ -171,22 +171,34 @@ jobs:
 
       # The TypeScript client is a file the Rust build never looks at, so
       # compiling proves nothing about it either way.
+      # Written with `if`, not `cmd && { exit 1; }`. The steps run under
+      # `bash -e`, where a trailing `grep -q` that finds nothing returns 1 and
+      # fails the step — so the shorthand fails exactly when the check passes.
       - name: Check the opt-ins produced what they promise
         run: |
           case "${{ matrix.combination.name }}" in
             *extras*)
-              test -f generated/client/authkestra.ts \
-                || { echo "::error::the client opt-in produced no client"; exit 1; }
-              grep -q 'utoipa::path' generated/src/main.rs \
-                || { echo "::error::the openapi opt-in annotated nothing"; exit 1; }
+              if [ ! -f generated/client/authkestra.ts ]; then
+                echo "::error::the client opt-in produced no client"
+                exit 1
+              fi
+              if ! grep -q 'utoipa::path' generated/src/main.rs; then
+                echo "::error::the openapi opt-in annotated nothing"
+                exit 1
+              fi
               ;;
             *)
-              test ! -e generated/client \
-                || { echo "::error::a plain download carries a TypeScript client"; exit 1; }
-              grep -q 'utoipa' generated/src/main.rs \
-                && { echo "::error::a plain download carries utoipa annotations"; exit 1; }
+              if [ -e generated/client ]; then
+                echo "::error::a plain download carries a TypeScript client"
+                exit 1
+              fi
+              if grep -q 'utoipa' generated/src/main.rs; then
+                echo "::error::a plain download carries utoipa annotations"
+                exit 1
+              fi
               ;;
           esac
+          echo "opt-ins are as expected"
 
       - name: Build it
         working-directory: generated
