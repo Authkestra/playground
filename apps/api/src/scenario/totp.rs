@@ -23,7 +23,7 @@ use ts_rs::TS;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitFragment, KitLink,
-    Scenario, ScenarioContext,
+    KitOpenApiPath, Scenario, ScenarioContext,
 };
 use crate::error::ApiError;
 use crate::events::Step;
@@ -267,6 +267,37 @@ async fn totp_verify(
     }
 }"##
             .to_string()],
+            openapi_paths: vec![
+                KitOpenApiPath {
+                    handler: "totp_enrol".to_string(),
+                    annotation: r##"#[utoipa::path(
+    post,
+    path = "/auth/totp/enroll",
+    request_body = TotpEnrol,
+    responses(
+            (status = 200, description = "The secret and an otpauth:// URI for a QR code"),
+            (status = 409, description = "An authenticator is already enrolled for this user"),
+    ),
+    tag = "totp",
+)]"##
+                        .to_string(),
+                },
+                KitOpenApiPath {
+                    handler: "totp_verify".to_string(),
+                    annotation: r##"#[utoipa::path(
+    post,
+    path = "/auth/totp/verify",
+    request_body = TotpVerify,
+    responses(
+            (status = 200, description = "The code was accepted"),
+            (status = 401, description = "The code was wrong, expired, or already used"),
+    ),
+    tag = "totp",
+)]"##
+                        .to_string(),
+                },
+            ],
+            openapi_schemas: vec!["TotpEnrol".to_string(), "TotpVerify".to_string()],
             state_fields: Vec::new(),
             state_init: Vec::new(),
             crates: vec![

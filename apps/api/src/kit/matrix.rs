@@ -10,7 +10,7 @@
 //! rather than repeating it in YAML, so the two cannot drift.
 
 use crate::demo_config::DemoConfig;
-use crate::scenario::{ControlValue, ScenarioRegistry};
+use crate::scenario::{ControlValue, KitOptions, ScenarioRegistry};
 
 /// Every provider the generator knows how to emit.
 pub const PROVIDERS: &[&str] = &["github", "google", "discord"];
@@ -22,6 +22,8 @@ pub struct Combination {
     pub name: String,
     /// `scenario[=opt+opt],scenario`, or empty for the base project.
     pub spec: String,
+    /// What was asked of the download itself.
+    pub options: KitOptions,
 }
 
 impl Combination {
@@ -29,6 +31,15 @@ impl Combination {
         Self {
             name: name.to_string(),
             spec: spec.to_string(),
+            options: KitOptions::default(),
+        }
+    }
+
+    fn with_options(name: &str, spec: &str, options: KitOptions) -> Self {
+        Self {
+            name: name.to_string(),
+            spec: spec.to_string(),
+            options,
         }
     }
 }
@@ -56,6 +67,18 @@ pub fn representative() -> Vec<Combination> {
     out.push(Combination::new(
         "all",
         &format!("passkeys,totp,oauth={}", PROVIDERS.join("+")),
+    ));
+    // The opt-ins, on. Every other leg covers them off. Only OpenAPI changes
+    // what the compiler sees — the TypeScript client is a file the Rust build
+    // never looks at — but the two ship together here so a leg exists where
+    // both are on at once.
+    out.push(Combination::with_options(
+        "all-extras",
+        "passkeys,totp",
+        KitOptions {
+            openapi: true,
+            ts_client: true,
+        },
     ));
     out
 }
@@ -203,11 +226,26 @@ mod tests {
     fn the_exhaustive_set_is_the_whole_product() {
         // two toggles x every subset of three providers
         assert_eq!(exhaustive().len(), 4 * 8);
-        // and it contains everything the pull-request set builds
+        // and it contains every *selection* the pull-request set builds; the
+        // opt-in legs differ by options rather than by scenarios
         let all: Vec<String> = exhaustive().into_iter().map(|c| c.spec).collect();
         for c in representative() {
             assert!(all.contains(&c.spec), "exhaustive is missing `{}`", c.spec);
         }
+    }
+
+    /// A matrix that only ever builds the default would let the opt-ins rot.
+    #[test]
+    fn the_matrix_builds_the_opt_ins_as_well_as_without_them() {
+        let set = representative();
+        assert!(
+            set.iter().any(|c| c.options.openapi && c.options.ts_client),
+            "no combination exercises the download opt-ins"
+        );
+        assert!(
+            set.iter().any(|c| c.options == KitOptions::default()),
+            "no combination exercises a plain download"
+        );
     }
 
     #[test]

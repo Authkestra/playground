@@ -274,6 +274,13 @@ pub struct KitFragment {
     pub state_fields: Vec<String>,
     /// The matching `name: value,` lines where `AppState` is constructed.
     pub state_init: Vec<String>,
+    /// Endpoints to document, used only when a spec was asked for. Kept as
+    /// data rather than baked into `handlers` so a project that wants no
+    /// OpenAPI carries no trace of it — not an unused attribute, not a
+    /// dependency, not a `cfg` on a feature that does not exist.
+    pub openapi_paths: Vec<KitOpenApiPath>,
+    /// Request types that need a schema, by name.
+    pub openapi_schemas: Vec<String>,
     /// Crates the *generated handlers* need, as opposed to the ones the
     /// framework needs. Kept apart from `Consequences::crates` because the
     /// playground's diff answers "what does turning this on require of
@@ -368,10 +375,36 @@ impl KitEnvVar {
     }
 }
 
+/// Choices about the download itself rather than about authentication.
+///
+/// Kept apart from `DemoConfig` on purpose: these are properties of the kit,
+/// not authentication methods, and putting them among the login toggles would
+/// misrepresent both. They are two independent opt-ins because they serve
+/// different people — someone on htmx wants the spec and no TypeScript,
+/// someone on Next.js may want the client and no `utoipa`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KitOptions {
+    /// Annotate the handlers and serve an OpenAPI document.
+    pub openapi: bool,
+    /// Emit a typed TypeScript client for the ceremony endpoints.
+    pub ts_client: bool,
+}
+
+/// One documented endpoint, when the visitor asked for a spec.
+#[derive(Debug, Clone)]
+pub struct KitOpenApiPath {
+    /// The generated handler this describes, by function name.
+    pub handler: String,
+    /// The `#[utoipa::path(...)]` attribute, without the `cfg_attr` wrapper.
+    pub annotation: String,
+}
+
 /// What else is switched on, so a fragment can adapt to its company.
 pub struct KitContext<'a> {
     /// Ids of every active scenario, in registry order.
     pub active: &'a [String],
+    /// What was asked of the download itself.
+    pub options: KitOptions,
 }
 
 impl KitContext<'_> {

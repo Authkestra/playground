@@ -11,13 +11,14 @@
 
 use crate::demo_config::DemoConfig;
 mod archive;
+mod client;
 pub mod matrix;
 
 pub use archive::ArchiveError;
 
 use crate::scenario::{
-    ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment, KitLink, KitSetup,
-    ScenarioRegistry,
+    ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment, KitLink, KitOptions,
+    KitSetup, ScenarioRegistry,
 };
 
 /// The framework version every generated project pins.
@@ -49,9 +50,18 @@ pub struct StarterKit {
 }
 
 impl StarterKit {
-    /// Build a project from a visitor's configuration.
+    /// Build a project from a visitor's configuration, with nothing extra.
     pub fn generate(config: &DemoConfig, registry: &ScenarioRegistry) -> Self {
-        let plan = Plan::from(config, registry);
+        Self::generate_with(config, registry, KitOptions::default())
+    }
+
+    /// Build a project, including whatever was asked of the download itself.
+    pub fn generate_with(
+        config: &DemoConfig,
+        registry: &ScenarioRegistry,
+        options: KitOptions,
+    ) -> Self {
+        let plan = Plan::from(config, registry, options);
         Self {
             slug: plan.slug(),
             files: vec![
@@ -79,7 +89,10 @@ impl StarterKit {
                     path: "justfile".to_string(),
                     contents: JUSTFILE.to_string(),
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(client_file(&plan))
+            .collect(),
         }
     }
 
@@ -104,6 +117,8 @@ impl StarterKit {
 /// Derived from the same `Scenario::consequences` the diff renders, so the
 /// download and the promise cannot drift — see the ADR.
 struct Plan {
+    /// What was asked of the download itself, as opposed to of the auth.
+    options: KitOptions,
     /// Scenario ids the visitor turned on, in registry order.
     active: Vec<String>,
     /// The same scenarios by their display name, for prose. The README is read
@@ -121,7 +136,7 @@ struct Plan {
 }
 
 impl Plan {
-    fn from(config: &DemoConfig, registry: &ScenarioRegistry) -> Self {
+    fn from(config: &DemoConfig, registry: &ScenarioRegistry, options: KitOptions) -> Self {
         let mut active = Vec::new();
         let mut labels = Vec::new();
         let mut selection: Vec<(String, Vec<String>)> = Vec::new();
@@ -142,7 +157,10 @@ impl Plan {
         // Fragments are gathered in a second pass so each one can see the full
         // set of active scenarios — TOTP's role depends on whether it has
         // company.
-        let ctx = KitContext { active: &active };
+        let ctx = KitContext {
+            active: &active,
+            options,
+        };
         let mut fragments = Vec::new();
         for scenario in registry.iter() {
             if let Some(value) = config.get(scenario.id()) {
@@ -156,6 +174,9 @@ impl Plan {
         // generated handler's dependency is emitted without appearing in the
         // diff as something authkestra asked for.
         let mut crates = consequences.crates;
+        if options.openapi && fragments.iter().any(|f| !f.openapi_paths.is_empty()) {
+            crates.push(CrateRequirement::new("utoipa", &["axum_extras"]));
+        }
         for fragment in &fragments {
             for req in &fragment.crates {
                 match crates.iter_mut().find(|c| c.name == req.name) {
@@ -174,6 +195,7 @@ impl Plan {
         crates.sort_by(|a, b| a.name.cmp(&b.name));
 
         Self {
+            options,
             active,
             labels,
             selection,
@@ -215,6 +237,20 @@ impl Plan {
             .into_iter()
             .filter(|v| v.default.is_none())
             .collect()
+    }
+
+    /// Every documented endpoint, in emission order.
+    fn openapi_paths(&self) -> Vec<&crate::scenario::KitOpenApiPath> {
+        self.collect(|f| &f.openapi_paths).collect()
+    }
+
+    fn openapi_schemas(&self) -> Vec<&String> {
+        self.collect(|f| &f.openapi_schemas).collect()
+    }
+
+    /// Only worth serving a spec when something asked to be in it.
+    fn wants_openapi(&self) -> bool {
+        self.options.openapi && !self.openapi_paths().is_empty()
     }
 
     fn setup_steps(&self) -> Vec<&KitSetup> {
@@ -271,10 +307,22 @@ impl Plan {
     /// both "oauth", and two downloads that differ would arrive under one name.
     /// So the chosen options are folded in too.
     fn slug(&self) -> String {
-        if self.selection.is_empty() {
-            return "base".to_string();
+        // Options belong in the name too: two downloads that differ only by an
+        // opt-in would otherwise arrive under one filename and overwrite each
+        // other in a downloads folder.
+        let mut extras = String::new();
+        if self.options.openapi {
+            extras.push_str("-openapi");
         }
-        self.selection
+        if self.options.ts_client {
+            extras.push_str("-client");
+        }
+
+        if self.selection.is_empty() {
+            return format!("base{extras}");
+        }
+        let methods = self
+            .selection
             .iter()
             .map(|(id, options)| {
                 if options.is_empty() {
@@ -284,7 +332,8 @@ impl Plan {
                 }
             })
             .collect::<Vec<_>>()
-            .join("-")
+            .join("-");
+        format!("{methods}{extras}")
     }
 }
 
@@ -311,6 +360,18 @@ fn feature_list(base: &[&str], extra: Vec<String>) -> String {
         .map(|f| format!("\"{f}\""))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The TypeScript client, when it was asked for and there is something for it
+/// to talk to.
+fn client_file(plan: &Plan) -> Option<GeneratedFile> {
+    if !plan.options.ts_client || !(plan.is_active("passkeys") || plan.is_active("totp")) {
+        return None;
+    }
+    Some(GeneratedFile {
+        path: client::CLIENT_PATH.to_string(),
+        contents: client::client_ts(plan),
+    })
 }
 
 fn cargo_toml(plan: &Plan) -> String {
@@ -377,6 +438,7 @@ fn third_party_deps(plan: &Plan) -> String {
             "webauthn-rs" => "0.5",
             "uuid" => "1",
             "serde" => "1",
+            "utoipa" => "5",
             "sqlx" => "0.8",
             "url" => "2.5",
             other => {
@@ -553,6 +615,74 @@ fn main_rs(plan: &Plan) -> String {
         }
     };
 
+    // Annotations are woven in here rather than baked into the fragments, so a
+    // project that did not ask for a spec carries no trace of one: no unused
+    // attribute, no dependency, and no `cfg` naming a feature that does not
+    // exist in its manifest.
+    let extra_handlers = if plan.wants_openapi() {
+        let mut annotated = extra_handlers;
+        for path in plan.openapi_paths() {
+            let needle = format!("async fn {}(", path.handler);
+            let Some(at) = annotated.find(&needle) else {
+                // A handler named in `openapi_paths` that no fragment emits is
+                // a bug in the fragment, not something to paper over.
+                panic!("no generated handler named `{}`", path.handler);
+            };
+            // Back up over the handler's doc comment so the attribute sits
+            // above it, where rustfmt and rustdoc both expect it.
+            let start = annotated[..at].rfind("\n\n").map(|i| i + 2).unwrap_or(at);
+            annotated.insert_str(start, &format!("{}\n", path.annotation));
+        }
+        for schema in plan.openapi_schemas() {
+            let needle = format!("struct {schema} {{");
+            if let Some(at) = annotated.find(&needle) {
+                annotated.insert_str(at, "#[derive(utoipa::ToSchema)]\n");
+            }
+        }
+        annotated
+    } else {
+        extra_handlers
+    };
+
+    let openapi_block = if plan.wants_openapi() {
+        let paths = plan
+            .openapi_paths()
+            .iter()
+            .map(|p| p.handler.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let schemas = plan
+            .openapi_schemas()
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            r#"
+/// The generated OpenAPI document.
+///
+/// Descriptions come from the handlers' own doc comments, so the spec and the
+/// code cannot drift: there is only one place to write them.
+#[derive(utoipa::OpenApi)]
+#[openapi(paths({paths}), components(schemas({schemas})))]
+struct ApiDoc;
+
+async fn openapi_spec() -> impl IntoResponse {{
+    use utoipa::OpenApi as _;
+    Json(ApiDoc::openapi())
+}}
+"#
+        )
+    } else {
+        String::new()
+    };
+
+    let openapi_route = if plan.wants_openapi() {
+        "\n        .route(\"/openapi.json\", get(openapi_spec))".to_string()
+    } else {
+        String::new()
+    };
+
     let state_fields = {
         let mut lines: Vec<String> = Vec::new();
         // Emitted once, by whoever needs credentials at all, rather than by
@@ -650,7 +780,7 @@ async fn main() {{
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/api/me", get(me)){extra_routes}
+        .route("/api/me", get(me)){extra_routes}{openapi_route}
         // The engine's own `/auth/*` routes.
         .merge(engine.axum_router())
         // The engine reads and writes cookies, so the cookie layer must wrap
@@ -690,7 +820,7 @@ async fn me(session: Result<AuthSession, AxumError>) -> impl IntoResponse {{
         ),
     }}
 }}
-{extra_handlers}"#
+{extra_handlers}{openapi_block}"#
     )
 }
 
@@ -738,7 +868,7 @@ fn readme(plan: &Plan) -> String {
 Generated by the [authkestra playground](https://play.authkestra.com).
 
 {selected}
-{configure}{run}{deps_section}{notes_section}{differences}
+{configure}{run}{deps_section}{notes_section}{extras}{differences}
 ## Read more
 
 {links}
@@ -785,6 +915,7 @@ MIT OR Apache-2.0, matching the framework.
 "#,
         configure = configure_section(plan),
         differences = differences_section(plan),
+        extras = extras_section(plan),
         run = run_section(plan),
         links = link_list(&plan.links()),
     )
@@ -800,6 +931,40 @@ MIT OR Apache-2.0, matching the framework.
 /// the reader has to discover is a small betrayal of that. A parity test keeps
 /// this list honest: the assertions both sides must satisfy live in
 /// `apps/api/tests/parity.rs`, and anything not on that list is written here.
+/// What the two download opt-ins added, when they were asked for.
+fn extras_section(plan: &Plan) -> String {
+    let mut parts = Vec::new();
+
+    if plan.wants_openapi() {
+        parts.push(
+            "### OpenAPI\n\nThe service serves its own document at `GET /openapi.json`. \
+             Descriptions come from the handlers' doc comments, so there is one place to \
+             write them and the spec cannot drift from the code.\n\n`utoipa` is a normal \
+             dependency here because you asked for it; remove the annotations and the \
+             `/openapi.json` route to drop it."
+                .to_string(),
+        );
+    }
+
+    if plan.options.ts_client && (plan.is_active("passkeys") || plan.is_active("totp")) {
+        parts.push(format!(
+            "### TypeScript client\n\n`{}` is a dependency-free client for the endpoints \
+             above. It is hand-written rather than generated from the OpenAPI document, \
+             deliberately: a schema describes the wire shapes, but not the base64url \
+             conversion `navigator.credentials` needs on both sides, which is where most \
+             passkey integrations break.\n\nCopy it, or import it as-is. It has no build \
+             step and no dependencies.",
+            client::CLIENT_PATH
+        ));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("\n## What you also asked for\n\n{}\n", parts.join("\n\n"))
+    }
+}
+
 fn differences_section(plan: &Plan) -> String {
     if !plan.needs_credential_store() {
         return String::new();
@@ -1546,6 +1711,169 @@ mod tests {
                 "the manifest would inherit a surrounding workspace:\n{manifest}"
             );
         }
+    }
+
+    // ---- P4 #49: two independent opt-ins ----
+
+    fn kit_with_options(scenarios: &[(&str, ControlValue)], options: KitOptions) -> StarterKit {
+        let registry = ScenarioRegistry::with_providers(vec!["github".to_string()]);
+        let mut config = DemoConfig::defaults_for(&registry);
+        for (id, value) in scenarios {
+            config.set(id, value.clone());
+        }
+        StarterKit::generate_with(&config, &registry, options)
+    }
+
+    const BOTH: KitOptions = KitOptions {
+        openapi: true,
+        ts_client: true,
+    };
+
+    /// The default must leave no trace of either opt-in. Someone who wants a
+    /// Rust service should not find TypeScript in their download, and should
+    /// not read `utoipa` attributes they did not ask for.
+    #[test]
+    fn a_download_that_asked_for_nothing_extra_contains_nothing_extra() {
+        let kit = kit_with(&[("passkeys", on()), ("totp", on())]);
+
+        assert!(
+            kit.file(client::CLIENT_PATH).is_none(),
+            "a TS client appeared"
+        );
+        let main = contents(&kit, "src/main.rs");
+        assert!(!main.contains("utoipa"), "utoipa annotations appeared");
+        assert!(!main.contains("openapi"), "an openapi route appeared");
+        assert!(
+            !contents(&kit, "Cargo.toml").contains("utoipa"),
+            "utoipa is in the manifest"
+        );
+    }
+
+    #[test]
+    fn the_two_opt_ins_are_independent() {
+        let spec_only = kit_with_options(
+            &[("totp", on())],
+            KitOptions {
+                openapi: true,
+                ts_client: false,
+            },
+        );
+        assert!(contents(&spec_only, "src/main.rs").contains("utoipa::path"));
+        assert!(
+            spec_only.file(client::CLIENT_PATH).is_none(),
+            "asking for a spec should not produce TypeScript"
+        );
+
+        let client_only = kit_with_options(
+            &[("totp", on())],
+            KitOptions {
+                openapi: false,
+                ts_client: true,
+            },
+        );
+        assert!(client_only.file(client::CLIENT_PATH).is_some());
+        assert!(
+            !contents(&client_only, "Cargo.toml").contains("utoipa"),
+            "asking for a client should not add a Rust dependency"
+        );
+    }
+
+    /// Every generated handler must appear in the spec. A documented endpoint
+    /// that silently stops being documented is worse than none, because the
+    /// spec still looks complete.
+    #[test]
+    fn every_ceremony_endpoint_is_documented() {
+        let main = contents(
+            &kit_with_options(&[("passkeys", on()), ("totp", on())], BOTH),
+            "src/main.rs",
+        );
+        for route in [
+            "/auth/passkey/register/start",
+            "/auth/passkey/register/finish",
+            "/auth/passkey/login/start",
+            "/auth/passkey/login/finish",
+            "/auth/totp/enroll",
+            "/auth/totp/verify",
+        ] {
+            let documented = main.match_indices(route).any(|(i, _)| {
+                main[..i].rfind("#[utoipa::path(").is_some_and(|a| {
+                    // the annotation that mentions this route is the nearest one above it
+                    main[a..i].matches("async fn").count() == 0
+                })
+            });
+            assert!(documented, "{route} is served but not documented");
+        }
+        assert_eq!(main.matches("#[utoipa::path(").count(), 6);
+    }
+
+    /// The client is only worth emitting when there is something to call.
+    #[test]
+    fn no_client_is_emitted_for_a_project_with_no_ceremonies() {
+        let kit = kit_with_options(&[], BOTH);
+        assert!(kit.file(client::CLIENT_PATH).is_none());
+        // And with nothing to document, no spec route either.
+        assert!(!contents(&kit, "src/main.rs").contains("openapi.json"));
+    }
+
+    /// The client only covers what the project actually serves.
+    #[test]
+    fn the_client_covers_the_selected_methods_and_no_others() {
+        let totp_only = kit_with_options(&[("totp", on())], BOTH);
+        let ts = &totp_only.file(client::CLIENT_PATH).unwrap().contents;
+        assert!(ts.contains("export async function enrolTotp"));
+        assert!(
+            !ts.contains("enrolPasskey"),
+            "the client offers a passkey call the project cannot answer"
+        );
+
+        let passkeys_only = kit_with_options(&[("passkeys", on())], BOTH);
+        let ts = &passkeys_only.file(client::CLIENT_PATH).unwrap().contents;
+        assert!(ts.contains("export async function enrolPasskey"));
+        assert!(!ts.contains("enrolTotp"));
+    }
+
+    /// The one field a blanket camelCase rule gets wrong, on the browser side
+    /// this time. Getting it wrong here fails every sign-in on shape.
+    #[test]
+    fn the_client_spells_client_data_json_correctly() {
+        let kit = kit_with_options(&[("passkeys", on())], BOTH);
+        let ts = &kit.file(client::CLIENT_PATH).unwrap().contents;
+        assert!(ts.contains("clientDataJSON:"), "{ts}");
+        assert!(
+            // The wrong spelling appears once, in the comment warning against it.
+            // What must not exist is a field written that way.
+            !ts.contains("clientDataJson:"),
+            "no browser sends that spelling"
+        );
+    }
+
+    /// Two downloads that differ only by an opt-in must not share a filename.
+    #[test]
+    fn the_opt_ins_reach_the_archive_name() {
+        let plain = kit_with(&[("totp", on())]).archive_name();
+        let with_spec = kit_with_options(
+            &[("totp", on())],
+            KitOptions {
+                openapi: true,
+                ts_client: false,
+            },
+        )
+        .archive_name();
+        let with_both = kit_with_options(&[("totp", on())], BOTH).archive_name();
+
+        assert_ne!(plain, with_spec);
+        assert_ne!(with_spec, with_both);
+        assert!(
+            with_both.contains("openapi") && with_both.contains("client"),
+            "{with_both}"
+        );
+    }
+
+    #[test]
+    fn the_readme_explains_what_the_opt_ins_added() {
+        let readme = contents(&kit_with_options(&[("totp", on())], BOTH), "README.md");
+        assert!(readme.contains("GET /openapi.json"), "{readme}");
+        assert!(readme.contains(client::CLIENT_PATH), "{readme}");
     }
 
     #[test]

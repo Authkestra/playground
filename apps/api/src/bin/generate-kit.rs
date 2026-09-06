@@ -60,6 +60,7 @@ fn run() -> Result<(), String> {
     }
 
     let name = value_of(&args, "--name");
+    let named_lookup = name.clone();
     let spec = value_of(&args, "--spec");
     let out = value_of(&args, "--out").ok_or("--out is required")?;
 
@@ -78,9 +79,22 @@ fn run() -> Result<(), String> {
         (None, None) => return Err("pass --name or --spec".to_string()),
     };
 
+    // A named combination carries its own opt-ins, so CI can name one leg
+    // rather than repeating flags in YAML. Explicit flags still win.
+    let named = named_lookup
+        .as_ref()
+        .and_then(|n| set.iter().find(|c| &c.name == n))
+        .map(|c| c.options)
+        .unwrap_or_default();
+
+    let options = api::scenario::KitOptions {
+        openapi: named.openapi || args.iter().any(|a| a == "--openapi"),
+        ts_client: named.ts_client || args.iter().any(|a| a == "--ts-client"),
+    };
+
     let registry = matrix::ci_registry();
     let config = matrix::config_from_spec(&spec, &registry)?;
-    let kit = StarterKit::generate(&config, &registry);
+    let kit = StarterKit::generate_with(&config, &registry, options);
 
     let root = std::path::Path::new(&out);
     for file in &kit.files {
@@ -115,4 +129,6 @@ Emit a generated starter project to disk.
   --exhaustive           use the full product rather than the PR set
   --name <name>          generate a named combination
   --spec <spec>          generate an ad-hoc one, e.g. \"passkeys,oauth=github\"
-  --out <dir>            where to write it (required to generate)";
+  --out <dir>            where to write it (required to generate)
+  --openapi              annotate the handlers and serve an OpenAPI document
+  --ts-client            emit a typed TypeScript client for the ceremonies";

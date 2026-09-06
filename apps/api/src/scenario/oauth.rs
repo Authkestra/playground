@@ -354,6 +354,8 @@ impl Scenario for OAuthScenario {
             handlers: Vec::new(),
             env,
             notes,
+            openapi_paths: Vec::new(),
+            openapi_schemas: Vec::new(),
             state_fields: Vec::new(),
             state_init: Vec::new(),
             crates: Vec::new(),

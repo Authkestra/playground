@@ -170,10 +170,27 @@ export type StarterKitDownload = { blob: Blob; filename: string };
 
 const FALLBACK_FILENAME = "authkestra-starter.zip";
 
-export async function downloadStarterKit(): Promise<ApiResult<StarterKitDownload>> {
+/**
+ * What the visitor asked of the download itself, as opposed to of the auth.
+ * Independent flags: someone may want the spec and no TypeScript, or the
+ * reverse.
+ */
+export interface StarterKitOptions {
+  openapi: boolean;
+  tsClient: boolean;
+}
+
+export async function downloadStarterKit(
+  options: StarterKitOptions = { openapi: false, tsClient: false },
+): Promise<ApiResult<StarterKitDownload>> {
+  const query = new URLSearchParams();
+  if (options.openapi) query.set("openapi", "1");
+  if (options.tsClient) query.set("client", "1");
+  const suffix = query.size > 0 ? `?${query}` : "";
+
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/api/starter-kit`, { credentials: "include" });
+    res = await fetch(`${API_BASE}/api/starter-kit${suffix}`, { credentials: "include" });
   } catch {
     return { ok: false, error: { kind: "unavailable" } };
   }

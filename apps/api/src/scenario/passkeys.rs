@@ -32,7 +32,7 @@ use webauthn_rs::WebauthnBuilder;
 
 use super::{
     Consequences, ControlShape, ControlValue, CrateRequirement, KitContext, KitEnvVar, KitFragment,
-    KitLink, KitSetup, Scenario, ScenarioContext,
+    KitLink, KitOpenApiPath, KitSetup, Scenario, ScenarioContext,
 };
 use crate::ceremony::CeremonyKind;
 use crate::error::ApiError;
@@ -541,6 +541,64 @@ async fn passkey_login_finish(
 }"##
                 .to_string(),
             ],
+            openapi_paths: vec![
+                KitOpenApiPath {
+                    handler: "passkey_register_start".to_string(),
+                    annotation: r##"#[utoipa::path(
+    post,
+    path = "/auth/passkey/register/start",
+    request_body = PasskeyStart,
+    responses(
+            (status = 200, description = "A creation challenge, plus the ceremony id to send back"),
+            (status = 500, description = "The relying party could not start a ceremony"),
+    ),
+    tag = "passkeys",
+)]"##.to_string(),
+                },
+                KitOpenApiPath {
+                    handler: "passkey_register_finish".to_string(),
+                    annotation: r##"#[utoipa::path(
+    post,
+    path = "/auth/passkey/register/finish",
+    request_body = PasskeyFinish,
+    responses(
+            (status = 200, description = "The passkey is enrolled"),
+            (status = 400, description = "The credential was malformed; the challenge is untouched"),
+            (status = 410, description = "The challenge expired or was already used"),
+    ),
+    tag = "passkeys",
+)]"##.to_string(),
+                },
+                KitOpenApiPath {
+                    handler: "passkey_login_start".to_string(),
+                    annotation: r##"#[utoipa::path(
+    post,
+    path = "/auth/passkey/login/start",
+    request_body = PasskeyStart,
+    responses(
+            (status = 200, description = "A request challenge, plus the ceremony id to send back"),
+            (status = 404, description = "No passkey is enrolled for that username"),
+    ),
+    tag = "passkeys",
+)]"##.to_string(),
+                },
+                KitOpenApiPath {
+                    handler: "passkey_login_finish".to_string(),
+                    annotation: r##"#[utoipa::path(
+    post,
+    path = "/auth/passkey/login/finish",
+    request_body = PasskeyFinish,
+    responses(
+            (status = 200, description = "Signature verified and a session opened"),
+            (status = 400, description = "The credential was malformed; the challenge is untouched"),
+            (status = 401, description = "The signature did not verify"),
+            (status = 410, description = "The challenge expired or was already used"),
+    ),
+    tag = "passkeys",
+)]"##.to_string(),
+                },
+            ],
+            openapi_schemas: vec!["PasskeyStart".to_string(), "PasskeyFinish".to_string()],
             state_fields: vec![r#"    /// The relying party, shared by every ceremony.
     webauthn: Arc<webauthn_rs::Webauthn>,
     ceremonies: Ceremonies,"#

@@ -132,8 +132,10 @@ jobs:
           shared-key: generated-project
           workspaces: generated
 
+      # By name, not by spec: a combination carries its own download opt-ins,
+      # and repeating those as flags here would let the two disagree.
       - name: Generate
-        run: ./generate-kit --spec "${{ matrix.combination.spec }}" --out generated
+        run: ./generate-kit --name "${{ matrix.combination.name }}" --out generated
 
       - name: Show what was generated
         run: |
@@ -165,6 +167,25 @@ jobs:
             *totp*)
               grep -q '/auth/totp/enroll' generated/src/main.rs \
                 || { echo "::error::totp selected but no ceremony routes generated"; exit 1; } ;;
+          esac
+
+      # The TypeScript client is a file the Rust build never looks at, so
+      # compiling proves nothing about it either way.
+      - name: Check the opt-ins produced what they promise
+        run: |
+          case "${{ matrix.combination.name }}" in
+            *extras*)
+              test -f generated/client/authkestra.ts \
+                || { echo "::error::the client opt-in produced no client"; exit 1; }
+              grep -q 'utoipa::path' generated/src/main.rs \
+                || { echo "::error::the openapi opt-in annotated nothing"; exit 1; }
+              ;;
+            *)
+              test ! -e generated/client \
+                || { echo "::error::a plain download carries a TypeScript client"; exit 1; }
+              grep -q 'utoipa' generated/src/main.rs \
+                && { echo "::error::a plain download carries utoipa annotations"; exit 1; }
+              ;;
           esac
 
       - name: Build it

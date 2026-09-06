@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import type { DemoConfig, ScenarioSpec } from "@playground/api-types";
-import { downloadStarterKit, type ApiError } from "@/lib/api";
+import {
+  downloadStarterKit,
+  type ApiError,
+  type StarterKitOptions,
+} from "@/lib/api";
 import { isControlValueActive } from "@/components/ScenarioPanel";
 
 interface Props {
@@ -27,6 +31,13 @@ export default function StepDownload({
   onBack,
 }: Props) {
   const [state, setState] = useState<State>({ kind: "idle" });
+  // Two independent choices, not a single "extras" toggle: someone on htmx
+  // wants the spec and no TypeScript, someone on Next.js may want the client
+  // and no utoipa.
+  const [options, setOptions] = useState<StarterKitOptions>({
+    openapi: false,
+    tsClient: false,
+  });
 
   const included = scenarios.filter((s) => {
     const value = config?.scenarios?.[s.id];
@@ -35,7 +46,7 @@ export default function StepDownload({
 
   async function handleDownload() {
     setState({ kind: "working" });
-    const result = await downloadStarterKit();
+    const result = await downloadStarterKit(options);
 
     if (!result.ok) {
       if (result.error.kind === "demo_disabled") {
@@ -102,6 +113,51 @@ export default function StepDownload({
           runs, with a README that names every value you need to fill in and
           where to get it. No sign-up, no gate.
         </p>
+
+        <fieldset className="mt-5 border-t border-slate-800 pt-4">
+          <legend className="sr-only">Optional extras</legend>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            Optional
+          </p>
+
+          <label className="mt-3 flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={options.openapi}
+              onChange={(e) =>
+                setOptions((o) => ({ ...o, openapi: e.target.checked }))
+              }
+              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            />
+            <span className="text-sm text-slate-300">
+              OpenAPI document
+              <span className="block text-xs text-slate-500">
+                Annotates the handlers and serves the spec at{" "}
+                <code className="font-mono">/openapi.json</code>. Adds{" "}
+                <code className="font-mono">utoipa</code>.
+              </span>
+            </span>
+          </label>
+
+          <label className="mt-3 flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={options.tsClient}
+              onChange={(e) =>
+                setOptions((o) => ({ ...o, tsClient: e.target.checked }))
+              }
+              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            />
+            <span className="text-sm text-slate-300">
+              TypeScript client
+              <span className="block text-xs text-slate-500">
+                A dependency-free client that handles the base64url conversion{" "}
+                <code className="font-mono">navigator.credentials</code> needs.
+                No Rust dependency.
+              </span>
+            </span>
+          </label>
+        </fieldset>
 
         <button
           type="button"

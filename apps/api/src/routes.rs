@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -19,6 +19,7 @@ use crate::engine::EngineFactory;
 use crate::error::ApiError;
 use crate::killswitch::KillSwitch;
 use crate::kit::StarterKit;
+use crate::scenario::KitOptions;
 use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec};
 use crate::session::{DemoSession, DemoSessionStore, DemoSessionView, COOKIE_NAME};
 use crate::settings::Settings;
@@ -347,6 +348,38 @@ async fn admin_client_ip(
     Ok(Json(extractor.explain(&req_headers)))
 }
 
+/// The download's two opt-ins, as query parameters.
+///
+/// Independent on purpose: someone on htmx wants the spec and no TypeScript,
+/// someone on Next.js may want the client and no `utoipa`. Coupling them would
+/// hand each of them the other's baggage.
+///
+/// Absent means off, and anything unparseable means off too — a download is
+/// not worth failing over a malformed query string.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct StarterKitQuery {
+    openapi: Option<String>,
+    client: Option<String>,
+}
+
+impl StarterKitQuery {
+    fn into_options(self) -> KitOptions {
+        KitOptions {
+            openapi: is_truthy(self.openapi.as_deref()),
+            ts_client: is_truthy(self.client.as_deref()),
+        }
+    }
+}
+
+/// Accepts what a browser or a curl user would plausibly send.
+fn is_truthy(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on" | "")
+    )
+}
+
 /// Download the visitor's configuration as a runnable project.
 ///
 /// Generated from the same session config the diff and the try buttons read,
@@ -356,9 +389,14 @@ async fn admin_client_ip(
 async fn download_starter_kit(
     State(state): State<AppState>,
     cookies: Cookies,
+    Query(params): Query<StarterKitQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let session = resolve_session(&state, &cookies).await?;
-    let kit = StarterKit::generate(&session.config, state.sessions.registry());
+    let kit = StarterKit::generate_with(
+        &session.config,
+        state.sessions.registry(),
+        params.into_options(),
+    );
 
     let name = kit.archive_name();
     let bytes = kit
