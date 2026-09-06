@@ -12,9 +12,9 @@
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
 | `P4` | Downloadable starter kit | 10 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
-| `P6` | Post-launch / wizard path | 4 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
+| `P6` | Post-launch / wizard path | 5 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**48 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**49 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -823,6 +823,31 @@ Playground announced with working links, live guardrails, and a triage plan.
 **Exit criteria.** Not scoped for v0. Revisit once P5 ships and there is real usage data.
 
 ### Issues
+
+#### Be your own identity provider: an OP server page
+
+`area:scenario` `area:api` `type:feature`
+
+`authkestra-op` ships and the playground does not mention it. Running your own OpenID Provider is the framework's most differentiated capability — most auth libraries let you *consume* an identity provider, not *be* one — and a playground that only shows passkeys, TOTP, OAuth and token validation undersells it by omission.
+
+Held out of the resource-server work (#47) deliberately, and out of P2 for the same reason: **it does not fit the wizard.** Every other scenario is a toggle whose effect a visitor can see in one page. An OP is only meaningful once something authenticates *against* it, so demonstrating it needs a second application — a client — and that is a page of its own rather than a checkbox in step 1.
+
+P6 rather than P2 because of that shape and that size, not because it matters less.
+
+### What it would take
+- [ ] A dedicated route, outside the three-step wizard, with its own explanation of what an OP is and why you would run one
+- [ ] A demo client the visitor completes a real authorization-code flow against — the hard part, and the thing that decides whether this is worth doing
+- [ ] Discovery and JWKS served and shown, since they are the machine-readable contract and the part integrators most often get wrong
+- [ ] Mandatory PKCE, and loopback redirect URIs per RFC 8252 §7.3
+- [ ] The failure modes surfaced the way #47 surfaces token failures, rather than a flat error
+- [ ] Persistence via `OpStore`, with the decision about what the playground stores per visitor written down
+- [ ] Starter-kit fragment, so a download can run an OP too
+
+### Acceptance
+A visitor completes an authorization-code flow against an OP the playground is running, sees the discovery document and the tokens it issued, and can download a project that does the same.
+
+### Worth deciding first
+Whether this belongs in the playground at all, or as a separate example application. It is a large amount of surface for one page, and the upstream repository already has four runnable `*_op_server*` examples. The case for building it here is that examples are read while a live flow is *used* — but that case should be made explicitly before the work starts, not assumed.
 
 #### Backlog: reserve a cratestack scenario slot
 
