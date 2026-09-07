@@ -345,10 +345,19 @@ async fn a_token_whose_signature_was_altered_fails_on_the_signature() {
     let issued = server.issue("198.20.4.1").await;
     let token = issued["token"].as_str().expect("a token");
 
+    // Edit the *first* character of the signature, not the last. A 64-byte ES256
+    // signature encodes to 86 base64url characters whose final character carries
+    // only two significant bits, so `A`, `Q`, `g` and `w` are the only legal values
+    // there. ECDSA signatures are randomised, so the old last-character flip drew a
+    // fresh final character every run and produced invalid base64 — reported, quite
+    // correctly, as `malformed` — the one run in four that it landed on `A`. The
+    // first character is unconstrained, so any substitution stays decodable and the
+    // token fails on the signature, which is what this test is about.
     let (signed_part, signature) = token.rsplit_once('.').expect("a signature");
-    let mut altered = signature.to_string();
-    let last = altered.pop().expect("a non-empty signature");
-    altered.push(if last == 'A' { 'B' } else { 'A' });
+    let mut chars = signature.chars();
+    let first = chars.next().expect("a non-empty signature");
+    let altered: String =
+        std::iter::once(if first == 'A' { 'B' } else { 'A' }).chain(chars).collect();
 
     let result = server
         .call("198.20.4.2", Some(&format!("{signed_part}.{altered}")))
