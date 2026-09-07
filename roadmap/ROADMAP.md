@@ -12,9 +12,9 @@
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
 | `P4` | Downloadable starter kit | 10 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
-| `P6` | Post-launch / wizard path | 6 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
+| `P6` | Post-launch / wizard path | 7 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**51 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**52 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -1000,6 +1000,39 @@ Any of: Google announcing a withdrawal date for legacy `siteverify`; the console
 ### Not blocked
 Nothing is waiting on anyone. This is a watch item with a known escape hatch, deliberately left unlabelled `blocked:external` so that label keeps meaning work that genuinely cannot proceed.
 
+#### Research: catalog cloud/PaaS provider revenue-share and kickback programs for templates
+
+`area:monetization` `area:starter-kit` `type:research`
+
+Railway runs a confirmed, real program — template creators earn 15% of the hosting costs a deployer incurs (25% with active support engagement in the Template Queue), paid via Railway credits or Stripe Connect. Its **Technology Partner** tier pays out on *any* community template using your technology, not just ones you built, and gives you a branded ecosystem page inside Railway's own dashboard — which is the closest thing found so far to "people get it from the provider's UI" without owning any infrastructure or data.
+
+That is one confirmed data point. The goal of this ticket is to find out how many others exist, since the deploy-to-cloud feature (P4) will emit manifests for more than one provider and each one is a separate potential revenue channel that costs nothing to pursue if it exists.
+
+### Scope — two distinct mechanisms, don't conflate them
+1. **Usage-kickback / creator-payout programs** (Railway's model): the *provider* pays *you* a cut of what *they* bill the end user for hosting. Requires no selling, no pricing, no customer relationship — this is the one that fits "don't own the data."
+2. **Paid marketplace listings** (AWS/Azure/GCP Marketplace, DigitalOcean paid Add-Ons): *you* set a price, *you* collect from the customer, the platform takes a cut of your revenue. Only relevant once there's something to actually sell (the managed-service side, not the free playground/starter-kit).
+
+Don't file a provider under mechanism 1 without confirming money actually flows from the provider to the creator — a free 1-click-app listing with no payout is not a kickback program, it's just distribution.
+
+### Providers to check (starting list, not exhaustive — find others)
+- Render (Blueprints / marketplace)
+- Fly.io (now the actual P0 host per this roadmap — check first, since a same-provider program would be the easiest to activate)
+- DigitalOcean (confirm whether the free 1-Click Apps program has any creator payout at all, distinct from the paid Add-On revenue share already confirmed)
+- Vercel (integrations/marketplace program — relevant to `apps/web`, not the Rust backend)
+- Cloudflare (partner/marketplace programs — even though Workers itself is ruled out for the backend, confirm whether a program exists at all)
+- Netlify, Coolify, Northflank, Zeabur, Koyeb, Porter, Qovery
+- Heroku (button.heroku.com deploy-button ecosystem — legacy but confirm current state)
+- AWS Marketplace (3% seller fee already confirmed for paid SaaS listings — separately check AWS Activate / ISV Accelerate for anything resembling a kickback rather than a fee reduction)
+- Azure Marketplace, Google Cloud Marketplace
+- Supabase, Neon, Upstash (not compute hosts, but if the session-store decision lands on Postgres/Redis-as-a-service, check whether either runs a referral/partner-revenue program worth stacking alongside a Railway/Fly deploy)
+- Replit (deploy templates / bounty programs)
+
+### Deliverable
+A written comparison (`docs/research/provider-revenue-share-programs.md` in this repo) covering, per provider: does a program exist at all; which mechanism (kickback vs marketplace fee); exact percentage/terms with a source link; application/verification process and expected turnaround; payout method and minimum thresholds; and any constraint that rules it out for authkestra specifically (e.g. WASM-only runtime, no persistent compute, requires a paid listing you're not ready to run). End with a ranked recommendation of which 2-3 to actually pursue first, given the P0 host is Fly.io and the deploy-to-cloud feature is still unbuilt.
+
+### Acceptance
+Every provider in the starting list is either confirmed-with-source or confirmed-absent (not left blank), plus at least three more providers found that weren't on the starting list, and a clear top-2-3 recommendation with reasoning tied to authkestra's actual constraints (no data custody, real compiled-binary hosting needed, Fly.io already the P0 host).
+
 ---
 
 ## Labels
@@ -1018,6 +1051,8 @@ Nothing is waiting on anyone. This is a watch item with a known escape hatch, de
 | `type:security` | Security or abuse-surface work |
 | `blocked:external` | Waiting on a third party (provider registration, upstream) |
 | `good-first-issue` | Self-contained, good entry point for a contributor |
+| `type:research` | Investigation/spike — deliverable is a written finding, not code |
+| `area:monetization` | Revenue, provider partnerships, marketplace/kickback programs |
 
 ## How this syncs to GitHub
 
