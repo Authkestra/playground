@@ -248,19 +248,21 @@ impl Plan {
         self.collect(|f| &f.openapi_schemas).collect()
     }
 
-    /// Only worth serving a spec when something asked to be in it.
     /// Which engine alias the generated `AppState` should name.
     ///
     /// Only `session_store` and `token_manager` move the typestate, so the
-    /// alias follows whether a token manager was supplied. Naming the wrong
-    /// one is a type error in the generated project rather than something
-    /// subtle, but it is a confusing one to land on.
+    /// alias follows whether a token manager was supplied — and no fragment
+    /// supplies one any more. The resource scenario used to: it minted tokens
+    /// as well as validating them, which was the thing wrong with it (#52). A
+    /// resource server *validates* tokens somebody else issued, so it needs no
+    /// signing key and no `TokenManager`, and the engine stays
+    /// `AkWebAppEngine`.
+    ///
+    /// Left as a function rather than inlined because the OP-server scenario
+    /// will genuinely need `AkEngine` — it issues — and this is where that
+    /// belongs when it lands.
     fn engine_alias(&self) -> &'static str {
-        if self.is_active("resource") {
-            "AkEngine"
-        } else {
-            "AkWebAppEngine"
-        }
+        "AkWebAppEngine"
     }
 
     fn wants_openapi(&self) -> bool {
@@ -453,6 +455,11 @@ fn third_party_deps(plan: &Plan) -> String {
             "uuid" => "1",
             "serde" => "1",
             "utoipa" => "5",
+            // The resource fragment builds a `Validation` directly. Kept in
+            // step with the engine's own requirement, and with `aws_lc_rs`
+            // deliberately unset: a second crypto backend in one crate is how
+            // this workspace got a boot panic once already.
+            "jsonwebtoken" => "11",
             "sqlx" => "0.8",
             "url" => "2.5",
             other => {

@@ -852,7 +852,13 @@ impl Scenario for ResourceScenario {
             ],
             openapi_paths: Vec::new(),
             openapi_schemas: Vec::new(),
-            crates: vec![CrateRequirement::new("serde", &["derive"])],
+            crates: vec![
+                CrateRequirement::new("serde", &["derive"]),
+                // The handler builds its own `Validation`, so the generated
+                // project depends on this directly rather than through the
+                // engine.
+                CrateRequirement::new("jsonwebtoken", &["rust_crypto"]),
+            ],
             env: vec![
                 KitEnvVar::required(
                     "JWKS_URL",
