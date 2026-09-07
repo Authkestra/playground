@@ -38,6 +38,10 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled, onAction }: 
   const [result, setResult] = useState<ProtectedCall | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [pasted, setPasted] = useState("");
+  // The request the current result came from. Without it the panel only
+  // asserts an outcome — "called with no token, got a 401" is a claim until you
+  // can see the header that was, or was not, sent.
+  const [sentHeader, setSentHeader] = useState<string | null>(null);
 
   async function issue() {
     setIssuing(true);
@@ -56,9 +60,18 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled, onAction }: 
     setResult(null);
   }
 
+  /** The `Authorization` header this call will carry, written out as it goes. */
+  function headerFor(token: string | null): string {
+    const trimmed = token?.trim();
+    return trimmed
+      ? `Authorization: Bearer ${trimmed.length > 40 ? `${trimmed.slice(0, 40)}…` : trimmed}`
+      : "(no Authorization header)";
+  }
+
   async function call(token: string | null) {
     setCalling(true);
     setBanner(null);
+    setSentHeader(headerFor(token));
     const res = await scenarioAction<ProtectedCall>(scenarioId, "call", {
       token: token ?? undefined,
     });
@@ -79,7 +92,9 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled, onAction }: 
     <div className="flex flex-col gap-4">
       <p className="text-sm text-slate-400">
         A route that serves nobody without a valid token. Issue one, call it, then call
-        it again with the token removed or altered and watch the answer change.
+        it again with the token removed or altered and watch the answer change. Each
+        result names the request it came from, so the difference is visible rather than
+        asserted.
       </p>
 
       {banner && (
@@ -139,6 +154,11 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled, onAction }: 
       )}
 
       <div aria-live="polite">
+        {sentHeader && (
+          <p className="mb-1 break-all font-mono text-[11px] text-slate-400">
+            GET /api/protected · {sentHeader}
+          </p>
+        )}
         {result && (
           <div
             className={`rounded-md border px-3 py-2 text-sm ${

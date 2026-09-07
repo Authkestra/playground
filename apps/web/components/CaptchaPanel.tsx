@@ -37,8 +37,15 @@ export const PROVIDER_SCRIPTS: Record<string, { src: string; global: ProviderGlo
   },
 };
 
-/** Stands in for a forged or replayed token — the failure path issue #19 wants demonstrable. */
-const FAKE_TOKEN = "forged-token-0000000000000000";
+/** Whatever a thrown value has to say for itself. */
+function message(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** Long tokens are unreadable in full and the point is recognisability, not the value. */
+function truncate(value: string, keep = 48): string {
+  return value.length <= keep ? value : `${value.slice(0, keep)}… (${value.length} chars)`;
+}
 
 /** A failed captcha is the expected outcome of the failure button, not an error — amber, not red. */
 export function verdictStyle(verified: boolean): string {
@@ -63,13 +70,35 @@ interface CaptchaWidgetApi {
     },
   ): string | number;
   reset(widgetId?: string | number): void;
-  /** reCAPTCHA only: must resolve before `render` is safe to call. */
-  ready?: (callback: () => void) => void;
 }
 
 /** The one place a third-party global gets assumed to exist on `window`. */
 function providerApi(global: ProviderGlobal): CaptchaWidgetApi | undefined {
   return (window as unknown as Record<ProviderGlobal, CaptchaWidgetApi | undefined>)[global];
+}
+
+/**
+ * Wait until the provider's global can actually render.
+ *
+ * A loaded script is not a ready one. reCAPTCHA installs `grecaptcha` before
+ * `grecaptcha.render` exists, so calling render on script load produced a
+ * permanently blank widget — the failure this replaces. Waiting on `render`
+ * itself works for all three and needs no per-provider special case, which the
+ * previous `grecaptcha.ready()` branch did (and which the other two never
+ * expose, so it silently only covered one of them).
+ */
+const READY_TIMEOUT_MS = 10_000;
+
+async function awaitRenderable(global: ProviderGlobal): Promise<CaptchaWidgetApi> {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    const api = providerApi(global);
+    if (api && typeof api.render === "function") return api;
+    if (Date.now() > deadline) {
+      throw new Error(`window.${global}.render did not appear within ${READY_TIMEOUT_MS}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 // Module-level so a remount (or two panels on the same page) never fetches
@@ -181,7 +210,8 @@ function CaptchaWidgetCard({
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | number | null>(null);
 
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState("");
+  const [sent, setSent] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
@@ -193,41 +223,63 @@ function CaptchaWidgetCard({
     if (!config) return;
     let cancelled = false;
 
-    loadScript(config.src)
-      .then(() => {
-        if (cancelled) return;
-        const api = providerApi(config.global);
-        if (!api || !containerRef.current) {
-          setRenderError(`The ${widget.label} script loaded but didn't expose its API.`);
-          return;
+    // Three failure modes, three messages. They used to share one `.catch`,
+    // which reported "could not load the script" for a `render()` that threw —
+    // so a rejected site key read as a network problem and sent us looking in
+    // the wrong place entirely.
+    (async () => {
+      try {
+        await loadScript(config.src);
+      } catch {
+        if (!cancelled) {
+          setRenderError(
+            `Could not fetch the ${widget.label} script. An ad blocker or strict ` +
+              `tracking protection will do this; so will being offline.`,
+          );
         }
+        return;
+      }
 
-        const doRender = () => {
-          if (cancelled || !containerRef.current) return;
-          widgetIdRef.current = api.render(containerRef.current, {
-            sitekey: widget.site_key,
-            callback: (t) => {
-              if (!cancelled) setToken(t);
-            },
-            "error-callback": () => {
-              if (!cancelled) setRenderError(`${widget.label} reported an error. Try refreshing the page.`);
-            },
-            "expired-callback": () => {
-              if (!cancelled) setToken(null);
-            },
-          });
-        };
-
-        // reCAPTCHA needs `ready()` before it will render; the other two don't expose it.
-        if (typeof api.ready === "function") {
-          api.ready(doRender);
-        } else {
-          doRender();
+      let api: CaptchaWidgetApi;
+      try {
+        api = await awaitRenderable(config.global);
+      } catch (e) {
+        if (!cancelled) {
+          setRenderError(
+            `The ${widget.label} script loaded but never became usable (${message(e)}).`,
+          );
         }
-      })
-      .catch(() => {
-        if (!cancelled) setRenderError(`Could not load the ${widget.label} script.`);
-      });
+        return;
+      }
+
+      if (cancelled || !containerRef.current) return;
+
+      try {
+        widgetIdRef.current = api.render(containerRef.current, {
+          sitekey: widget.site_key,
+          callback: (t) => {
+            if (!cancelled) setToken(t);
+          },
+          "error-callback": () => {
+            if (!cancelled) {
+              setRenderError(
+                `${widget.label} refused the widget. The usual cause is a site key ` +
+                  `whose registered hostnames do not include this one.`,
+              );
+            }
+          },
+          "expired-callback": () => {
+            if (!cancelled) setToken("");
+          },
+        });
+      } catch (e) {
+        // Most often a site key the provider will not accept here — which is
+        // worth saying, rather than blaming the network.
+        if (!cancelled) {
+          setRenderError(`${widget.label} would not render this site key: ${message(e)}`);
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -235,9 +287,12 @@ function CaptchaWidgetCard({
   }, [config, widget.label, widget.provider, widget.site_key]);
 
   const verify = useCallback(
-    async (tokenToSend: string, { consumesWidget }: { consumesWidget: boolean }) => {
+    async (tokenToSend: string) => {
       setVerifying(true);
       setBanner(null);
+      // Keep what was sent, so the outcome is shown next to its own cause
+      // rather than asserted on its own.
+      setSent(tokenToSend);
 
       const res = await scenarioAction<CaptchaVerification>(scenarioId, "verify", {
         provider: widget.provider,
@@ -249,16 +304,26 @@ function CaptchaWidgetCard({
 
       if (!res.ok) {
         if (res.error.kind === "demo_disabled") return onDemoDisabled();
-        setBanner(res.error.kind === "rate_limited" ? res.error.detail : "The provider could not verify this token.");
+        // The server's own words, not a paraphrase. Sending an empty box is a
+        // legitimate thing to try — the 400 explaining it is the demonstration,
+        // so replacing it with "something went wrong" would throw away the
+        // only part that teaches anything.
+        setBanner(
+          res.error.kind === "rate_limited" || res.error.kind === "http_error"
+            ? res.error.detail
+            : "Could not reach the API to verify that token.",
+        );
+        setResult(null);
         return;
       }
 
-      // verified: false is a normal outcome here, not an error — render it inline.
+      // verified: false is a normal outcome here, not an error — render inline.
       setResult(res.data);
 
-      if (consumesWidget) {
-        // Tokens are single-use, so the widget needs to hand out a fresh one.
-        setToken(null);
+      // A token the provider accepted has been spent, so the widget owes us a
+      // fresh one. A rejected one leaves the box alone: that is the evidence.
+      if (res.data.verified) {
+        setToken("");
         if (config && widgetIdRef.current !== null) {
           providerApi(config.global)?.reset(widgetIdRef.current);
         }
@@ -283,29 +348,40 @@ function CaptchaWidgetCard({
 
       {renderError && <p className="mt-2 text-xs text-amber-400">{renderError}</p>}
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <label className="mt-3 block text-xs text-slate-400" htmlFor={`captcha-token-${widget.provider}`}>
+        The token the widget produced. Edit a character to see a forged one
+        rejected, or empty the box to see what arrives with no token at all —
+        whatever is here is exactly what gets sent.
+      </label>
+      <textarea
+        id={`captcha-token-${widget.provider}`}
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        spellCheck={false}
+        rows={3}
+        placeholder="Solve the widget above, or paste a token to try"
+        className="mt-1 w-full resize-y break-all rounded border border-slate-700 bg-slate-950 p-2 font-mono text-xs text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+      />
+
+      <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => void verify(token ?? "", { consumesWidget: true })}
-          disabled={!token || verifying}
+          onClick={() => void verify(token)}
+          disabled={verifying}
           className="rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/50"
         >
           {verifying ? "Verifying…" : "Verify this token"}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => void verify(FAKE_TOKEN, { consumesWidget: false })}
-          disabled={verifying}
-          className="rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Send a token that cannot pass
         </button>
       </div>
 
       {banner && <p className="mt-2 text-xs text-amber-400">{banner}</p>}
 
       <div aria-live="polite" className="mt-2">
+        {sent !== null && (
+          <p className="mb-1 break-all font-mono text-[11px] text-slate-400">
+            sent: {sent === "" ? "(nothing — no token field)" : truncate(sent)}
+          </p>
+        )}
         {result && (
           <div className={`rounded-md border px-3 py-2 text-sm ${verdictStyle(result.verified)}`}>
             <p className="font-medium">
