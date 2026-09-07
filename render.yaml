@@ -29,8 +29,14 @@ services:
       # Served over HTTPS by Render's proxy.
       - key: COOKIE_SECURE
         value: "true"
+      # `authkestra=debug`, not `=info`. The framework emits roughly 34
+      # `debug!` events against 6 `info!` ones, so at INFO it is silent almost
+      # everywhere and the playground looks like it is not using it. The
+      # directive matches by target prefix, so one entry covers
+      # authkestra_engine, _axum, _providers and _resource. Verified by
+      # `the_shipped_log_filter_lets_the_frameworks_own_events_through`.
       - key: RUST_LOG
-        value: "info,api=debug,authkestra=info"
+        value: "info,api=debug,authkestra=debug"
       # Client IP: DO NOT guess this. Render documents setting the *first*
       # X-Forwarded-For entry to the real client IP, which would make
       # `leftmost` correct — but reading the leftmost entry is a rate-limit

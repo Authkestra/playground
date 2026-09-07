@@ -42,6 +42,29 @@ use crate::scenario::ScenarioRegistry;
 use crate::session::DemoSessionStore;
 use crate::settings::Settings;
 
+/// Log directives used when `RUST_LOG` is unset.
+///
+/// `authkestra=debug` rather than `=info` is the load-bearing part. The
+/// framework emits about 34 `debug!` events to 6 `info!` ones, so at INFO it
+/// says almost nothing and the service looks like it is not using it — which
+/// is exactly how the deployment looked until `render.yaml` was corrected.
+///
+/// One `authkestra` entry covers `authkestra_engine`, `authkestra_axum`,
+/// `authkestra_providers` and `authkestra_resource`, because `EnvFilter`
+/// matches a directive against the event target by **prefix**. That is an
+/// assumption worth not making silently, so there is a test for it.
+pub const DEFAULT_LOG_DIRECTIVES: &str = "info,api=debug,authkestra=debug";
+
+/// The filter this process logs under.
+///
+/// `RUST_LOG` wins when set, which is what a deployment wants — but note that
+/// it wins *completely*: a deployment setting `RUST_LOG=info` silences the
+/// framework no matter what [`DEFAULT_LOG_DIRECTIVES`] says.
+pub fn log_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| DEFAULT_LOG_DIRECTIVES.into())
+}
+
 /// Client-IP key extractor for the rate limiter.
 ///
 /// Getting this wrong is a rate-limit bypass, so the order matters:
@@ -623,6 +646,104 @@ mod key_extractor_tests {
         assert_eq!(
             x.selected, "192.0.2.1",
             "the trusted header must win over anything client-supplied"
+        );
+    }
+}
+
+#[cfg(test)]
+mod log_filter_tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use tracing_subscriber::EnvFilter;
+
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("capture poisoned")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+        type Writer = Capture;
+        fn make_writer(&'a self) -> Capture {
+            self.clone()
+        }
+    }
+
+    /// Emit one event per framework target under `directive`, and return what
+    /// the subscriber actually printed.
+    fn emitted_under(directive: &str) -> String {
+        let capture = Capture(Arc::new(Mutex::new(Vec::new())));
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new(directive))
+            .with_writer(capture.clone())
+            .finish();
+
+        // Targets are set explicitly so this tests the *filter*, not whether
+        // some dependency happens to log during the test.
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!(target: "authkestra_engine::token", "ENGINE_DEBUG");
+            tracing::debug!(target: "authkestra_axum::helpers", "AXUM_DEBUG");
+            tracing::debug!(target: "authkestra_resource::jwt", "RESOURCE_DEBUG");
+            tracing::debug!(target: "api::routes", "API_DEBUG");
+        });
+
+        let bytes = capture.0.lock().expect("capture poisoned").clone();
+        String::from_utf8(bytes).expect("log output is UTF-8")
+    }
+
+    /// The point of the default: the framework's own events reach the log.
+    ///
+    /// This is not hypothetical. The deployment ran with `authkestra=info` for
+    /// its whole life, which suppressed every `debug!` the framework emits —
+    /// and since it emits far more of those than `info!` ones, the service
+    /// looked like it was not using the framework at all.
+    #[test]
+    fn the_shipped_log_filter_lets_the_frameworks_own_events_through() {
+        let out = emitted_under(super::DEFAULT_LOG_DIRECTIVES);
+
+        for expected in ["ENGINE_DEBUG", "AXUM_DEBUG", "RESOURCE_DEBUG", "API_DEBUG"] {
+            assert!(
+                out.contains(expected),
+                "{expected} was filtered out by `{}`:\n{out}",
+                super::DEFAULT_LOG_DIRECTIVES
+            );
+        }
+    }
+
+    /// One `authkestra` entry covering four crates relies on `EnvFilter`
+    /// matching targets by prefix. If that ever stopped being true the
+    /// directive above would silently cover nothing.
+    #[test]
+    fn a_directive_matches_framework_targets_by_prefix() {
+        let out = emitted_under("warn,authkestra=debug");
+        assert!(out.contains("ENGINE_DEBUG"), "{out}");
+        assert!(out.contains("AXUM_DEBUG"), "{out}");
+        assert!(
+            !out.contains("API_DEBUG"),
+            "`authkestra` should not match `api`: {out}"
+        );
+    }
+
+    /// The failure mode this all exists to prevent, asserted directly so the
+    /// difference between the two settings is visible in the suite.
+    #[test]
+    fn info_level_hides_almost_everything_the_framework_says() {
+        let out = emitted_under("info,api=debug,authkestra=info");
+        assert!(
+            !out.contains("ENGINE_DEBUG"),
+            "this directive is meant to suppress engine debug — if it no longer \
+             does, the deployment note in render.yaml is wrong: {out}"
         );
     }
 }
