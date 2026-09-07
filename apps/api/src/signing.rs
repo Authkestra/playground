@@ -65,9 +65,19 @@ impl SigningKeys {
     /// is logged loudly, because "my token stopped working" is otherwise a
     /// mystery.
     pub fn from_env(issuer: String) -> Self {
-        let supplied = std::env::var("TOKEN_SIGNING_KEY_PEM")
-            .ok()
-            .map(|raw| raw.replace("\\n", "\n"))
+        Self::from_supplied(std::env::var("TOKEN_SIGNING_KEY_PEM").ok(), issuer)
+    }
+
+    /// As [`Self::from_env`], with the raw variable handed in.
+    ///
+    /// Split out so the interesting half is testable without mutating process
+    /// environment, which is global and races with every other test in the
+    /// binary. The interesting half is the unescaping: a deployment pastes a
+    /// PEM into a dashboard as one line, and if that is mishandled the service
+    /// panics at boot with a key it was given and could not read.
+    pub fn from_supplied(raw: Option<String>, issuer: String) -> Self {
+        let supplied = raw
+            .map(|raw| unescape_pem(&raw))
             .filter(|pem| !pem.trim().is_empty());
 
         let pem = match supplied {
@@ -91,7 +101,8 @@ impl SigningKeys {
         // and quietly substituting another would mean tokens that validate
         // here and nowhere else, with no symptom until something downstream
         // rejects them.
-        let manager = TokenManager::new_ed25519(pem.as_bytes(), Some(issuer.clone()), None)
+        let kid = stable_kid(&pem, &issuer);
+        let manager = TokenManager::new_ed25519(pem.as_bytes(), Some(issuer.clone()), kid)
             .unwrap_or_else(|e| {
                 panic!(
                     "TOKEN_SIGNING_KEY_PEM is not a usable Ed25519 PKCS#8 PEM: {e}. \
@@ -125,7 +136,8 @@ impl SigningKeys {
     /// A key for tests, generated in-process.
     pub fn for_test(issuer: &str) -> Self {
         let pem = generate_ed25519_pem();
-        let manager = TokenManager::new_ed25519(pem.as_bytes(), Some(issuer.to_string()), None)
+        let kid = stable_kid(&pem, issuer);
+        let manager = TokenManager::new_ed25519(pem.as_bytes(), Some(issuer.to_string()), kid)
             .expect("a freshly generated key parses");
         let jwk = manager.public_jwk().expect("Ed25519 carries a JWK");
         Self {
@@ -189,6 +201,43 @@ impl SigningKeys {
 fn encoding_key(pem: &str) -> jsonwebtoken::EncodingKey {
     jsonwebtoken::EncodingKey::from_ed_pem(pem.as_bytes())
         .expect("a PEM that built a TokenManager also builds an EncodingKey")
+}
+
+/// A `kid` that identifies the *key*, not the process that loaded it.
+///
+/// `TokenManager::new_ed25519` invents a random UUID when it is not given one,
+/// which makes the `kid` a property of the process. A restart then republishes
+/// the same public key under a new name, and every token issued before it
+/// fails as `unknown_kid` — so setting `TOKEN_SIGNING_KEY_PEM` did *not*
+/// survive a restart, which is the entire reason to set it. Two instances
+/// sharing the key had the same problem: each refused the other's tokens.
+///
+/// Derived from the public point, which the JWK already carries base64url
+/// encoded, so this needs nothing the crate does not already produce. It is
+/// not an RFC 7638 thumbprint — a thumbprint would be conventional, but the
+/// requirement here is only that it be stable and unique per key, and the
+/// point itself is both.
+///
+/// Returns `None` when the PEM cannot be read at all, leaving the real
+/// construction below to produce the error a caller can act on.
+fn stable_kid(pem: &str, issuer: &str) -> Option<String> {
+    TokenManager::new_ed25519(pem.as_bytes(), Some(issuer.to_string()), None)
+        .ok()?
+        .public_jwk()?
+        .x
+}
+
+/// Turn a one-line environment value back into a PEM.
+///
+/// A PEM is multi-line and many hosting dashboards take a single line, so the
+/// usual workaround is to write `\n` literally. Both forms have to work: the
+/// escaped one, and a genuine multi-line value from a dashboard that supports
+/// them. `\r\n` is handled too, because a value pasted from Windows or from
+/// some web forms carries carriage returns that the PEM parser rejects.
+fn unescape_pem(raw: &str) -> String {
+    raw.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\r\n", "\n")
 }
 
 /// A fresh Ed25519 private key, PKCS#8 PEM encoded.
@@ -292,6 +341,93 @@ mod tests {
         let b = SigningKeys::for_test("https://b.test");
         assert_ne!(a.kid(), b.kid());
         assert_ne!(a.jwks()["keys"][0]["x"], b.jwks()["keys"][0]["x"]);
+    }
+
+    /// The form a deployment pastes into a dashboard. If this is mishandled
+    /// the service panics at boot holding a key it was given and cannot read,
+    /// which is a miserable thing to debug from a log line.
+    #[test]
+    fn a_pem_supplied_as_one_escaped_line_is_accepted() {
+        let multiline = generate_ed25519_pem();
+        let one_line = multiline.replace('\n', "\\n");
+        assert!(!one_line.contains('\n'), "the fixture should be one line");
+
+        let from_multiline =
+            SigningKeys::from_supplied(Some(multiline.clone()), "https://issuer.test".into());
+        let from_one_line =
+            SigningKeys::from_supplied(Some(one_line), "https://issuer.test".into());
+
+        // Same key, so same published point — the escaping must not alter it.
+        assert_eq!(
+            from_multiline.jwks()["keys"][0]["x"],
+            from_one_line.jwks()["keys"][0]["x"],
+            "the escaped form produced a different key"
+        );
+    }
+
+    /// The point of configuring a key at all.
+    ///
+    /// This failed before `stable_kid`: the `kid` was a fresh UUID per
+    /// construction, so a restart republished the same public key under a new
+    /// name and every token issued beforehand came back `unknown_kid`. Two
+    /// instances sharing the key refused each other's tokens for the same
+    /// reason.
+    #[test]
+    fn the_same_key_always_publishes_the_same_kid() {
+        let pem = generate_ed25519_pem();
+        let first = SigningKeys::from_supplied(Some(pem.clone()), "https://issuer.test".into());
+        let second = SigningKeys::from_supplied(Some(pem), "https://issuer.test".into());
+
+        assert_eq!(
+            first.kid(),
+            second.kid(),
+            "a restart with the same key must publish the same kid"
+        );
+        assert!(first.kid().is_some());
+    }
+
+    /// And it must still be unique per key, or two issuers would collide.
+    #[test]
+    fn different_keys_publish_different_kids() {
+        let a = SigningKeys::from_supplied(Some(generate_ed25519_pem()), "https://i.test".into());
+        let b = SigningKeys::from_supplied(Some(generate_ed25519_pem()), "https://i.test".into());
+        assert_ne!(a.kid(), b.kid());
+    }
+
+    /// Carriage returns come with a paste from Windows, or from some web
+    /// forms, and the PEM parser rejects them.
+    #[test]
+    fn a_pem_carrying_carriage_returns_is_accepted() {
+        let pem = generate_ed25519_pem();
+        let crlf = pem.replace('\n', "\r\n");
+        let keys = SigningKeys::from_supplied(Some(crlf), "https://issuer.test".into());
+        assert_eq!(
+            keys.jwks()["keys"][0]["x"],
+            SigningKeys::from_supplied(Some(pem), "https://issuer.test".into()).jwks()["keys"][0]
+                ["x"]
+        );
+    }
+
+    /// An unset or blank variable generates a key rather than failing, which
+    /// is what keeps `cargo run` working with no configuration.
+    #[test]
+    fn no_supplied_key_generates_one() {
+        for raw in [None, Some(String::new()), Some("   \n ".to_string())] {
+            let keys = SigningKeys::from_supplied(raw, "https://issuer.test".into());
+            assert!(keys.kid().is_some());
+        }
+    }
+
+    /// The deployment asked for a specific signing identity. Substituting
+    /// another would mean tokens that validate here and nowhere else, with no
+    /// symptom until something downstream refuses them — so this is fatal.
+    #[test]
+    #[should_panic(expected = "not a usable Ed25519")]
+    fn a_supplied_key_that_cannot_be_read_is_fatal_rather_than_replaced() {
+        SigningKeys::from_supplied(
+            Some("-----BEGIN PRIVATE KEY-----\nnot base64\n-----END PRIVATE KEY-----".into()),
+            "https://issuer.test".into(),
+        );
     }
 
     /// A trailing slash on the issuer must not produce a double slash in the
