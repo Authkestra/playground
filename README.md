@@ -22,7 +22,7 @@ frontend on [Vercel](https://playground-web-opal.vercel.app).
 | --- | --- |
 | **TOTP** (authenticator app) | Working end to end — enrol by QR, verify a real code |
 | **Passkeys** (WebAuthn) | Working — registration and authentication, with signature-counter tracking |
-| **Resource server** (protected route) | Working — issue a token, call the route with it and without it |
+| **Resource server** (protected route) | Working — validates by fetching the issuer's published keys and matching on `kid`, so the route holds no secret |
 | OAuth (GitHub / Google / Discord) | Built; waits on provider credentials |
 | Bot protection (Turnstile / hCaptcha / reCAPTCHA) | Built; waits on captcha site keys |
 
@@ -91,6 +91,8 @@ scenarios simply report themselves as not configured.
 | `TRUSTED_CLIENT_IP_HEADER` | — | Header carrying the true client IP, set by the proxy in front. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. No portable default exists; set this to match your proxy (e.g. `cf-connecting-ip` behind Cloudflare). Use `GET /admin/client-ip` to verify which headers actually arrive and which to trust. Empty string (the safe default) falls back to the rightmost `X-Forwarded-For` entry. |
 | `CLIENT_IP_XFF_POSITION` | `rightmost` | Which `X-Forwarded-For` entry to trust. `rightmost` is unforgeable; `leftmost` is correct only where the proxy overwrites the header. Settle it with `GET /admin/client-ip` rather than guessing. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
+| `PUBLIC_BASE_URL` | `http://localhost:{PORT}` | This API's own externally reachable base URL. It is the `iss` of every token signed here and the prefix of the published key set, so pointing it somewhere a validator cannot reach means tokens issue fine and then fail to validate. |
+| `TOKEN_SIGNING_KEY_PEM` | generated per process | Ed25519 private key, PKCS#8 PEM (`openssl genpkey -algorithm ed25519`). Literal `\n` is unescaped, for dashboards that only take one line. **Unset means a key is generated at boot**: fine for `cargo run`, but restarts invalidate outstanding tokens and two instances publish different keys. A supplied key that will not parse is fatal rather than silently replaced. |
 | `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | — | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. **Both halves or the provider is not offered** — a site key alone renders a widget whose token nothing can spend. The site key is public and reaches the browser; the secret never does. reCAPTCHA needs a **legacy** secret key — the engine speaks classic `siteverify`, not Enterprise assessments; see `docs/deployment.md`. |
 | `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
 | `REDIS_PREFIX` | `ak_playground` | Key namespace, so deployments can share one Redis |

@@ -13,6 +13,7 @@ regenerating (CI enforces this — see P0 "Mirror the framework's CI quality bar
 | GET    | `/api/session`                | —               | `DemoSessionView` |
 | POST   | `/api/session/reset`          | —               | `DemoSessionView` |
 | GET    | `/api/session/events`         | —               | `FlowEvent[]`     |
+| GET    | `/.well-known/jwks.json`      | —               | RFC 7517 key set  |
 | GET    | `/api/scenarios`              | —               | `ScenarioSpec[]`  |
 | POST   | `/api/scenarios/:id/configure`| `ConfigureBody` | `ConfigureResponse` |
 | POST   | `/api/scenarios/:id/action/:action` | scenario-specific | scenario-specific |
@@ -67,12 +68,31 @@ responses are scenario-specific and typed in `packages/api-types`.
 | `passkeys` | `authenticate_start` | `{}` | WebAuthn `CredentialRequestOptions` |
 | `passkeys` | `authenticate_finish` | assertion | `PasskeyAuthResult` |
 | `resource` | `issue` | `{}` | `IssuedToken` |
+| `resource` | `forge` | `{ kind }` | `IssuedToken` |
 | `resource` | `call` | `{ token }` | `ProtectedCall` |
 | `captcha` | `widget` | `{}` | `CaptchaWidgets` |
 | `captcha` | `verify` | `{ provider, token }` | `CaptchaVerification` |
 
 The `oauth` scenario has **no** actions, because OAuth is a navigation rather
 than an XHR ceremony — see below.
+
+`resource/forge` mints a token built to fail one specific check — `kind` is one
+of `unknown_kid`, `bad_signature`, `untrusted_issuer`, `wrong_audience`,
+`expired`, `missing_kid`. Each is a **real, correctly signed token**; the
+verdict `call` returns comes from real validation, not from a label travelling
+alongside it. `IssuedToken.forged_as` says which, and is `null` for an honest
+token.
+
+`resource/call` validates by **key discovery**: the token's `kid` is looked up
+in the key set published at `GET /.well-known/jwks.json`, behind a trust map
+keyed on `iss`. The validating side holds no secret. `TokenVerdict` therefore
+distinguishes twelve outcomes rather than a flat 401 — including
+`unknown_kid` (a key nobody published), `untrusted_issuer` (no key set is
+trusted for that `iss`, with no fallback), and `missing_kid`.
+
+`keys_unreachable` answers **503, not 401**. Nothing was decided about the
+credential, so calling it invalid would be a lie — and a client that retries on
+503 and gives up on 401 would otherwise give up on a token that was fine.
 
 `captcha/widget` returns the **site key** for each selected provider — the
 public half, which every page showing a widget renders anyway. The secret never

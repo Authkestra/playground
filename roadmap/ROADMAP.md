@@ -606,8 +606,19 @@ Written for the visitor, not for us. Server-side `tracing` keeps the detail that
 - [x] `append_capped`/`list` in the store rather than read-modify-write, which would drop concurrent events
 - [ ] Narrate the OAuth flow too, once a real round trip is possible (#7)
 
+### The panel was removed; the record was not
+The `FlowLog` component is gone from the sign-in step, and the space went to the resource-server panel (P2, the JWKS rebuild).
+
+Everything ticked above still stands: `GET /api/session/events`, the levels, the facts, the cap, the expiry, the infallible recording, and the test that no secret reaches it. What was removed is the *reader*.
+
+Two reasons, and the second settles it. The panel was expected to reflect the framework's own logs and did not — and it cannot usefully: authkestra emits roughly 34 `debug!` events to 6 `info!`, so an honest INFO mirror is nearly empty, while DEBUG would mean streaming unaudited log sites from a dependency to untrusted viewers. This log is safe *by construction* precisely because it is curated, and piping raw tracing through it would trade that away for content nobody can vet. Server-side `tracing` is where that detail belongs, and it now actually reaches the logs — the deployment had `authkestra=info`, which suppressed nearly all of it.
+
+What the panel was reaching for is served better in place: each scenario's panel shows the request it made and what came back, next to the thing that produced it.
+
+A reader may well come back for the OP-server page (P6), where a two-party flow genuinely benefits from a sequence. The endpoint is deliberately still there for it.
+
 ### Acceptance
-A visitor completes and fails a flow, and the log reads as a sequence they can learn from.
+A visitor completes and fails a flow, and the log reads as a sequence they can learn from. *Met by the API; the browser-side reader was withdrawn — see above.*
 
 #### Dark theme, matching the framework's site
 

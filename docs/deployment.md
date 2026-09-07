@@ -128,6 +128,8 @@ own origin.
 
 | Variable | Why |
 | --- | --- |
+| `PUBLIC_BASE_URL` | This API's own base URL, no trailing slash. The `iss` of every token it signs and the prefix of `/.well-known/jwks.json`. A validator resolves the token's `iss` to that URL and fetches it, so a value nothing can reach means tokens issue and then fail to validate — the confusing way round. |
+| `TOKEN_SIGNING_KEY_PEM` | Ed25519 PKCS#8 PEM. Unset generates one per process, which is fine for one instance and wrong for two: each would publish a different key, and a token issued by one would be refused by the other. Set it before scaling past one. |
 | `ADMIN_TOKEN` | Enables `POST /admin/kill-switch`. Unset means the route is not mounted at all — a missing secret must never mean an open switch. |
 | `OAUTH_STATE_KEY` | ≥32 bytes. Keeps encrypted OAuth state valid across restarts. |
 | `TRUSTED_CLIENT_IP_HEADER` | The header the proxy in front **overwrites**. `cf-connecting-ip` behind Cloudflare. Empty falls back to `X-Forwarded-For`. |
