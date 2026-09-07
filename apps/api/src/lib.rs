@@ -338,8 +338,21 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
     // unavailable rather than failing at boot.
     let provider_credentials = ProviderCredentials::from_env();
     let captcha_keys = crate::scenario::captcha::CaptchaKeys::from_env();
-    let registry =
-        ScenarioRegistry::with_credentials(provider_credentials.configured(), captcha_keys);
+
+    // Signing comes first: the resource scenario issues with this key and
+    // validates against the key set it publishes, so it cannot be built
+    // without it. The issuer is this API's own base URL, so the key set lands
+    // at `<iss>/.well-known/jwks.json` — where a resource server pointed at
+    // this issuer will look for it.
+    let signing = Arc::new(crate::signing::SigningKeys::from_env(
+        settings.public_base_url.clone(),
+    ));
+
+    let registry = ScenarioRegistry::from_config(crate::scenario::RegistryConfig {
+        oauth_providers: provider_credentials.configured(),
+        captcha: captcha_keys,
+        signing: signing.clone(),
+    });
 
     let kv = open_state_store().await?;
 
@@ -363,13 +376,6 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
     let engines = Arc::new(EngineFactory::new(
         provider_credentials,
         settings.cookie_secure,
-    ));
-
-    // The issuer is this API's own base URL, so the JWKS it publishes is
-    // reachable at `<iss>/.well-known/jwks.json` — which is where a resource
-    // server pointed at this issuer will look for it.
-    let signing = Arc::new(crate::signing::SigningKeys::from_env(
-        settings.public_base_url.clone(),
     ));
 
     Ok(AppState {

@@ -115,11 +115,18 @@ fn build_state(
     let signing = Arc::new(crate::signing::SigningKeys::for_test(
         &settings.public_base_url,
     ));
+    // The same key the state publishes, so the resource scenario validates
+    // against what `/.well-known/jwks.json` actually serves.
+    let registry = ScenarioRegistry::for_tests_from(crate::scenario::RegistryConfig {
+        oauth_providers: configured,
+        captcha,
+        signing: signing.clone(),
+    });
 
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
             kv.clone(),
-            ScenarioRegistry::for_tests_with(configured, captcha),
+            registry,
             settings.session_ttl_hours,
             creds.clone(),
         )),
@@ -171,15 +178,18 @@ pub fn test_state_with_shared_store_and_admin(
     let settings = Arc::new(test_settings(admin_token));
     let ttl = Duration::from_secs((settings.session_ttl_hours.max(1) as u64) * 3600);
     let creds = KvCredentialStore::new(store.clone(), ttl);
-    let configured = ProviderCredentials::default().configured();
     let signing = Arc::new(crate::signing::SigningKeys::for_test(
         &settings.public_base_url,
     ));
+    let registry = ScenarioRegistry::for_tests_from(crate::scenario::RegistryConfig {
+        signing: signing.clone(),
+        ..Default::default()
+    });
 
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
             store.clone(),
-            ScenarioRegistry::for_tests(configured),
+            registry,
             settings.session_ttl_hours,
             creds.clone(),
         )),

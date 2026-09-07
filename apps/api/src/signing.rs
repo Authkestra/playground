@@ -43,6 +43,9 @@ pub const JWKS_PATH: &str = "/.well-known/jwks.json";
 /// The signing identity of this deployment.
 pub struct SigningKeys {
     manager: Arc<TokenManager>,
+    /// The same key as `manager` holds, kept separately so an arbitrary claim
+    /// set can be signed. See [`SigningKeys::sign`].
+    encoding: jsonwebtoken::EncodingKey,
     jwk: Jwk,
     issuer: String,
     jwks_url: String,
@@ -79,7 +82,7 @@ impl SigningKeys {
                      instances will publish different keys — set it in any deployment \
                      that runs more than one."
                 );
-                generate_pem()
+                generate_ed25519_pem()
             }
         };
 
@@ -112,6 +115,7 @@ impl SigningKeys {
         let jwks_url = format!("{}{JWKS_PATH}", issuer.trim_end_matches('/'));
         Self {
             manager: Arc::new(manager),
+            encoding: encoding_key(&pem),
             jwk,
             issuer,
             jwks_url,
@@ -120,12 +124,13 @@ impl SigningKeys {
 
     /// A key for tests, generated in-process.
     pub fn for_test(issuer: &str) -> Self {
-        let pem = generate_pem();
+        let pem = generate_ed25519_pem();
         let manager = TokenManager::new_ed25519(pem.as_bytes(), Some(issuer.to_string()), None)
             .expect("a freshly generated key parses");
         let jwk = manager.public_jwk().expect("Ed25519 carries a JWK");
         Self {
             manager: Arc::new(manager),
+            encoding: encoding_key(&pem),
             jwk,
             jwks_url: format!("{}{JWKS_PATH}", issuer.trim_end_matches('/')),
             issuer: issuer.to_string(),
@@ -160,10 +165,38 @@ impl SigningKeys {
     pub fn kid(&self) -> Option<&str> {
         self.jwk.kid.as_deref()
     }
+
+    /// Sign an arbitrary claim set with this deployment's key and `kid`.
+    ///
+    /// An issuer's fundamental operation, and exposed because
+    /// `TokenManager`'s `issue_*` methods take an **unsigned** lifetime — so
+    /// "expired one second ago" is not expressible through them, and the
+    /// resource scenario needs exactly that: a token this deployment really
+    /// signed, correctly, that is nonetheless past its `exp`. Anything else
+    /// would demonstrate expiry by waiting for it.
+    pub fn sign(&self, claims: &serde_json::Value) -> Result<String, jsonwebtoken::errors::Error> {
+        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::EdDSA);
+        header.kid = self.jwk.kid.clone();
+        jsonwebtoken::encode(&header, claims, &self.encoding)
+    }
+}
+
+/// The signing half of a PEM this module has already parsed once.
+///
+/// Panics on failure by design: both call sites have just built a
+/// `TokenManager` from the same bytes, so a failure here would mean the two
+/// halves disagree about a key that is already in use.
+fn encoding_key(pem: &str) -> jsonwebtoken::EncodingKey {
+    jsonwebtoken::EncodingKey::from_ed_pem(pem.as_bytes())
+        .expect("a PEM that built a TokenManager also builds an EncodingKey")
 }
 
 /// A fresh Ed25519 private key, PKCS#8 PEM encoded.
-fn generate_pem() -> String {
+///
+/// Public because the resource scenario needs throwaway keys of its own, to
+/// mint tokens that are *meant* to fail validation. Those are not signing
+/// identities and deliberately do not go through [`SigningKeys`].
+pub fn generate_ed25519_pem() -> String {
     use ed25519_dalek::pkcs8::EncodePrivateKey;
     use rand_core::RngCore;
 

@@ -3,4 +3,4 @@
 /**
  * Why a request to the protected route was answered the way it was.
  */
-export type TokenVerdict = "accepted" | "absent" | "malformed" | "expired" | "wrong_audience" | "bad_signature";
+export type TokenVerdict = "accepted" | "absent" | "malformed" | "missing_kid" | "unknown_kid" | "untrusted_issuer" | "wrong_issuer" | "wrong_audience" | "expired" | "bad_signature" | "keys_unreachable" | "rejected";

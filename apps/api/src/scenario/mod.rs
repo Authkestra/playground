@@ -515,6 +515,40 @@ pub trait Scenario: Send + Sync {
     }
 }
 
+/// What a deployment supplies to the scenarios that need it.
+///
+/// A struct rather than a growing argument list. It reached four parameters
+/// while the resource scenario was being rebuilt, and every scenario that
+/// gains a dependency would otherwise break every call site — including the
+/// test fixtures, which is how a signature change turns into a diff nobody
+/// wants to read.
+pub struct RegistryConfig {
+    /// OAuth providers this deployment holds credentials for.
+    pub oauth_providers: Vec<String>,
+    /// Captcha site keys and secrets.
+    pub captcha: captcha::CaptchaKeys,
+    /// The deployment's signing identity, which the resource scenario issues
+    /// with and validates against.
+    pub signing: Arc<crate::signing::SigningKeys>,
+}
+
+impl Default for RegistryConfig {
+    /// No third-party credentials, and a signing key generated on the spot.
+    ///
+    /// The generated key is what makes this usable in tests and in
+    /// `cargo run` with no configuration. It publishes at
+    /// `http://localhost:8000`, which is where a local API serves it.
+    fn default() -> Self {
+        Self {
+            oauth_providers: Vec::new(),
+            captcha: captcha::CaptchaKeys::default(),
+            signing: Arc::new(crate::signing::SigningKeys::for_test(
+                "http://localhost:8000",
+            )),
+        }
+    }
+}
+
 /// Registry of every known scenario.
 #[derive(Clone)]
 pub struct ScenarioRegistry {
@@ -536,34 +570,48 @@ impl ScenarioRegistry {
     /// the codebase has to change to accommodate them.
     /// The registry with no third-party credentials configured.
     pub fn with_builtins() -> Self {
-        Self::with_providers(Vec::new())
+        Self::from_config(RegistryConfig::default())
     }
 
     /// The scenarios a visitor is offered, with OAuth credentials only.
-    ///
-    /// Kept as its own entry point because most callers have no captcha keys
-    /// to pass and `..Default::default()` is not available on a positional
-    /// argument.
     pub fn with_providers(configured_providers: Vec<String>) -> Self {
-        Self::with_credentials(configured_providers, captcha::CaptchaKeys::default())
+        Self::from_config(RegistryConfig {
+            oauth_providers: configured_providers,
+            ..Default::default()
+        })
     }
 
-    /// The scenarios a visitor is offered.
-    ///
-    /// Both provider-select controls only list providers this deployment holds
-    /// credentials for, so neither can offer a dead end. A deployment with no
-    /// credentials at all still gets every scenario — they report themselves
-    /// unavailable, which explains the gap instead of hiding it.
+    /// As [`Self::with_providers`], plus captcha keys.
     pub fn with_credentials(
         configured_providers: Vec<String>,
         captcha_keys: captcha::CaptchaKeys,
     ) -> Self {
+        Self::from_config(RegistryConfig {
+            oauth_providers: configured_providers,
+            captcha: captcha_keys,
+            ..Default::default()
+        })
+    }
+
+    /// The scenarios a visitor is offered.
+    ///
+    /// Every provider-select control only lists providers this deployment holds
+    /// credentials for, so none can offer a dead end. A deployment with no
+    /// credentials at all still gets every scenario — they report themselves
+    /// unavailable, which explains the gap instead of hiding it.
+    pub fn from_config(config: RegistryConfig) -> Self {
+        let RegistryConfig {
+            oauth_providers,
+            captcha,
+            signing,
+        } = config;
+
         let mut r = Self::new();
         r.register(Arc::new(passkeys::PasskeysScenario));
-        r.register(Arc::new(oauth::OAuthScenario::new(configured_providers)));
+        r.register(Arc::new(oauth::OAuthScenario::new(oauth_providers)));
         r.register(Arc::new(totp::TotpScenario));
-        r.register(Arc::new(resource::ResourceScenario));
-        r.register(Arc::new(captcha::CaptchaScenario::new(captcha_keys)));
+        r.register(Arc::new(resource::ResourceScenario::new(signing)));
+        r.register(Arc::new(captcha::CaptchaScenario::new(captcha)));
         r
     }
 
@@ -587,7 +635,16 @@ impl ScenarioRegistry {
         configured_providers: Vec<String>,
         captcha_keys: captcha::CaptchaKeys,
     ) -> Self {
-        let mut r = Self::with_credentials(configured_providers, captcha_keys);
+        Self::for_tests_from(RegistryConfig {
+            oauth_providers: configured_providers,
+            captcha: captcha_keys,
+            ..Default::default()
+        })
+    }
+
+    /// As [`Self::from_config`], plus the placeholder scenarios.
+    pub fn for_tests_from(config: RegistryConfig) -> Self {
+        let mut r = Self::from_config(config);
         r.register(Arc::new(dummy::DummyToggleScenario));
         r.register(Arc::new(dummy::DummyProviderScenario));
         r

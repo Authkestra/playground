@@ -5,13 +5,30 @@
  */
 export type IssuedToken = { token: string, 
 /**
- * Seconds until its `exp` passes.
- *
- * Not the same as when it stops being accepted: the validator allows 60
- * seconds of clock skew on top. See `VALIDATION_LEEWAY_SECS`.
+ * Seconds until its `exp` passes. There is no skew allowance here, so
+ * this is the whole life.
  */
 expires_in: number, 
 /**
- * What the protected route will demand.
+ * What the protected route demands in `aud`.
  */
-audience: string, };
+audience: string, 
+/**
+ * The `iss` it carries, and the name the validator has to trust.
+ */
+issuer: string, 
+/**
+ * The key that signed it. Look for this in the published key set.
+ */
+kid: string | null, 
+/**
+ * Where the key set is published, so the `kid` can be checked by hand.
+ */
+jwks_url: string, 
+/**
+ * Whether this token was minted to fail, and how.
+ *
+ * `None` for an honest token. The panel shows it so a rejection is never
+ * mistaken for a bug in the happy path.
+ */
+forged_as: string | null, };
