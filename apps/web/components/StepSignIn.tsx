@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { DemoConfig, FlowEvent, OAuthMode, ScenarioSpec } from "@playground/api-types";
 import { getSessionEvents } from "@/lib/api";
 import { loginUrl, type OAuthReturn } from "@/lib/oauth";
@@ -32,6 +33,56 @@ const PROVIDER_STYLES: Record<string, string> = {
 
 const PROVIDER_FALLBACK_STYLE =
   "border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800";
+
+/**
+ * Scenarios with a panel in the sign-in step, in the order they appear.
+ *
+ * Bot protection leads: a captcha guards the form, so it belongs in front of
+ * the methods rather than after them.
+ */
+export const PANEL_ORDER = ["captcha", "oauth", "passkeys", "totp", "resource"] as const;
+
+/** Switched on by the visitor *and* usable on this deployment. */
+export function isScenarioLive(
+  scenarios: ScenarioSpec[],
+  config: DemoConfig | null,
+  id: string,
+): boolean {
+  const spec = scenarios.find((s) => s.id === id);
+  // Both halves matter. A kill-switched scenario used to render its panel
+  // anyway, and then every button inside it answered 503.
+  return !!spec && spec.available !== false && isControlValueActive(config?.scenarios?.[id]);
+}
+
+/**
+ * Which panels to show, in order.
+ *
+ * Pure and exported because this is where the bug was: the "is anything on?"
+ * check listed every panel except the resource server, so turning on only the
+ * protected route showed "no sign-in method is turned on yet" while its panel
+ * sat one branch away, never rendered. Deriving the list from `PANEL_ORDER`
+ * makes that unrepresentable — a panel cannot render without counting towards
+ * the empty state, and the dividers between them cannot disagree with what is
+ * actually on either side.
+ */
+export function visiblePanels(
+  scenarios: ScenarioSpec[],
+  config: DemoConfig | null,
+  oauthOptionCount: number,
+): string[] {
+  return PANEL_ORDER.filter((id) => {
+    if (!isScenarioLive(scenarios, config, id)) return false;
+    // A provider can be selected and no longer offered — credentials pulled
+    // from the deployment — so OAuth needs a button to show, not a selection.
+    if (id === "oauth") return oauthOptionCount > 0;
+    return true;
+  });
+}
+
+/** Whether any of the live panels is actually a way to sign in. */
+export function hasSignInMethod(visible: string[]): boolean {
+  return visible.some((id) => id === "oauth" || id === "passkeys" || id === "totp");
+}
 
 export default function StepSignIn({
   scenarios,
@@ -112,17 +163,90 @@ export default function StepSignIn({
   const oauthOptions =
     oauthScenario?.control.kind === "select_many" ? oauthScenario.control.options : [];
   const activeOauthOptions = oauthOptions.filter((o) => selectedProviders.includes(o.id));
-  const oauthAvailable = oauthScenario?.available !== false && activeOauthOptions.length > 0;
 
-  const passkeysActive = isControlValueActive(config?.scenarios.passkeys);
-  const resourceActive = isControlValueActive(config?.scenarios?.["resource"]);
-  const totpActive = isControlValueActive(config?.scenarios.totp);
+  const visible = visiblePanels(scenarios, config, activeOauthOptions.length);
+  const signInMethodOn = hasSignInMethod(visible);
 
-  const captchaScenario = scenarios.find((s) => s.id === "captcha");
-  const captchaActive =
-    captchaScenario?.available !== false && isControlValueActive(config?.scenarios?.["captcha"]);
-
-  const hasAnyMethod = oauthAvailable || passkeysActive || totpActive || captchaActive;
+  const renderPanel = (id: string): ReactNode => {
+    switch (id) {
+      case "captcha":
+        return (
+          <div className="rounded-md border border-slate-800 p-4">
+            <h4 className="mb-2 text-sm font-medium text-slate-200">Bot protection</h4>
+            <CaptchaPanel
+              scenarioId="captcha"
+              onDemoDisabled={onDemoDisabled}
+              onAction={fetchEvents}
+            />
+          </div>
+        );
+      case "oauth":
+        return (
+          <div className="flex flex-col gap-2">
+            {activeOauthOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => {
+                  window.location.href = loginUrl(option.id, oauthMode);
+                }}
+                className={`flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
+                  PROVIDER_STYLES[option.id] ?? PROVIDER_FALLBACK_STYLE
+                }`}
+              >
+                Continue with {option.label}
+              </button>
+            ))}
+            <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-400">
+              <span>Identity mode:</span>
+              <div className="inline-flex rounded-md border border-slate-800 p-0.5">
+                <ModeButton
+                  label="Session"
+                  active={oauthMode === "session"}
+                  onClick={() => setOauthMode("session")}
+                />
+                <ModeButton
+                  label="Stateless (JWT)"
+                  active={oauthMode === "jwt"}
+                  onClick={() => setOauthMode("jwt")}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      case "passkeys":
+        return (
+          <div className="rounded-md border border-slate-800 p-4">
+            <h4 className="mb-2 text-sm font-medium text-slate-200">Passkey</h4>
+            <PasskeysPanel
+              scenarioId="passkeys"
+              onDemoDisabled={onDemoDisabled}
+              onAction={fetchEvents}
+            />
+          </div>
+        );
+      case "totp":
+        return (
+          <div className="rounded-md border border-slate-800 p-4">
+            <h4 className="mb-2 text-sm font-medium text-slate-200">Authenticator app</h4>
+            <TotpPanel scenarioId="totp" onDemoDisabled={onDemoDisabled} onAction={fetchEvents} />
+          </div>
+        );
+      case "resource":
+        return (
+          <div className="rounded-md border border-slate-800 p-4">
+            <h4 className="mb-2 text-sm font-medium text-slate-200">Protected API route</h4>
+            <ResourcePanel
+              scenarioId="resource"
+              onDemoDisabled={onDemoDisabled}
+              onAction={fetchEvents}
+            />
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -140,9 +264,9 @@ export default function StepSignIn({
             <OAuthReturnBanner result={oauthReturn} onDismiss={onDismissOauthReturn} />
           )}
 
-          {!hasAnyMethod ? (
+          {visible.length === 0 ? (
             <p className="text-sm text-slate-400">
-              No sign-in method is turned on yet.{" "}
+              Nothing is turned on yet.{" "}
               <button
                 type="button"
                 onClick={onBack}
@@ -150,7 +274,7 @@ export default function StepSignIn({
               >
                 Go back to step 1
               </button>{" "}
-              to choose one.
+              to choose something.
             </p>
           ) : (
             <div className="mx-auto flex max-w-sm flex-col gap-5">
@@ -158,98 +282,19 @@ export default function StepSignIn({
                 <h3 className="text-base font-semibold text-slate-100">
                   Sign in to Authkestra
                 </h3>
-                <p className="text-sm text-slate-400">Choose how you&apos;d like to continue.</p>
+                <p className="text-sm text-slate-400">
+                  {signInMethodOn
+                    ? "Choose how you'd like to continue."
+                    : "No sign-in method is on — try what you did turn on below."}
+                </p>
               </div>
 
-              {captchaActive && (
-                <div className="rounded-md border border-slate-800 p-4">
-                  <h4 className="mb-2 text-sm font-medium text-slate-200">Bot protection</h4>
-                  <CaptchaPanel
-                    scenarioId="captcha"
-                    onDemoDisabled={onDemoDisabled}
-                    onAction={fetchEvents}
-                  />
-                </div>
-              )}
-
-              {captchaActive && (oauthAvailable || passkeysActive || totpActive || resourceActive) && (
-                <Divider />
-              )}
-
-              {oauthAvailable && (
-                <div className="flex flex-col gap-2">
-                  {activeOauthOptions.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => {
-                        window.location.href = loginUrl(option.id, oauthMode);
-                      }}
-                      className={`flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
-                        PROVIDER_STYLES[option.id] ?? PROVIDER_FALLBACK_STYLE
-                      }`}
-                    >
-                      Continue with {option.label}
-                    </button>
-                  ))}
-                  <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-400">
-                    <span>Identity mode:</span>
-                    <div className="inline-flex rounded-md border border-slate-800 p-0.5">
-                      <ModeButton
-                        label="Session"
-                        active={oauthMode === "session"}
-                        onClick={() => setOauthMode("session")}
-                      />
-                      <ModeButton
-                        label="Stateless (JWT)"
-                        active={oauthMode === "jwt"}
-                        onClick={() => setOauthMode("jwt")}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {oauthAvailable && (passkeysActive || totpActive) && <Divider />}
-
-              {passkeysActive && (
-                <div className="rounded-md border border-slate-800 p-4">
-                  <h4 className="mb-2 text-sm font-medium text-slate-200">Passkey</h4>
-                  <PasskeysPanel
-                    scenarioId="passkeys"
-                    onDemoDisabled={onDemoDisabled}
-                    onAction={fetchEvents}
-                  />
-                </div>
-              )}
-
-              {passkeysActive && totpActive && <Divider />}
-
-              {totpActive && (
-                <div className="rounded-md border border-slate-800 p-4">
-                  <h4 className="mb-2 text-sm font-medium text-slate-200">Authenticator app</h4>
-                  <TotpPanel
-                    scenarioId="totp"
-                    onDemoDisabled={onDemoDisabled}
-                    onAction={fetchEvents}
-                  />
-                </div>
-              )}
-
-              {totpActive && resourceActive && <Divider />}
-
-              {resourceActive && (
-                <div className="rounded-md border border-slate-800 p-4">
-                  <h4 className="mb-2 text-sm font-medium text-slate-200">
-                    Protected API route
-                  </h4>
-                  <ResourcePanel
-                    scenarioId="resource"
-                    onDemoDisabled={onDemoDisabled}
-                    onAction={fetchEvents}
-                  />
-                </div>
-              )}
+              {visible.map((id, i) => (
+                <Fragment key={id}>
+                  {i > 0 && <Divider />}
+                  {renderPanel(id)}
+                </Fragment>
+              ))}
             </div>
           )}
         </div>
