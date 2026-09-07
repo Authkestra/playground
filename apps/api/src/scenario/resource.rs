@@ -56,12 +56,33 @@ pub const VALIDATION_LEEWAY_SECS: u64 = 60;
 
 pub struct ResourceScenario;
 
+/// What the flow log says about a freshly issued token.
+///
+/// Built from the constants rather than written out, because it *was* written
+/// out and went stale: it claimed a five-minute life while `TOKEN_TTL_SECS`
+/// said sixty seconds, with the contradicting `expires_in` fact attached to the
+/// very same event. Wrong prose about expiry, in the one scenario whose subject
+/// is expiry. Prose that restates a constant has to be generated from it.
+fn issued_token_detail() -> String {
+    format!(
+        "Signed for this session only, with an `aud` of `{DEMO_AUDIENCE}` and a \
+         {TOKEN_TTL_SECS}-second life. `jsonwebtoken` allows \
+         {VALIDATION_LEEWAY_SECS}s of clock skew by default and the engine does not \
+         override it, so it keeps being accepted for about {total}s in total — that \
+         is the wait before `expired` shows.",
+        total = TOKEN_TTL_SECS + VALIDATION_LEEWAY_SECS
+    )
+}
+
 /// A token minted for the visitor's demo identity.
 #[derive(Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct IssuedToken {
     pub token: String,
-    /// Seconds until it stops validating.
+    /// Seconds until its `exp` passes.
+    ///
+    /// Not the same as when it stops being accepted: the validator allows 60
+    /// seconds of clock skew on top. See `VALIDATION_LEEWAY_SECS`.
     pub expires_in: u32,
     /// What the protected route will demand.
     pub audience: String,
@@ -320,10 +341,7 @@ impl Scenario for ResourceScenario {
 
                 ctx.record(
                     Step::success("resource", "token issued")
-                        .detail(
-                            "Signed for this session only, with an `aud` of \
-                             `playground-api` and a five-minute life.",
-                        )
+                        .detail(issued_token_detail())
                         .fact("audience", DEMO_AUDIENCE)
                         .fact("expires_in", TOKEN_TTL_SECS.to_string()),
                 )
@@ -627,6 +645,32 @@ mod tests {
         let (verdict, _) = classify(&mine, Some(&forged));
         assert_ne!(verdict, TokenVerdict::Accepted);
         assert_eq!(verdict.status(), 401);
+    }
+
+    /// The regression. The detail is visitor-facing text about expiry in the
+    /// scenario about expiry, so it must agree with the constants that decide
+    /// it — and it did not.
+    #[test]
+    fn the_issued_token_detail_agrees_with_the_constants() {
+        let detail = issued_token_detail();
+
+        for expected in [
+            TOKEN_TTL_SECS.to_string(),
+            VALIDATION_LEEWAY_SECS.to_string(),
+            (TOKEN_TTL_SECS + VALIDATION_LEEWAY_SECS).to_string(),
+        ] {
+            assert!(
+                detail.contains(&expected),
+                "the detail should name {expected}: {detail}"
+            );
+        }
+        assert!(detail.contains(DEMO_AUDIENCE), "{detail}");
+        // The stale wording, and any other unit that is not what the constants
+        // are measured in.
+        assert!(
+            !detail.contains("minute"),
+            "the TTL is in seconds; saying minutes is how this went wrong: {detail}"
+        );
     }
 
     #[test]

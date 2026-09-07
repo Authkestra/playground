@@ -5,7 +5,10 @@
  */
 export type IssuedToken = { token: string, 
 /**
- * Seconds until it stops validating.
+ * Seconds until its `exp` passes.
+ *
+ * Not the same as when it stops being accepted: the validator allows 60
+ * seconds of clock skew on top. See `VALIDATION_LEEWAY_SECS`.
  */
 expires_in: number, 
 /**
