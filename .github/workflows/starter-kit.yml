@@ -7,11 +7,15 @@
 # Two sets, because the combinatorial space grows with every scenario and a
 # matrix slow enough to be annoying is one people learn to ignore:
 #
-#   pull requests  - the representative set (~8): nothing on, each method
+#   pull requests  - the representative set (~14): nothing on, each method
 #                    alone, one per provider, and everything at once
-#   nightly        - the full product (32), with dependencies updated first,
+#   nightly        - the full product (128), with dependencies updated first,
 #                    so a newly published authkestra that breaks generated
 #                    code is caught here rather than by whoever downloads next
+#
+# The counts are indicative, not authoritative — matrix.rs is. They are written
+# down so a change that multiplies the nightly run is noticed in review rather
+# than in the Actions bill.
 #
 # The list itself lives in `apps/api/src/kit/matrix.rs` and is read from the
 # binary below. It is deliberately not repeated in this file: a matrix that
@@ -167,6 +171,15 @@ jobs:
             *totp*)
               grep -q '/auth/totp/enroll' generated/src/main.rs \
                 || { echo "::error::totp selected but no ceremony routes generated"; exit 1; } ;;
+          esac
+          # The captcha fragment's whole point is *where* the check sits, and a
+          # fragment that dropped the route would still compile.
+          case "${{ matrix.combination.spec }}" in
+            *captcha*)
+              grep -q '/auth/guarded' generated/src/main.rs \
+                || { echo "::error::captcha selected but no guarded route generated"; exit 1; }
+              grep -q 'captcha.verify(' generated/src/main.rs \
+                || { echo "::error::the guarded route does not verify anything"; exit 1; } ;;
           esac
 
       # The TypeScript client is a file the Rust build never looks at, so

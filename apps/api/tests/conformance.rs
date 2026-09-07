@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use api::killswitch::KillSwitch;
 use api::routes::AppState;
+use api::scenario::captcha::CaptchaKeys;
 use api::scenario::{ControlShape, ControlValue, ScenarioRegistry};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -22,21 +23,33 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
-/// State with every OAuth provider configured.
+/// State with every third-party credential configured.
 ///
 /// The harness needs each scenario to have a meaningful "active" value, and a
 /// provider-select control offers nothing without credentials — so a deployment
-/// missing them would let the OAuth scenario pass vacuously.
+/// missing them would let OAuth and bot protection pass vacuously.
+///
+/// The values are fictional and nothing here reaches a third party: the only
+/// path that would is captcha `verify`, which this suite never gets past its
+/// argument checks.
 async fn state() -> AppState {
-    api::testing::test_state_with_providers(
+    api::testing::test_state_with_all_credentials(
         KillSwitch::default(),
         &[
             ("github", "gh-id", "gh-secret"),
             ("google", "go-id", "go-secret"),
             ("discord", "di-id", "di-secret"),
         ],
+        CAPTCHA_KEYS,
     )
 }
+
+/// The captcha keys `state` and `test_registry` agree on.
+const CAPTCHA_KEYS: &[(&str, &str, &str)] = &[
+    ("turnstile", "ts-site", "ts-secret"),
+    ("hcaptcha", "hc-site", "hc-secret"),
+    ("recaptcha", "rc-site", "rc-secret"),
+];
 
 fn req(method: &str, uri: &str) -> axum::http::request::Builder {
     req_from("203.0.113.77", method, uri)
@@ -105,11 +118,18 @@ fn registered() -> Vec<(String, ControlShape, Vec<String>)> {
 
 /// The same registry the test state is built with, so control options line up.
 fn test_registry() -> ScenarioRegistry {
-    ScenarioRegistry::for_tests(vec![
-        "discord".to_string(),
-        "github".to_string(),
-        "google".to_string(),
-    ])
+    let mut captcha = CaptchaKeys::default();
+    for (id, site, secret) in CAPTCHA_KEYS {
+        captcha.insert_for_test(id, site, secret);
+    }
+    ScenarioRegistry::for_tests_with(
+        vec![
+            "discord".to_string(),
+            "github".to_string(),
+            "google".to_string(),
+        ],
+        captcha,
+    )
 }
 
 #[tokio::test]
@@ -582,7 +602,7 @@ async fn the_shipped_registry_offers_no_placeholder_scenarios() {
         !ids.iter().any(|id| id.starts_with("dummy_")),
         "placeholder scenarios must not be offered to visitors: {ids:?}"
     );
-    for expected in ["passkeys", "oauth", "totp"] {
+    for expected in ["passkeys", "oauth", "totp", "resource", "captcha"] {
         assert!(
             ids.contains(&expected),
             "{expected} should be shipped: {ids:?}"

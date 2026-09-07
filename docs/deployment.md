@@ -133,6 +133,7 @@ own origin.
 | `TRUSTED_CLIENT_IP_HEADER` | The header the proxy in front **overwrites**. `cf-connecting-ip` behind Cloudflare. Empty falls back to `X-Forwarded-For`. |
 | `CLIENT_IP_XFF_POSITION` | `rightmost` (default, safe) or `leftmost`. See below — do not set this from guesswork. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | `GITHUB_`, `GOOGLE_`, `DISCORD_`. Absent credentials are not an error; the affected scenarios report themselves as not configured. |
+| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. Both halves are required or the provider is not offered at all, because a site key without a secret renders a widget whose token nothing can spend — a failure at the last step with no clue as to why. Register the deployment's hostnames with each provider; a widget served from an unregistered host produces a token that fails verification and looks exactly like a bot. |
 
 ## Settling the client-IP question
 

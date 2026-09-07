@@ -15,6 +15,7 @@ use crate::credentials::KvCredentialStore;
 use crate::engine::{EngineFactory, ProviderCredentials};
 use crate::killswitch::{KillSwitch, KillSwitchState};
 use crate::routes::AppState;
+use crate::scenario::captcha::CaptchaKeys;
 use crate::scenario::ScenarioRegistry;
 use crate::session::{DemoSessionStore, DEFAULT_TTL_HOURS};
 use crate::settings::{CookieSameSite, RelyingParty, Settings, XffPosition};
@@ -57,18 +58,53 @@ pub fn test_state_with_providers(
     for (id, client_id, secret) in providers {
         creds.insert_for_test(id, client_id, secret);
     }
-    build_state(kill_switch, test_settings(None), creds)
+    build_state(
+        kill_switch,
+        test_settings(None),
+        creds,
+        CaptchaKeys::default(),
+    )
+}
+
+/// As [`test_state_with_providers`], plus captcha site keys.
+///
+/// Both provider-select controls offer nothing without credentials, so a suite
+/// that walks every scenario needs both halves supplied or the captcha scenario
+/// passes vacuously.
+///
+/// The keys are fictional. Nothing here reaches a provider: `verify` is the
+/// only path that would, and no test calls it against a live endpoint.
+pub fn test_state_with_all_credentials(
+    kill_switch: KillSwitch,
+    providers: &[(&str, &str, &str)],
+    captcha: &[(&str, &str, &str)],
+) -> AppState {
+    let mut creds = ProviderCredentials::default();
+    for (id, client_id, secret) in providers {
+        creds.insert_for_test(id, client_id, secret);
+    }
+    let mut keys = CaptchaKeys::default();
+    for (id, site_key, secret) in captcha {
+        keys.insert_for_test(id, site_key, secret);
+    }
+    build_state(kill_switch, test_settings(None), creds, keys)
 }
 
 /// As [`test_state`], with settings supplied by the caller.
 pub fn test_state_with_settings(kill_switch: KillSwitch, settings: Settings) -> AppState {
-    build_state(kill_switch, settings, ProviderCredentials::default())
+    build_state(
+        kill_switch,
+        settings,
+        ProviderCredentials::default(),
+        CaptchaKeys::default(),
+    )
 }
 
 fn build_state(
     kill_switch: KillSwitch,
     settings: Settings,
     credentials: ProviderCredentials,
+    captcha: CaptchaKeys,
 ) -> AppState {
     let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
     let ttl = Duration::from_secs((settings.session_ttl_hours.max(1) as u64) * 3600);
@@ -79,7 +115,7 @@ fn build_state(
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
             kv.clone(),
-            ScenarioRegistry::for_tests(configured),
+            ScenarioRegistry::for_tests_with(configured, captcha),
             settings.session_ttl_hours,
             creds.clone(),
         )),

@@ -358,13 +358,20 @@ All three providers complete a real round trip and land the visitor in an authen
 
 `area:scenario` `area:api` `type:feature`
 
-Shipped as a single `CaptchaVerifier` with a `CaptchaProvider` enum (`Turnstile`, `HCaptcha`, `ReCaptcha`) in `authkestra-engine::captcha` behind the `captcha` feature; each hits its real `siteverify` endpoint. The Axum adapter's `captcha` feature just forwards to the engine.
+Shipped as a single `CaptchaVerifier` with a `CaptchaProvider` enum (`Turnstile`, `HCaptcha`, `ReCaptcha`) in `authkestra-engine::captcha` behind the `captcha` feature; each hits its real `siteverify` endpoint. The Axum adapter's `captcha` feature just forwards to the engine — there is no middleware and no extractor, so the check stays visible in the handler that makes it.
 
 ### Tasks
 - [ ] Provider-select control across the three
 - [ ] Render the correct widget per provider on the frontend (each has its own script and site-key handling)
+- [ ] Mount the widget per provider in the sign-in flow tester — moved here from **Flow tester components for each scenario** (P3), where it sat as one bullet among five and the dependency below was invisible
 - [ ] Show the verification result, including a deliberate failure path so the difference is visible
 - [ ] Diff explaining where the check sits in the request lifecycle
+- [ ] Starter-kit fragment putting the check at the top of a handler rather than on a route of its own
+
+### Depends on
+The captcha half of **Register OAuth apps and captcha site keys for play.authkestra.com** (P0) — Turnstile, hCaptcha and reCAPTCHA site keys and secrets registered against `play.authkestra.com`. That is the one piece nobody but the maintainer can do.
+
+It gates the *acceptance criterion*, not the work. Everything else ships without the keys: the scenario, both actions, the diff, the starter-kit fragment and the widget panel all exist, and the control renders itself unavailable with a reason until keys are present — the same shape the OAuth scenario uses. Putting the keys in the deployment's environment is the whole of what remains, with no code change.
 
 ### Acceptance
 Each of the three providers verifies a real token against its live siteverify endpoint, and a failed verification is demonstrable.
@@ -472,11 +479,14 @@ The "then test it" half of the promise. Each scenario needs its own interaction 
 - [ ] Passkey ceremony trigger + status, with the capability-detection fallback wired in
 - [ ] TOTP QR display and code entry
 - [ ] OAuth provider buttons and post-redirect return handling
-- [ ] Captcha widget mounting per provider
+- [ ] Resource-server tester: issue a token, call the protected route with it and without it
 - [ ] Uniform result panel (what was sent, what came back, what it proves)
 
+### Not in scope
+Mounting the captcha widget, which moved to **Bot-protection scenario (Turnstile, hCaptcha, reCAPTCHA)** (P2). It is the only one of these surfaces that cannot be finished from this repository alone, and listing it here as a peer of the other four hid that. It now sits beside the dependency that gates it.
+
 ### Acceptance
-Every v0 scenario is fully exercisable from the browser with clear success and failure feedback.
+Every v0 scenario that can be exercised from this repository is fully exercisable from the browser, with clear success and failure feedback. The result panel is a shared convention rather than a shared component: each panel shows what was sent, what came back and what it proves, in the same shape.
 
 #### Set a performance budget and enforce it in CI
 

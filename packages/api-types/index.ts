@@ -31,3 +31,6 @@ export type { TotpVerification } from "./generated/TotpVerification";
 export type { IssuedToken } from "./generated/IssuedToken";
 export type { ProtectedCall } from "./generated/ProtectedCall";
 export type { TokenVerdict } from "./generated/TokenVerdict";
+export type { CaptchaWidget } from "./generated/CaptchaWidget";
+export type { CaptchaWidgets } from "./generated/CaptchaWidgets";
+export type { CaptchaVerification } from "./generated/CaptchaVerification";

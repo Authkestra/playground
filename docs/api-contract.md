@@ -66,17 +66,32 @@ responses are scenario-specific and typed in `packages/api-types`.
 | `passkeys` | `register_finish` | attestation | `PasskeyEnrolment` |
 | `passkeys` | `authenticate_start` | `{}` | WebAuthn `CredentialRequestOptions` |
 | `passkeys` | `authenticate_finish` | assertion | `PasskeyAuthResult` |
+| `resource` | `issue` | `{}` | `IssuedToken` |
+| `resource` | `call` | `{ token }` | `ProtectedCall` |
+| `captcha` | `widget` | `{}` | `CaptchaWidgets` |
+| `captcha` | `verify` | `{ provider, token }` | `CaptchaVerification` |
 
 The `oauth` scenario has **no** actions, because OAuth is a navigation rather
 than an XHR ceremony — see below.
 
+`captcha/widget` returns the **site key** for each selected provider — the
+public half, which every page showing a widget renders anyway. The secret never
+leaves the server. `captcha/verify` will only spend a secret for a provider the
+session has actually selected; anything else is a `400`, so a caller cannot
+choose which of a deployment's provider quotas to burn.
+
 Action endpoints share the tighter rate limit with starter-kit generation, since they create
 credentials and reach third parties.
 
-**A rejected credential is not an error.** `TotpVerification.verified: false` and
-`PasskeyAuthResult.verified: false` are ordinary `200` responses describing a
-normal outcome, and must render as results rather than failures. Genuine faults
-use the error shapes below.
+**A rejected credential is not an error.** `TotpVerification.verified: false`,
+`PasskeyAuthResult.verified: false` and `CaptchaVerification.verified: false`
+are ordinary `200` responses describing a normal outcome, and must render as
+results rather than failures. Genuine faults use the error shapes below.
+
+`CaptchaVerification.verified: false` also covers a provider that could not be
+reached: the check fails closed, and `detail` carries the provider's own words.
+The API does not distinguish "rejected" from "unreachable", because doing so
+would mean matching on the wording of a dependency's error strings.
 
 ## Types
 

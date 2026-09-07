@@ -10,6 +10,20 @@
 // deliberately close to current: a budget with generous headroom is a budget
 // nobody notices breaking.
 //
+// What this does NOT measure, stated so it is a known gap rather than a
+// discovery: third-party scripts a page fetches at runtime. The captcha
+// widgets load from Cloudflare, hCaptcha and Google, and none of them appears
+// in the build manifest — they are not bundled, so nothing here can see them.
+// Two things keep that honest rather than convenient. Our own code for
+// mounting them *is* counted, since it ships in the route chunk. And the
+// scripts are loaded lazily, per provider, only once a visitor has switched
+// bot protection on and reached the sign-in step — so the budgeted number is
+// what a visitor who never turns it on actually downloads, which is the
+// number this file exists to defend. Measuring the vendors properly would
+// mean fetching them at build time and gating on somebody else's release
+// schedule; if that becomes worth doing it wants its own check, not a bigger
+// number here.
+//
 //   node scripts/bundle-budget.mjs           # check
 //   node scripts/bundle-budget.mjs --report  # print, do not fail
 

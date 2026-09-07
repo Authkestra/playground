@@ -1,7 +1,7 @@
 //! Which generated projects CI actually builds.
 //!
-//! The combinatorial space is passkeys x TOTP x three OAuth providers, and it
-//! grows every time a scenario is added. Building all of it on every push
+//! The combinatorial space is passkeys x TOTP x resource x captcha x three
+//! OAuth providers, and it grows every time a scenario is added. Building all of it on every push
 //! would be slow enough that people start skipping it, so there are two sets:
 //! a small representative one for pull requests, and the full product for the
 //! scheduled run.
@@ -10,10 +10,21 @@
 //! rather than repeating it in YAML, so the two cannot drift.
 
 use crate::demo_config::DemoConfig;
-use crate::scenario::{ControlValue, KitOptions, ScenarioRegistry};
+use crate::scenario::captcha::{CaptchaKeys, KNOWN_PROVIDERS as CAPTCHA_PROVIDERS};
+use crate::scenario::{ControlShape, ControlValue, KitOptions, ScenarioRegistry};
 
-/// Every provider the generator knows how to emit.
+/// Every OAuth provider the generator knows how to emit.
 pub const PROVIDERS: &[&str] = &["github", "google", "discord"];
+
+/// The captcha provider the exhaustive run crosses everything else with.
+///
+/// One rather than all three, deliberately. The three fragments differ by an
+/// enum variant, an environment-variable name and some prose — the *composition*
+/// with every other fragment is identical, which is what a cross-product is for.
+/// All three are compiled in the representative set below, so none goes
+/// unbuilt; crossing all three would put the nightly matrix at GitHub's 256-job
+/// ceiling to prove the same thing three times.
+const EXHAUSTIVE_CAPTCHA: &str = "turnstile";
 
 /// One generated project.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,10 +75,25 @@ pub fn representative() -> Vec<Combination> {
             &format!("oauth={p}"),
         ));
     }
+    // One leg per captcha provider: the enum variant and the secret's name are
+    // the only things that vary, and both are things a typo would break
+    // silently in prose but loudly in a build.
+    for (p, _) in CAPTCHA_PROVIDERS {
+        out.push(Combination::new(
+            &format!("captcha-{p}"),
+            &format!("captcha={p}"),
+        ));
+    }
     out.push(Combination::new("totp-passkeys", "passkeys,totp"));
+    // Captcha alongside TOTP is the composition worth pinning: the fragment
+    // adapts its README to name the endpoint worth guarding.
+    out.push(Combination::new("totp-captcha", "totp,captcha=turnstile"));
     out.push(Combination::new(
         "all",
-        &format!("passkeys,totp,resource,oauth={}", PROVIDERS.join("+")),
+        &format!(
+            "passkeys,totp,resource,captcha={EXHAUSTIVE_CAPTCHA},oauth={}",
+            PROVIDERS.join("+")
+        ),
     ));
     // The opt-ins, on. Every other leg covers them off. Only OpenAPI changes
     // what the compiler sees — the TypeScript client is a file the Rust build
@@ -84,45 +110,54 @@ pub fn representative() -> Vec<Combination> {
     out
 }
 
-/// The full product, for the scheduled run: every subset of the two toggles
-/// against every subset of the providers.
+/// The full product, for the scheduled run: every subset of the toggles
+/// against every subset of the OAuth providers, with and without a captcha.
 pub fn exhaustive() -> Vec<Combination> {
     let mut out = Vec::new();
     for toggles in 0..8u8 {
         for providers in 0..(1 << PROVIDERS.len()) {
-            let mut parts = Vec::new();
-            let mut name = Vec::new();
-            if toggles & 1 != 0 {
-                parts.push("passkeys".to_string());
-                name.push("passkeys");
+            // Captcha off, then captcha on. See EXHAUSTIVE_CAPTCHA for why one
+            // provider stands in for three here.
+            for captcha in [false, true] {
+                let mut parts = Vec::new();
+                let mut name = Vec::new();
+                if toggles & 1 != 0 {
+                    parts.push("passkeys".to_string());
+                    name.push("passkeys");
+                }
+                if toggles & 2 != 0 {
+                    parts.push("totp".to_string());
+                    name.push("totp");
+                }
+                if toggles & 4 != 0 {
+                    parts.push("resource".to_string());
+                    name.push("resource");
+                }
+                if captcha {
+                    parts.push(format!("captcha={EXHAUSTIVE_CAPTCHA}"));
+                    name.push("captcha");
+                    name.push(EXHAUSTIVE_CAPTCHA);
+                }
+                let chosen: Vec<&str> = PROVIDERS
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| providers & (1 << i) != 0)
+                    .map(|(_, p)| *p)
+                    .collect();
+                if !chosen.is_empty() {
+                    parts.push(format!("oauth={}", chosen.join("+")));
+                    name.push("oauth");
+                    name.extend(chosen.iter().copied());
+                }
+                out.push(Combination::new(
+                    &if name.is_empty() {
+                        "base".to_string()
+                    } else {
+                        name.join("-")
+                    },
+                    &parts.join(","),
+                ));
             }
-            if toggles & 2 != 0 {
-                parts.push("totp".to_string());
-                name.push("totp");
-            }
-            if toggles & 4 != 0 {
-                parts.push("resource".to_string());
-                name.push("resource");
-            }
-            let chosen: Vec<&str> = PROVIDERS
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| providers & (1 << i) != 0)
-                .map(|(_, p)| *p)
-                .collect();
-            if !chosen.is_empty() {
-                parts.push(format!("oauth={}", chosen.join("+")));
-                name.push("oauth");
-                name.extend(chosen.iter().copied());
-            }
-            out.push(Combination::new(
-                &if name.is_empty() {
-                    "base".to_string()
-                } else {
-                    name.join("-")
-                },
-                &parts.join(","),
-            ));
         }
     }
     out
@@ -156,8 +191,17 @@ pub fn config_from_spec(spec: &str, registry: &ScenarioRegistry) -> Result<DemoC
         let value = if options.is_empty() {
             ControlValue::Toggle { enabled: true }
         } else {
+            // Against the scenario's own control, not a global provider list.
+            // There are two select-many controls now with disjoint options, and
+            // one shared list would have let `captcha=github` through.
+            let offered: Vec<String> = match scenario.control() {
+                ControlShape::SelectOne { options } | ControlShape::SelectMany { options } => {
+                    options.into_iter().map(|o| o.id).collect()
+                }
+                ControlShape::Toggle => Vec::new(),
+            };
             for option in &options {
-                if !PROVIDERS.contains(&option.as_str()) {
+                if !offered.contains(option) {
                     return Err(format!("`{id}` has no option `{option}`"));
                 }
             }
@@ -186,8 +230,16 @@ pub fn config_from_spec(spec: &str, registry: &ScenarioRegistry) -> Result<DemoC
 
 /// The registry the generator runs against in CI: every provider available, so
 /// a combination naming one is never silently dropped for want of credentials.
+///
+/// The captcha keys are placeholders. Generation only ever reads which
+/// providers are *offered*; the keys themselves never reach a generated
+/// project, which reads its secret from the environment at runtime.
 pub fn ci_registry() -> ScenarioRegistry {
-    ScenarioRegistry::with_providers(PROVIDERS.iter().map(|p| p.to_string()).collect())
+    let mut captcha = CaptchaKeys::default();
+    for (id, _) in CAPTCHA_PROVIDERS {
+        captcha.insert_for_test(id, "ci-site-key", "ci-secret-key");
+    }
+    ScenarioRegistry::with_credentials(PROVIDERS.iter().map(|p| p.to_string()).collect(), captcha)
 }
 
 #[cfg(test)]
@@ -205,6 +257,15 @@ mod tests {
             assert!(
                 names.iter().any(|n| n == &format!("oauth-{p}")),
                 "no combination builds {p} on its own"
+            );
+        }
+        // Every captcha provider is compiled somewhere. The exhaustive run
+        // crosses only one of them, so if these legs go the other two stop
+        // being built at all.
+        for (p, _) in CAPTCHA_PROVIDERS {
+            assert!(
+                names.iter().any(|n| n == &format!("captcha-{p}")),
+                "no combination builds the {p} captcha fragment"
             );
         }
     }
@@ -229,12 +290,19 @@ mod tests {
 
     #[test]
     fn the_exhaustive_set_is_the_whole_product() {
-        // three toggles x every subset of three providers
-        assert_eq!(exhaustive().len(), 8 * 8);
+        // three toggles x every subset of three providers x captcha off/on
+        assert_eq!(exhaustive().len(), 8 * 8 * 2);
         // and it contains every *selection* the pull-request set builds; the
-        // opt-in legs differ by options rather than by scenarios
+        // opt-in legs differ by options rather than by scenarios.
+        //
+        // The captcha providers the exhaustive run does not cross are the one
+        // exception, and a deliberate one — see EXHAUSTIVE_CAPTCHA. They are
+        // built on every pull request instead, which the test above pins.
         let all: Vec<String> = exhaustive().into_iter().map(|c| c.spec).collect();
         for c in representative() {
+            if c.spec.contains("captcha=") && !c.spec.contains(EXHAUSTIVE_CAPTCHA) {
+                continue;
+            }
             assert!(all.contains(&c.spec), "exhaustive is missing `{}`", c.spec);
         }
     }
@@ -276,5 +344,10 @@ mod tests {
         assert!(config_from_spec("oauth=gihtub", &registry).is_err());
         assert!(config_from_spec("oauth", &registry).is_err());
         assert!(config_from_spec("passkeys=github", &registry).is_err());
+        assert!(config_from_spec("captcha=turnstyle", &registry).is_err());
+        // The two select-many controls have disjoint options, and neither may
+        // borrow the other's.
+        assert!(config_from_spec("captcha=github", &registry).is_err());
+        assert!(config_from_spec("oauth=turnstile", &registry).is_err());
     }
 }

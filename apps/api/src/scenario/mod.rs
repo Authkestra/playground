@@ -9,6 +9,7 @@
 //! registering it in [`ScenarioRegistry::with_builtins`]. No shared code path
 //! needs a new `match` arm.
 
+pub mod captcha;
 pub mod dummy;
 pub mod oauth;
 pub mod passkeys;
@@ -533,21 +534,36 @@ impl ScenarioRegistry {
     ///
     /// P2 adds passkeys / TOTP / OAuth / bot-protection here; nothing else in
     /// the codebase has to change to accommodate them.
-    /// The registry with no OAuth providers configured.
+    /// The registry with no third-party credentials configured.
     pub fn with_builtins() -> Self {
         Self::with_providers(Vec::new())
     }
 
+    /// The scenarios a visitor is offered, with OAuth credentials only.
+    ///
+    /// Kept as its own entry point because most callers have no captcha keys
+    /// to pass and `..Default::default()` is not available on a positional
+    /// argument.
+    pub fn with_providers(configured_providers: Vec<String>) -> Self {
+        Self::with_credentials(configured_providers, captcha::CaptchaKeys::default())
+    }
+
     /// The scenarios a visitor is offered.
     ///
-    /// The OAuth control only lists providers this deployment has credentials
-    /// for, so it can never offer a dead end.
-    pub fn with_providers(configured_providers: Vec<String>) -> Self {
+    /// Both provider-select controls only list providers this deployment holds
+    /// credentials for, so neither can offer a dead end. A deployment with no
+    /// credentials at all still gets every scenario — they report themselves
+    /// unavailable, which explains the gap instead of hiding it.
+    pub fn with_credentials(
+        configured_providers: Vec<String>,
+        captcha_keys: captcha::CaptchaKeys,
+    ) -> Self {
         let mut r = Self::new();
         r.register(Arc::new(passkeys::PasskeysScenario));
         r.register(Arc::new(oauth::OAuthScenario::new(configured_providers)));
         r.register(Arc::new(totp::TotpScenario));
         r.register(Arc::new(resource::ResourceScenario));
+        r.register(Arc::new(captcha::CaptchaScenario::new(captcha_keys)));
         r
     }
 
@@ -559,7 +575,19 @@ impl ScenarioRegistry {
     /// they carry no real behaviour — a test that needs "some toggle" should not
     /// depend on what TOTP happens to do.
     pub fn for_tests(configured_providers: Vec<String>) -> Self {
-        let mut r = Self::with_providers(configured_providers);
+        Self::for_tests_with(configured_providers, captcha::CaptchaKeys::default())
+    }
+
+    /// As [`Self::for_tests`], with captcha keys supplied.
+    ///
+    /// A provider-select control offers nothing without credentials, so a test
+    /// that needs the captcha scenario to be *reachable* has to hand it keys —
+    /// exactly as the OAuth scenario needs `configured_providers`.
+    pub fn for_tests_with(
+        configured_providers: Vec<String>,
+        captcha_keys: captcha::CaptchaKeys,
+    ) -> Self {
+        let mut r = Self::with_credentials(configured_providers, captcha_keys);
         r.register(Arc::new(dummy::DummyToggleScenario));
         r.register(Arc::new(dummy::DummyProviderScenario));
         r

@@ -8,6 +8,7 @@ import { isControlValueActive } from "@/components/ScenarioPanel";
 import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 import ResourcePanel from "@/components/ResourcePanel";
+import CaptchaPanel from "@/components/CaptchaPanel";
 import FlowLog from "@/components/FlowLog";
 
 interface Props {
@@ -117,7 +118,11 @@ export default function StepSignIn({
   const resourceActive = isControlValueActive(config?.scenarios?.["resource"]);
   const totpActive = isControlValueActive(config?.scenarios.totp);
 
-  const hasAnyMethod = oauthAvailable || passkeysActive || totpActive;
+  const captchaScenario = scenarios.find((s) => s.id === "captcha");
+  const captchaActive =
+    captchaScenario?.available !== false && isControlValueActive(config?.scenarios?.["captcha"]);
+
+  const hasAnyMethod = oauthAvailable || passkeysActive || totpActive || captchaActive;
 
   return (
     <div className="flex flex-col gap-6">
@@ -155,6 +160,21 @@ export default function StepSignIn({
                 </h3>
                 <p className="text-sm text-slate-400">Choose how you&apos;d like to continue.</p>
               </div>
+
+              {captchaActive && (
+                <div className="rounded-md border border-slate-800 p-4">
+                  <h4 className="mb-2 text-sm font-medium text-slate-200">Bot protection</h4>
+                  <CaptchaPanel
+                    scenarioId="captcha"
+                    onDemoDisabled={onDemoDisabled}
+                    onAction={fetchEvents}
+                  />
+                </div>
+              )}
+
+              {captchaActive && (oauthAvailable || passkeysActive || totpActive || resourceActive) && (
+                <Divider />
+              )}
 
               {oauthAvailable && (
                 <div className="flex flex-col gap-2">

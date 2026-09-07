@@ -22,12 +22,19 @@ frontend on [Vercel](https://playground-web-opal.vercel.app).
 | --- | --- |
 | **TOTP** (authenticator app) | Working end to end — enrol by QR, verify a real code |
 | **Passkeys** (WebAuthn) | Working — registration and authentication, with signature-counter tracking |
-| OAuth (GitHub / Google / Discord) | Blocked on provider credentials |
-| Bot protection (Turnstile / hCaptcha / reCAPTCHA) | Blocked on captcha site keys |
+| **Resource server** (protected route) | Working — issue a token, call the route with it and without it |
+| OAuth (GitHub / Google / Discord) | Built; waits on provider credentials |
+| Bot protection (Turnstile / hCaptcha / reCAPTCHA) | Built; waits on captcha site keys |
+
+"Built; waits on" means exactly that: the scenario, its actions, its diff and its
+starter-kit fragment are all shipped and tested, and the control renders itself
+unavailable with a reason until the keys are in the deployment's environment.
+Adding them is configuration, not a code change. Registering them is the one job
+nobody but the maintainer can do — see the P0 credentials issue.
 
 Placeholder scenarios (`dummy_toggle`, `dummy_provider`) exist for testing but
 are not registered in the live service — only the real scenarios (TOTP, passkeys,
-OAuth) are available to visitors.
+OAuth, resource server, bot protection) are available to visitors.
 
 `play.authkestra.com` is not wired up yet — see the open P0 issues.
 
@@ -84,6 +91,7 @@ scenarios simply report themselves as not configured.
 | `TRUSTED_CLIENT_IP_HEADER` | — | Header carrying the true client IP, set by the proxy in front. **Must be one the proxy overwrites**, or the rate limiter can be bypassed by forging it. No portable default exists; set this to match your proxy (e.g. `cf-connecting-ip` behind Cloudflare). Use `GET /admin/client-ip` to verify which headers actually arrive and which to trust. Empty string (the safe default) falls back to the rightmost `X-Forwarded-For` entry. |
 | `CLIENT_IP_XFF_POSITION` | `rightmost` | Which `X-Forwarded-For` entry to trust. `rightmost` is unforgeable; `leftmost` is correct only where the proxy overwrites the header. Settle it with `GET /admin/client-ip` rather than guessing. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | — | `GITHUB_`, `GOOGLE_`, `DISCORD_` |
+| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | — | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. **Both halves or the provider is not offered** — a site key alone renders a widget whose token nothing can spend. The site key is public and reaches the browser; the secret never does. |
 | `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
 | `REDIS_PREFIX` | `ak_playground` | Key namespace, so deployments can share one Redis |
 | `WEBAUTHN_ORIGIN` | `http://localhost:3000` | The frontend's origin, exactly as the browser sends it |

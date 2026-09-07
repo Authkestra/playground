@@ -308,10 +308,14 @@ pub enum StateError {
 pub async fn state_from_env() -> Result<AppState, StateError> {
     let settings = Arc::new(Settings::from_env());
 
-    // The OAuth control must only offer providers this deployment can actually
-    // complete, so credentials are read before the registry is built.
+    // Both provider-select controls must only offer providers this deployment
+    // can actually complete, so credentials are read before the registry is
+    // built. Neither is required: a scenario with no credentials reports itself
+    // unavailable rather than failing at boot.
     let provider_credentials = ProviderCredentials::from_env();
-    let registry = ScenarioRegistry::with_providers(provider_credentials.configured());
+    let captcha_keys = crate::scenario::captcha::CaptchaKeys::from_env();
+    let registry =
+        ScenarioRegistry::with_credentials(provider_credentials.configured(), captcha_keys);
 
     let kv = open_state_store().await?;
 
