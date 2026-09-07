@@ -21,6 +21,7 @@ pub mod routes;
 pub mod scenario;
 pub mod session;
 pub mod settings;
+pub mod signing;
 pub mod store;
 pub mod testing;
 
@@ -341,6 +342,13 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         settings.cookie_secure,
     ));
 
+    // The issuer is this API's own base URL, so the JWKS it publishes is
+    // reachable at `<iss>/.well-known/jwks.json` — which is where a resource
+    // server pointed at this issuer will look for it.
+    let signing = Arc::new(crate::signing::SigningKeys::from_env(
+        settings.public_base_url.clone(),
+    ));
+
     Ok(AppState {
         sessions,
         kill_switch,
@@ -349,6 +357,7 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         credentials: Arc::new(credentials),
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
         events: Arc::new(crate::events::EventLog::new(kv, session_ttl)),
+        signing,
     })
 }
 

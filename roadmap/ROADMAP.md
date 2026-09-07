@@ -8,13 +8,13 @@
 |---|---|---|---|
 | `P0` | Foundations | 7 | Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet. |
 | `P1` | Playground core | 7 | The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows. |
-| `P2` | Scenarios | 7 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
+| `P2` | Scenarios | 8 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
 | `P4` | Downloadable starter kit | 10 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
 | `P6` | Post-launch / wizard path | 6 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**50 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**51 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -414,6 +414,57 @@ Every scenario exposes the same three-endpoint contract, so it should be tested 
 
 ### Acceptance
 Adding a scenario without wiring it into the harness fails CI.
+
+#### Rebuild the resource-server scenario on authkestra-resource and JWKS
+
+`area:scenario` `area:api` `type:feature`
+
+The shipped resource-server scenario mints a token with `TokenManager` and a **per-session HMAC secret**, then validates it in the same process. Symmetric, self-referential, no `kid`, no key discovery. It demonstrates that a 401 can be produced, not that a resource server works — nothing is federated, and the "server" holds the same secret that issued the token.
+
+This was not a judgement call at the time. The original issue's own task list said "Diff naming `authkestra-resource` and the adapter's `resource` feature". The implementation named `authkestra-engine`'s `token` feature instead, and the issue was closed without the deviation being recorded.
+
+### What the framework already provides
+`authkestra-resource` 0.9.2, behind `authkestra-axum`'s `resource` feature, is considerably more than the current scenario uses:
+
+- `Jwks::fetch` / `JwksCache` — keyed by `kid`, with a refresh interval and a `require_kid` strict mode
+- `IssuerTrustMap` — `iss` -> JWKS endpoint, so a token from an unlisted issuer is rejected outright rather than falling back to a default key
+- `ValidationConfig` builder — `jwks_url`, `issuer`, `trusted_issuers`, `audience`, `algorithms`, `require_kid`, `require_cert_binding`, `require_dpop`, `dpop_resource_origin`
+- `JwtStrategy`, and a `Guard` with `AuthPolicy` for chaining strategies
+- DPoP (RFC 9449) proof verification with `jti` replay tracking, and RFC 8705 certificate binding
+
+And on the issuing side, `authkestra-engine` already has what is needed to be discovered: `TokenManager::new_ed25519` (and `new_asymmetric` for RS256) sets a `kid` header and exposes `public_jwk()`, ready to serve as a JWKS.
+
+### The shape to build
+The playground gains a **per-deployment** signing key (asymmetric, Ed25519) and publishes `GET /.well-known/jwks.json`. The scenario's `call` step validates through `authkestra-resource`, fetching that JWKS and matching on `kid` — so the validating side holds no secret at all, only a URL. That is the capability, and it is the part every library's documentation asserts rather than shows.
+
+- [ ] Per-deployment Ed25519 signing key: `TOKEN_SIGNING_KEY_PEM` from the environment, generated at boot when absent
+- [ ] `GET /.well-known/jwks.json` publishing the public half, so a visitor can fetch it themselves and check a `kid` by hand
+- [ ] `call` validates via `JwksCache` + `ValidationConfig`, not a shared secret
+- [ ] Diff naming `authkestra-resource` and the adapter's `resource` feature — the task the original issue asked for
+- [ ] Starter-kit fragment emitting a real JWKS-validating resource server
+
+### The failure modes this makes reachable
+The current six (absent, malformed, expired, wrong audience, bad signature, accepted) are the easy half. JWKS validation adds the ones that actually cost people afternoons:
+
+- [ ] **Unknown `kid`** — signed by a key that is not in the JWKS. Checkable by hand: fetch the JWKS and look
+- [ ] **Untrusted issuer** — an `iss` absent from the trust map, rejected rather than guessed at
+- [ ] **Missing `kid`** — refused under `require_kid`, which is the strict policy worth defaulting to
+- [ ] **Stale cache** — a key rotated at the issuer but not yet refreshed at the resource server
+
+Each needs a way to mint a deliberately-wrong token. That stays honest as long as the token is shown and editable and the verdict comes from real validation — a forgery a visitor can verify is not a forgery they have to take on trust.
+
+### Why this comes before the OP page
+"Be your own identity provider: an OP server page" (P6) records its own blocker as needing a client to complete a flow against. A JWKS-validating resource server **is** that counterpart: the OP issues and publishes keys, the resource server discovers them and validates. Two scenarios, one real trust relationship, and a demo that ends in "rotate the OP's key and watch the resource server pick it up".
+
+Built the other way round, the OP page has nothing to prove itself against and the resource server stays a toy.
+
+### Scope
+Replaces the current scenario rather than sitting beside it. The symmetric path is not worth keeping as a second option: it is the thing this issue exists to stop demonstrating.
+
+Not in scope here: DPoP and certificate binding. Both are supported by the crate and both deserve showing, but they are a second scenario — proof-of-possession is a different lesson from key discovery, and stacking them would make neither legible.
+
+### Acceptance
+A visitor issues a token, sees the `kid` in its header, fetches `/.well-known/jwks.json` and finds that same `kid`, and watches the protected route accept it. Then they see a token signed by a key absent from that JWKS rejected for that reason by name, and an untrusted issuer rejected for its own.
 
 ---
 

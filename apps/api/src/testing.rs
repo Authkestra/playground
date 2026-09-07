@@ -40,6 +40,7 @@ pub fn test_settings(admin_token: Option<&str>) -> Settings {
         },
         xff_position: XffPosition::Rightmost,
         cookie_same_site: CookieSameSite::Lax,
+        public_base_url: "http://localhost:8000".to_string(),
     }
 }
 
@@ -111,6 +112,9 @@ fn build_state(
     let creds = KvCredentialStore::new(kv.clone(), ttl);
     let settings = Arc::new(settings);
     let configured = credentials.configured();
+    let signing = Arc::new(crate::signing::SigningKeys::for_test(
+        &settings.public_base_url,
+    ));
 
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
@@ -125,6 +129,7 @@ fn build_state(
         credentials: Arc::new(creds),
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
         events: Arc::new(crate::events::EventLog::new(kv, ttl)),
+        signing,
     }
 }
 
@@ -167,6 +172,9 @@ pub fn test_state_with_shared_store_and_admin(
     let ttl = Duration::from_secs((settings.session_ttl_hours.max(1) as u64) * 3600);
     let creds = KvCredentialStore::new(store.clone(), ttl);
     let configured = ProviderCredentials::default().configured();
+    let signing = Arc::new(crate::signing::SigningKeys::for_test(
+        &settings.public_base_url,
+    ));
 
     AppState {
         sessions: Arc::new(DemoSessionStore::new(
@@ -181,5 +189,6 @@ pub fn test_state_with_shared_store_and_admin(
         credentials: Arc::new(creds),
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(store.clone())),
         events: Arc::new(crate::events::EventLog::new(store, ttl)),
+        signing,
     }
 }

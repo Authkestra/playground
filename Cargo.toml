@@ -23,3 +23,7 @@ license = "MIT OR Apache-2.0"
 authkestra-engine = { version = "0.9.2", default-features = false }
 authkestra-axum = { version = "0.9.2", default-features = false }
 authkestra-providers = { version = "0.9.2", default-features = false }
+# Resource-server validation: JWKS discovery, issuer trust maps, DPoP. The
+# engine's `token` feature can validate a token it signed itself; this is what
+# validates one somebody *else* signed. See roadmap #52.
+authkestra-resource = { version = "0.9.2", default-features = false }

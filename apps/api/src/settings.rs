@@ -201,6 +201,13 @@ pub struct Settings {
     pub xff_position: XffPosition,
     /// `SameSite` for the demo-session cookie.
     pub cookie_same_site: CookieSameSite,
+    /// This API's own externally reachable base URL, with no trailing slash.
+    ///
+    /// Load-bearing for the resource-server scenario: it is the `iss` of every
+    /// token this deployment signs, and the prefix of the JWKS URL a validator
+    /// fetches. Point it at something a validator cannot reach and tokens are
+    /// issued fine and then fail to validate, which is a confusing way round.
+    pub public_base_url: String,
 }
 
 impl Settings {
@@ -220,6 +227,16 @@ impl Settings {
             .unwrap_or(DEFAULT_TTL_HOURS);
 
         let admin_token = std::env::var("ADMIN_TOKEN").ok().filter(|t| !t.is_empty());
+
+        // Defaults to the local address so `cargo run` needs no configuration.
+        // A deployment must set it: a JWKS published at a URL nothing can reach
+        // is a resource server that rejects every token.
+        let public_base_url = std::env::var("PUBLIC_BASE_URL")
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| format!("http://localhost:{port}"));
+        tracing::info!(base_url = %public_base_url, "public base URL (token issuer)");
 
         // A malformed entry here disables CORS silently: the browser simply
         // blocks every request and the frontend looks like the API is down. So
@@ -270,6 +287,7 @@ impl Settings {
             relying_party: RelyingParty::from_env(),
             xff_position: XffPosition::from_env(),
             cookie_same_site: CookieSameSite::from_env(cookie_secure),
+            public_base_url,
         }
     }
 }

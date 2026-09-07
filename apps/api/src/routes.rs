@@ -36,6 +36,8 @@ pub struct AppState {
     pub ceremonies: Arc<crate::ceremony::CeremonyStore>,
     /// The visitor-facing flow log.
     pub events: Arc<crate::events::EventLog>,
+    /// This deployment's token-signing identity, and the JWKS it publishes.
+    pub signing: Arc<crate::signing::SigningKeys>,
 }
 
 // ---------------------------------------------------------------- wire types
@@ -172,6 +174,24 @@ async fn session_events(
 ) -> Result<Json<Vec<crate::events::FlowEvent>>, ApiError> {
     let session = resolve_session(&state, &cookies).await?;
     Ok(Json(state.events.read(session.id).await?))
+}
+
+/// The public half of this deployment's signing key (RFC 7517).
+///
+/// Deliberately unauthenticated and deliberately at the well-known path: a
+/// resource server discovers keys here, and so can a visitor who wants to check
+/// by hand that the `kid` in their token is the one being published. That
+/// check is the whole point of the resource scenario, and it only means
+/// anything if the document is fetchable without ceremony.
+#[tracing::instrument(skip_all)]
+async fn jwks(State(state): State<AppState>) -> impl IntoResponse {
+    (
+        // Short, because the demo rotates the key on every restart when no
+        // key is configured. A validator caches it anyway (see the scenario's
+        // `JwksCache`), so this only bounds how stale a *fresh* fetch can be.
+        [(header::CACHE_CONTROL, "public, max-age=60")],
+        Json(state.signing.jwks()),
+    )
 }
 
 #[tracing::instrument(skip_all)]
@@ -441,6 +461,7 @@ pub fn standard_router() -> Router<AppState> {
         .route("/api/session/events", get(session_events))
         .route("/api/scenarios", get(list_scenarios))
         .route("/api/scenarios/{id}/configure", post(configure_scenario))
+        .route(crate::signing::JWKS_PATH, get(jwks))
 }
 
 /// Admin routes, mounted only when an admin token is configured.

@@ -23,8 +23,10 @@ authkestra-axum = { workspace = true, features = [
     "session",
     "token",
     "captcha",
+    "resource",
     "rustls-aws-lc-rs",
 ] }
+authkestra-resource = { workspace = true, features = ["rustls-aws-lc-rs"] }
 authkestra-providers = { workspace = true, features = [
     "github",
     "google",
@@ -70,6 +72,30 @@ thiserror = "2"
 # ceremony types in signatures; the engine re-exports the traits but not these.
 webauthn-rs = "0.5.0"
 url = "2.5"
+
+# The deployment's token-signing key. Asymmetric on purpose: a resource server
+# that validates by fetching a JWKS holds no secret, which is the whole point
+# of the resource scenario (#52) and impossible to demonstrate with HS256.
+#
+# Both are already in the graph via authkestra-engine, so naming them here adds
+# no crate to the tree — only the ability to *generate* a key when the
+# deployment has not been given one.
+ed25519-dalek = { version = "2.2", default-features = false, features = [
+    "std",
+    "pkcs8",
+    "zeroize",
+] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Needed directly to build a `Validation` for the resource server and to read a
+# token's `kid` header before any key is chosen.
+#
+# The feature set mirrors `authkestra-engine`'s exactly (`rust_crypto`, plus the
+# default `use_pem`) and deliberately leaves `aws_lc_rs` off. Cargo features are
+# additive, so enabling a second crypto backend here would put two in the one
+# `jsonwebtoken` in the graph — the same class of trap that put two providers
+# into `rustls` and panicked this service at boot. See `install_crypto_provider`.
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 
 # --- support ---
 serde = { version = "1.0", features = ["derive"] }
