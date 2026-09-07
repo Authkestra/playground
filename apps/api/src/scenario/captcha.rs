@@ -330,27 +330,51 @@ impl CaptchaScenario {
             _ => return None,
         };
 
-        Some(KitSetup::new(
-            &format!("Register a {label} site"),
-            &[
-                format!("Open <{console}> and choose {create}."),
-                format!(
-                    "You get two values. The **site key** is public — it belongs in the \
-                     browser, next to the widget. The **secret key** goes in \
-                     `{prefix}_SECRET_KEY` in your `.env`, and must never reach the \
-                     browser; the generated `.gitignore` already excludes that file."
-                ),
-                "The hostname list is enforced: a widget served from a host you did not \
-                 register produces a token that fails verification, which looks exactly \
-                 like a bot. Add `localhost` while you develop."
+        let mut steps = vec![
+            format!("Open <{console}> and choose {create}."),
+            format!(
+                "You get two values. The **site key** is public — it belongs in the \
+                 browser, next to the widget. The **secret key** goes in \
+                 `{prefix}_SECRET_KEY` in your `.env`, and must never reach the \
+                 browser; the generated `.gitignore` already excludes that file."
+            ),
+            "The hostname list is enforced: a widget served from a host you did not \
+             register produces a token that fails verification, which looks exactly \
+             like a bot. Add `localhost` while you develop."
+                .to_string(),
+            format!(
+                "{label} publishes test keys that always pass or always fail. Use \
+                 them to exercise both paths before your own domain is registered — \
+                 and make sure they are gone before you deploy."
+            ),
+        ];
+
+        // Google has moved reCAPTCHA's console into Google Cloud, where the
+        // path it steers you down is reCAPTCHA Enterprise: an assessment call
+        // to `recaptchaenterprise.googleapis.com` authenticated with a project
+        // and an API key. That is a different protocol, not a different
+        // credential — `CaptchaVerifier` speaks only the classic `siteverify`
+        // form post, so an Enterprise API key in `RECAPTCHA_SECRET_KEY` fails
+        // verification and the error reads like a bad key rather than like the
+        // wrong product. Say so here: a generated README that sends a reader to
+        // a console for a value it cannot use is exactly the dead end this
+        // project keeps refusing to ship.
+        if provider == "recaptcha" {
+            steps.push(
+                "**Take the legacy secret key, not an Enterprise one.** Google's console \
+                 now presents reCAPTCHA Enterprise, which verifies through an assessment \
+                 call to `recaptchaenterprise.googleapis.com` using a Cloud project and \
+                 an API key. `CaptchaVerifier` speaks the classic \
+                 `www.google.com/recaptcha/api/siteverify` form post and nothing else, so \
+                 an Enterprise API key here will fail with what looks like an invalid \
+                 secret. If your project will only issue Enterprise credentials, use \
+                 Turnstile or hCaptcha instead — both still verify the way this code \
+                 expects."
                     .to_string(),
-                format!(
-                    "{label} publishes test keys that always pass or always fail. Use \
-                     them to exercise both paths before your own domain is registered — \
-                     and make sure they are gone before you deploy."
-                ),
-            ],
-        ))
+            );
+        }
+
+        Some(KitSetup::new(&format!("Register a {label} site"), &steps))
     }
 }
 
@@ -986,6 +1010,32 @@ mod tests {
                     .iter()
                     .any(|s| s.contains(&format!("{}_SECRET_KEY", id.to_uppercase()))),
                 "{id}: the steps should name the variable they fill"
+            );
+        }
+    }
+
+    /// The reCAPTCHA step has to name the protocol split, or the generated
+    /// README sends a reader to a console for a credential this code cannot
+    /// spend. `CaptchaVerifier` posts to `siteverify` and nothing else.
+    #[test]
+    fn the_recaptcha_steps_warn_that_an_enterprise_key_will_not_work() {
+        let setup = CaptchaScenario::kit_setup_for("recaptcha").expect("setup steps");
+        let joined = setup.steps.join(" ");
+        assert!(joined.contains("Enterprise"), "{joined}");
+        assert!(joined.contains("legacy secret key"), "{joined}");
+        // And it must offer a way forward rather than only a warning.
+        assert!(
+            joined.contains("Turnstile") || joined.contains("hCaptcha"),
+            "a caveat with no alternative is a dead end: {joined}"
+        );
+
+        // The other two verify the way the engine expects, so the caveat would
+        // only be noise there.
+        for id in ["turnstile", "hcaptcha"] {
+            let other = CaptchaScenario::kit_setup_for(id).expect("setup steps");
+            assert!(
+                !other.steps.join(" ").contains("Enterprise"),
+                "{id} carries a caveat that is not its problem"
             );
         }
     }

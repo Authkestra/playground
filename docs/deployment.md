@@ -133,7 +133,36 @@ own origin.
 | `TRUSTED_CLIENT_IP_HEADER` | The header the proxy in front **overwrites**. `cf-connecting-ip` behind Cloudflare. Empty falls back to `X-Forwarded-For`. |
 | `CLIENT_IP_XFF_POSITION` | `rightmost` (default, safe) or `leftmost`. See below — do not set this from guesswork. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | `GITHUB_`, `GOOGLE_`, `DISCORD_`. Absent credentials are not an error; the affected scenarios report themselves as not configured. |
-| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. Both halves are required or the provider is not offered at all, because a site key without a secret renders a widget whose token nothing can spend — a failure at the last step with no clue as to why. Register the deployment's hostnames with each provider; a widget served from an unregistered host produces a token that fails verification and looks exactly like a bot. |
+| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. Both halves are required or the provider is not offered at all, because a site key without a secret renders a widget whose token nothing can spend — a failure at the last step with no clue as to why. Register the deployment's hostnames with each provider; a widget served from an unregistered host produces a token that fails verification and looks exactly like a bot. **`RECAPTCHA_SECRET_KEY` must be a legacy secret key** — see below. |
+
+### reCAPTCHA and Enterprise
+
+`authkestra-engine`'s `CaptchaVerifier` verifies reCAPTCHA by posting `secret`
+and `response` to `www.google.com/recaptcha/api/siteverify`. That is the classic
+protocol, and it is the only one the crate speaks.
+
+Google has since moved reCAPTCHA's console into Google Cloud and steers new keys
+towards **reCAPTCHA Enterprise**, which verifies through an assessment call to
+`recaptchaenterprise.googleapis.com/v1/projects/{project}/assessments` — a
+different endpoint, a different credential (a Cloud API key), a JSON request
+body, and a response carrying a risk score rather than a bare `success` flag.
+It is a different protocol, not a different key.
+
+So there are two workable answers and one that is not:
+
+* **Legacy secret key.** If the console will still issue one for a v2 checkbox
+  key, put it in `RECAPTCHA_SECRET_KEY` and everything works as built.
+* **Leave reCAPTCHA unconfigured.** Turnstile and hCaptcha both still verify the
+  way the engine expects. The control only offers providers with keys, so an
+  unset reCAPTCHA is invisible rather than broken — no code change.
+* **Not this:** an Enterprise API key in `RECAPTCHA_SECRET_KEY`. `siteverify`
+  will reject it, and the error reads like an invalid secret rather than like
+  the wrong product.
+
+Supporting Enterprise needs a new `CaptchaProvider` variant upstream in
+`authkestra-engine`. Reimplementing the assessment call here instead would mean
+the playground demonstrating the playground rather than the framework, and the
+starter-kit fragment generating code that does not match what it claims.
 
 ## Settling the client-IP question
 
