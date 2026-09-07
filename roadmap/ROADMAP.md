@@ -12,9 +12,9 @@
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
 | `P4` | Downloadable starter kit | 10 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
-| `P6` | Post-launch / wizard path | 5 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
+| `P6` | Post-launch / wizard path | 6 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**49 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**50 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -905,6 +905,38 @@ This is where Rust's compile times bite — a generated project is seconds-to-te
 - [ ] Prototype build-time with a warm cargo cache to see whether the UX is viable at all
 - [ ] Decide orchestration, per-session limits, and teardown guarantees
 - [ ] Model the cost per preview before committing
+
+#### Contingency: a reCAPTCHA Enterprise path if the legacy secret key goes away
+
+`area:scenario` `area:api` `type:chore`
+
+Not a problem today. `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET_KEY` are set on the deployment with a legacy secret key, the classic `siteverify` endpoint accepts it, and the bot-protection scenario verifies reCAPTCHA end to end. This issue exists so that if that stops being true, the reasoning is already written down rather than rediscovered.
+
+### The shape of the risk
+`authkestra-engine`'s `CaptchaVerifier` verifies reCAPTCHA by posting `secret` and `response` as a form to `www.google.com/recaptcha/api/siteverify`. That is the only protocol the crate speaks, for all three providers.
+
+Google has moved reCAPTCHA's console into Google Cloud and steers new keys towards **reCAPTCHA Enterprise**, which verifies through an assessment call to `recaptchaenterprise.googleapis.com/v1/projects/{project}/assessments`: a different endpoint, a Cloud project plus an API key rather than a shared secret, a JSON request body, and a response carrying `tokenProperties.valid` and a risk score rather than a bare `success` flag. It is a different protocol, not a different credential — so no amount of configuration bridges it.
+
+Legacy secret keys still work, which is why nothing is broken. The exposure is that the playground's reCAPTCHA leg depends on a path Google describes as legacy, and its withdrawal would be a third party's decision on a third party's timetable.
+
+### What breaking looks like
+`verify` returns `Err`, the scenario reports `verified: false` with the provider's message, and the flow log says the check failed. It fails closed, so nothing becomes insecure — but reCAPTCHA stops being demonstrable, and the failure reads like a bad key rather than like a withdrawn protocol.
+
+### The cheap mitigation, already in place
+Nothing needs to be built to survive this. Unsetting `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET_KEY` removes reCAPTCHA from the control entirely: the credential-gated control only ever offers providers the deployment holds both halves for, and the scenario keeps working with Turnstile and hCaptcha, both of which still verify the classic way. That is a deployment change, not a code change.
+
+The generated starter kit already says this — the reCAPTCHA setup step names the Enterprise split and points a reader at Turnstile or hCaptcha if their Cloud project will only issue Enterprise credentials.
+
+### If it is ever worth building
+A `CaptchaProvider::ReCaptchaEnterprise` variant **upstream in `authkestra-engine`**, carrying a project id and an API key, and reading the assessment response's validity and score.
+
+Explicitly not in scope for this repository: reimplementing the assessment call in the playground. The scenario exists to demonstrate the framework's captcha feature, so hand-rolling the call here would demonstrate the playground instead, and the starter-kit fragment would generate code that does not match what it claims. If Enterprise is worth supporting it belongs in the framework, and this issue should become a pointer to the upstream one.
+
+### Trigger to act
+Any of: Google announcing a withdrawal date for legacy `siteverify`; the console ceasing to issue legacy secret keys for new sites; or the deployment's own reCAPTCHA verification starting to fail with a valid-looking key.
+
+### Not blocked
+Nothing is waiting on anyone. This is a watch item with a known escape hatch, deliberately left unlabelled `blocked:external` so that label keeps meaning work that genuinely cannot proceed.
 
 ---
 
