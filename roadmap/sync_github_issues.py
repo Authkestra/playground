@@ -5,13 +5,19 @@ Sync roadmap.json to GitHub: labels, milestones (one per phase), and issues.
 Idempotent: existing labels/milestones/issues (matched by name/title) are updated or
 skipped rather than duplicated, so it is safe to re-run after editing roadmap.json.
 
+The target repo is read from the `origin` git remote, which is the single source of
+truth for where these issues live — do not hardcode it here or in a runbook, or the
+two will drift. Override only to sync somewhere other than origin.
+
 Usage:
-    export GITHUB_TOKEN=...            # needs repo scope (issues: write)
-    python3 sync_github_issues.py --owner marcjazz --repo authkestra-playground --dry-run
-    python3 sync_github_issues.py --owner marcjazz --repo authkestra-playground
+    export GITHUB_TOKEN=$(gh auth token)   # or a PAT with repo scope (issues: write)
+    python3 sync_github_issues.py --dry-run
+    python3 sync_github_issues.py
 
 Flags:
     --dry-run     print what would happen; make no write calls
+    --owner STR   override the owner inferred from the origin remote
+    --repo STR    override the repo inferred from the origin remote
     --prefix STR  prepend STR to every issue title (e.g. "[playground] ") — useful if
                   the issues land in the framework repo rather than a dedicated one
 """
@@ -19,6 +25,8 @@ import argparse
 import json
 import os
 import pathlib
+import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -27,6 +35,20 @@ import urllib.request
 
 API = "https://api.github.com"
 HERE = pathlib.Path(__file__).parent
+
+
+def origin_slug():
+    """Return (owner, repo) from the origin remote, so the target lives in exactly one
+    place. Handles both ssh (git@host:owner/repo.git) and https remote forms."""
+    try:
+        url = subprocess.run(
+            ["git", "-C", str(HERE), "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None, None
+    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", url)
+    return (m.group(1), m.group(2)) if m else (None, None)
 
 
 def req(method, path, token, body=None, params=None):
@@ -69,15 +91,28 @@ def paged(path, token, params=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--owner", required=True)
-    ap.add_argument("--repo", required=True)
+    ap.add_argument("--owner", help="override the owner inferred from origin")
+    ap.add_argument("--repo", help="override the repo inferred from origin")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--prefix", default="")
     args = ap.parse_args()
 
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if not token:
-        raise SystemExit("GITHUB_TOKEN (or GH_TOKEN) must be set")
+        raise SystemExit(
+            "GITHUB_TOKEN (or GH_TOKEN) must be set — e.g. "
+            "export GITHUB_TOKEN=$(gh auth token)"
+        )
+
+    inferred_owner, inferred_repo = origin_slug()
+    owner = args.owner or inferred_owner
+    repo = args.repo or inferred_repo
+    if not owner or not repo:
+        raise SystemExit(
+            "could not infer the target from the origin remote; "
+            "pass --owner and --repo explicitly"
+        )
+    args.owner, args.repo = owner, repo
 
     data = json.loads((HERE / "roadmap.json").read_text())
     base = f"/repos/{args.owner}/{args.repo}"
@@ -89,12 +124,14 @@ def main():
           f"{len(data['issues'])} issues\n")
 
     if not dry:
-        repo = req("GET", base, token)
-        if not repo.get("has_issues"):
+        repo_meta = req("GET", base, token)
+        if not repo_meta.get("has_issues"):
             raise SystemExit(f"!! Issues are disabled on {args.owner}/{args.repo}")
 
     # ---- labels ----
-    existing_labels = {l["name"] for l in paged(f"{base}/labels", token)} if not dry else set()
+    # Read on a dry run too, for the same reason as the issues below: a preview that
+    # reports every label as new is worse than no preview.
+    existing_labels = {l["name"] for l in paged(f"{base}/labels", token)}
     for l in data["labels"]:
         if l["name"] in existing_labels:
             print(f"{tag}label   = {l['name']} (exists)")
@@ -105,9 +142,8 @@ def main():
 
     # ---- milestones ----
     ms_by_title = {}
-    if not dry:
-        for m in paged(f"{base}/milestones", token, params={"state": "all"}):
-            ms_by_title[m["title"]] = m["number"]
+    for m in paged(f"{base}/milestones", token, params={"state": "all"}):
+        ms_by_title[m["title"]] = m["number"]
 
     phase_ms = {}
     for ph in data["phases"]:
