@@ -8,8 +8,6 @@ interface Props {
   scenarioId: string;
   /** Bubble up: the demo-wide kill switch flipped mid-flow. */
   onDemoDisabled: () => void;
-  /** Called after every round trip, so the flow log can refetch. */
-  onAction?: () => void;
 }
 
 type ProviderGlobal = "turnstile" | "hcaptcha" | "grecaptcha";
@@ -121,7 +119,7 @@ function loadScript(src: string): Promise<void> {
   return promise;
 }
 
-export default function CaptchaPanel({ scenarioId, onDemoDisabled, onAction }: Props) {
+export default function CaptchaPanel({ scenarioId, onDemoDisabled }: Props) {
   const [widgets, setWidgets] = useState<CaptchaWidget[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
@@ -135,7 +133,6 @@ export default function CaptchaPanel({ scenarioId, onDemoDisabled, onAction }: P
       const res = await scenarioAction<CaptchaWidgets>(scenarioId, "widget");
       if (cancelled) return;
       setLoading(false);
-      onAction?.();
 
       if (!res.ok) {
         if (res.error.kind === "demo_disabled") return onDemoDisabled();
@@ -188,7 +185,6 @@ export default function CaptchaPanel({ scenarioId, onDemoDisabled, onAction }: P
             widget={widget}
             scenarioId={scenarioId}
             onDemoDisabled={onDemoDisabled}
-            onAction={onAction}
           />
         ))}
       </div>
@@ -200,12 +196,10 @@ function CaptchaWidgetCard({
   widget,
   scenarioId,
   onDemoDisabled,
-  onAction,
 }: {
   widget: CaptchaWidget;
   scenarioId: string;
   onDemoDisabled: () => void;
-  onAction?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | number | null>(null);
@@ -300,7 +294,6 @@ function CaptchaWidgetCard({
       });
 
       setVerifying(false);
-      onAction?.();
 
       if (!res.ok) {
         if (res.error.kind === "demo_disabled") return onDemoDisabled();
@@ -329,7 +322,7 @@ function CaptchaWidgetCard({
         }
       }
     },
-    [scenarioId, widget.provider, onDemoDisabled, onAction, config],
+    [scenarioId, widget.provider, onDemoDisabled, config],
   );
 
   if (!config) {

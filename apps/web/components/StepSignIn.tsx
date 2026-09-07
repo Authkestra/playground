@@ -1,16 +1,14 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { DemoConfig, FlowEvent, OAuthMode, ScenarioSpec } from "@playground/api-types";
-import { getSessionEvents } from "@/lib/api";
+import type { DemoConfig, OAuthMode, ScenarioSpec } from "@playground/api-types";
 import { loginUrl, type OAuthReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
 import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 import ResourcePanel from "@/components/ResourcePanel";
 import CaptchaPanel from "@/components/CaptchaPanel";
-import FlowLog from "@/components/FlowLog";
 
 interface Props {
   scenarios: ScenarioSpec[];
@@ -93,69 +91,7 @@ export default function StepSignIn({
   onBack,
   onContinue,
 }: Props) {
-  const [events, setEvents] = useState<FlowEvent[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(true);
-  const [eventsError, setEventsError] = useState<string | null>(null);
   const [oauthMode, setOauthMode] = useState<OAuthMode>("session");
-
-  const fetchEvents = useCallback(async () => {
-    const result = await getSessionEvents();
-    if (!result.ok) {
-      switch (result.error.kind) {
-        case "demo_disabled":
-          onDemoDisabled();
-          return;
-        case "state_unavailable":
-          setEventsError(result.error.detail);
-          return;
-        case "unavailable":
-          setEventsError(
-            "Can't reach the API right now. The flow log will pick back up once it responds.",
-          );
-          return;
-        case "rate_limited":
-          setEventsError(result.error.detail);
-          return;
-        default:
-          setEventsError(`Could not load the flow log (${result.error.detail}).`);
-          return;
-      }
-    }
-    setEventsError(null);
-    setEvents(result.data);
-  }, [onDemoDisabled]);
-
-  // Poll every 5 seconds, but skip fetches while the tab is hidden. When the
-  // tab becomes visible, fetch immediately to catch up on events. onAction
-  // already refetches after every ceremony step, so this is a safety net for
-  // events the client didn't initiate (e.g. the OAuth round trip).
-  useEffect(() => {
-    let cancelled = false;
-    setEventsLoading(true);
-    void fetchEvents().finally(() => {
-      if (!cancelled) setEventsLoading(false);
-    });
-
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        void fetchEvents();
-      }
-    }, 5000);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        void fetchEvents();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [fetchEvents]);
 
   const oauthScenario = scenarios.find((s) => s.id === "oauth");
   const oauthValue = config?.scenarios.oauth;
@@ -176,7 +112,6 @@ export default function StepSignIn({
             <CaptchaPanel
               scenarioId="captcha"
               onDemoDisabled={onDemoDisabled}
-              onAction={fetchEvents}
             />
           </div>
         );
@@ -221,7 +156,6 @@ export default function StepSignIn({
             <PasskeysPanel
               scenarioId="passkeys"
               onDemoDisabled={onDemoDisabled}
-              onAction={fetchEvents}
             />
           </div>
         );
@@ -229,7 +163,7 @@ export default function StepSignIn({
         return (
           <div className="rounded-md border border-slate-800 p-4">
             <h4 className="mb-2 text-sm font-medium text-slate-200">Authenticator app</h4>
-            <TotpPanel scenarioId="totp" onDemoDisabled={onDemoDisabled} onAction={fetchEvents} />
+            <TotpPanel scenarioId="totp" onDemoDisabled={onDemoDisabled} />
           </div>
         );
       case "resource":
@@ -239,7 +173,6 @@ export default function StepSignIn({
             <ResourcePanel
               scenarioId="resource"
               onDemoDisabled={onDemoDisabled}
-              onAction={fetchEvents}
             />
           </div>
         );
@@ -253,12 +186,13 @@ export default function StepSignIn({
       <div>
         <h2 className="text-lg font-semibold text-slate-100">Sign in</h2>
         <p className="text-sm text-slate-400">
-          A real sign-in screen assembled from what you chose in step 1, and a live log of
-          what the engine is doing on the right.
+          A real sign-in screen assembled from what you chose in step 1. Each panel shows
+          the request it made and what came back, so nothing here has to be taken on
+          trust.
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+      <div>
         <div className="rounded-lg border border-slate-800 bg-slate-900 p-6">
           {oauthReturn && (
             <OAuthReturnBanner result={oauthReturn} onDismiss={onDismissOauthReturn} />
@@ -277,7 +211,7 @@ export default function StepSignIn({
               to choose something.
             </p>
           ) : (
-            <div className="mx-auto flex max-w-sm flex-col gap-5">
+            <div className="mx-auto flex max-w-2xl flex-col gap-5">
               <div className="text-center">
                 <h3 className="text-base font-semibold text-slate-100">
                   Sign in to Authkestra
@@ -297,10 +231,6 @@ export default function StepSignIn({
               ))}
             </div>
           )}
-        </div>
-
-        <div className="lg:sticky lg:top-6">
-          <FlowLog events={events} loading={eventsLoading} error={eventsError} />
         </div>
       </div>
 
