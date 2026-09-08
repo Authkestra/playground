@@ -189,9 +189,17 @@ door:
 
 ## Deployment
 
-Backend to **Render** (from `render.yaml`), frontend to
-**Vercel**, both on merge to `main`. Render redeploys whenever CI passes (`autoDeployTrigger: checksPass`),
-so a build that fails formatting, linting, tests, or dependency checks cannot reach production.
+Backend to **Render** (from `render.yaml`), frontend to **Vercel**
+(`.github/workflows/deploy-web.yml`), both on merge to `main`. Render redeploys
+whenever CI passes (`autoDeployTrigger: checksPass`), so a build that fails
+formatting, linting, tests, or dependency checks cannot reach production.
+
+The frontend deploy is owned by CI rather than by Vercel's Git integration.
+It builds from the checkout and ships that artifact with `vercel deploy
+--prebuilt`, so what is live is the commit CI built, and a smoke test then
+fetches the served bundles and fails the run if they do not contain the
+current build. Turn the dashboard Git integration off if it is still on:
+otherwise both deploy on every push and race.
 
 Shuttle was the original plan; it was dropped after the project turned out to be
 abandoned — see
@@ -213,26 +221,30 @@ Two other targets stay configured but dormant, both `workflow_dispatch` only:
   leaves `main` red for reasons unrelated to the commit, so the trigger was removed
   rather than the workflow. Making Fly the target again is a card and a `push` trigger.
 
-### Vercel builds showing as "cancelled"
+### Why the frontend deploy moved into CI
 
-`apps/web/vercel.json` sets an `ignoreCommand` so backend-only commits don't
-rebuild the frontend. Vercel's semantics are inverted from the obvious reading:
-**exit 0 means skip the build**, exit 1 means proceed — and `git diff --quiet`
-exits 0 when nothing changed. So a commit touching only `apps/api/` correctly
-produces a **cancelled** Vercel build. That is the healthy outcome, not a
-failure.
+`apps/web/vercel.json` used to set an `ignoreCommand` so backend-only commits
+would not rebuild the frontend:
 
-The one case where it bites is a project's *first* import, when there is no
-prior deployment to fall back on: if the latest commit didn't touch `apps/web`
-or `packages/`, you get no deployment at all — and **Redeploy does not help,
-because it re-runs the ignore step and reaches the same conclusion.**
+```
+git diff --quiet HEAD^ HEAD -- . ../../packages
+```
 
-Two ways out:
+It inspects **only the tip commit of a push**, and Vercel builds only that tip.
+So a frontend change pushed as anything other than the last commit is skipped —
+and because the check never looks further back, no later push repairs it. The
+change stays undeployed indefinitely while every build reports success.
 
-- Set `VERCEL_FORCE_BUILD=1` in the Vercel project's environment variables. The
-  ignore command checks it first and always builds when it is set. Remove it
-  once a deployment exists.
-- Or push any commit touching `apps/web/` or `packages/`.
+That is not hypothetical: `4bf88da`, which rebuilt the resource-server panel on
+JWKS key discovery, went up in the same push as a docs-only commit. The tip
+touched no frontend files, the build was skipped, and `play.authkestra.com`
+served the previous panel — flow log, symmetric sign/verify and all — for hours
+with nothing reporting a problem, while the API deployed correctly and served
+the new key set.
+
+The `ignoreCommand` is gone and the deploy is a workflow. GitHub's `paths:`
+filter evaluates the whole push rather than its tip, so the failure cannot
+recur, and a skipped or stale deploy now shows up as a red run.
 
 See [`docs/deployment.md`](docs/deployment.md) for the full procedure. The short
 version: the API needs a Redis (`REDIS_URL`) and any container host; the

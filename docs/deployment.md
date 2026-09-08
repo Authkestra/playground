@@ -58,7 +58,15 @@ were load-bearing only while state lived in process memory.
 
 ## 3. Frontend
 
-Vercel, root directory `apps/web`. Two settings have to agree with the API:
+Vercel, root directory `apps/web`, deployed by
+[`.github/workflows/deploy-web.yml`](../.github/workflows/deploy-web.yml) rather
+than by Vercel's Git integration — turn that integration off, or both deploy on
+every push and race. The workflow needs `VERCEL_TOKEN`, `VERCEL_ORG_ID` and
+`VERCEL_PROJECT_ID` as Actions secrets; the last two come from
+`.vercel/project.json` after `vercel link`. Without them it warns and skips
+rather than failing, so forks stay green.
+
+Two settings have to agree with the API:
 
 | Where | Variable | Value |
 | --- | --- | --- |

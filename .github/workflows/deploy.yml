@@ -74,10 +74,7 @@ jobs:
           echo "::error::Deploy reported success but ${URL} never returned 200. Check 'fly logs' — the process is most likely exiting at boot."
           exit 1
 
-  # Frontend deploys through Vercel's own Git integration rather than a workflow
-  # step: Vercel builds on push to `main`, gives PRs preview deployments for
-  # free, and needs no tokens stored here. Set Root Directory to `apps/web` in
-  # Project Settings — Vercel has no vercel.json key for it.
-  #
-  # If you ever want CI to own the deploy instead, add VERCEL_TOKEN,
-  # VERCEL_ORG_ID and VERCEL_PROJECT_ID as secrets and use amondnet/vercel-action.
+  # The frontend deploys from deploy-web.yml, not from here and no longer from
+  # Vercel's Git integration. That integration skipped a frontend commit that
+  # was not the tip of its push and reported success while the site stayed
+  # stale; see "Why the frontend deploy moved into CI" in the README.

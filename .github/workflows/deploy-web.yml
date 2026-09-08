@@ -1,0 +1,173 @@
+# Deploy the frontend to Vercel.
+#
+# This exists because the dashboard Git integration failed silently. The API
+# deploys on push and was current, while play.authkestra.com went on serving a
+# build from before the resource-server rebuild — the old symmetric panel, flow
+# log and all — for hours, with nothing anywhere reporting a problem. A deploy
+# that can be stale without turning something red is a deploy you cannot trust.
+#
+# CI owns the build here, so what ships is this checkout by construction rather
+# than whatever the dashboard last happened to build.
+#
+# Required secrets (Settings > Secrets and variables > Actions):
+#   VERCEL_TOKEN       — Account Settings > Tokens
+#   VERCEL_ORG_ID      — from .vercel/project.json after `vercel link`
+#   VERCEL_PROJECT_ID  — likewise
+# Without them the workflow warns and skips, so forks and unconfigured clones
+# stay green. That matches deploy.yml's handling of FLY_API_TOKEN.
+#
+# One project setting still matters: Root Directory must be `apps/web`, which
+# `vercel pull` fetches into the build. Vercel has no vercel.json key for it.
+# `pnpm install` runs at the workspace root regardless, because apps/web
+# depends on @playground/api-types as `workspace:*` and resolving that from
+# apps/web alone is precisely what breaks a naive monorepo setup.
+#
+# Turn OFF the dashboard Git integration once this is running, or every push
+# deploys twice and the two race.
+name: Deploy (Vercel)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  # Never cancel an in-flight deploy — a cancelled one can leave the alias
+  # pointing at a half-promoted build.
+  group: deploy-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-web:
+    name: Deploy frontend to Vercel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Secrets are not available to job-level `if`, so gate the steps on an
+      # explicit check rather than the job.
+      - name: Check required secrets are configured
+        id: check
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -n "${VERCEL_TOKEN}" ] && [ -n "${VERCEL_ORG_ID}" ] && [ -n "${VERCEL_PROJECT_ID}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::VERCEL_TOKEN, VERCEL_ORG_ID or VERCEL_PROJECT_ID is not set — skipping deploy. Run 'vercel link' in apps/web, then copy the ids out of .vercel/project.json."
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # At the workspace root: apps/web resolves @playground/api-types through
+      # the pnpm workspace link, which only exists after a root install.
+      - name: Install dependencies
+        if: steps.check.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Vercel CLI
+        if: steps.check.outputs.ready == 'true'
+        run: pnpm add -g vercel@latest
+
+      # Brings down the project settings — Root Directory, framework preset and
+      # the environment variables the build needs, NEXT_PUBLIC_API_BASE_URL
+      # among them. Without this the build would run with none of them set and
+      # the app would come up pointing nowhere.
+      - name: Pull Vercel project settings
+        if: steps.check.outputs.ready == 'true'
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build
+        if: steps.check.outputs.ready == 'true'
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # --prebuilt uploads what we just built instead of rebuilding on Vercel,
+      # so the artifact that goes live is the one this job produced from this
+      # commit.
+      - name: Deploy
+        id: deploy
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "deployed: $url"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # A green deploy is not a served page, and — the failure that prompted
+      # this workflow — a served page is not necessarily the current one. The
+      # app is client-rendered, so the shell HTML carries almost no copy: the
+      # marker has to be looked for in the JS bundles the shell references.
+      #
+      # MARKER is a string from the current frontend. Its only job is to be
+      # absent from any older build, so if you change this copy, change it
+      # here too — a marker that no longer exists fails the deploy loudly,
+      # which is the safe direction to fail in.
+      - name: Smoke test the deployed site
+        if: steps.check.outputs.ready == 'true'
+        env:
+          URL: https://play.authkestra.com
+          MARKER: Unpublished key
+        run: |
+          for attempt in $(seq 1 10); do
+            code=$(curl -s -o /tmp/index.html -w '%{http_code}' --max-time 15 "$URL/?cb=$RANDOM$RANDOM" || true)
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            echo "attempt ${attempt}: HTTP ${code:-000}"
+            sleep 6
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::${URL} never returned 200 (last: HTTP ${code:-000})."
+            exit 1
+          fi
+
+          # List the bundles to a file first and read from a redirect rather
+          # than piping into `while`: a pipeline runs its right-hand side in a
+          # subshell, which swallows failures here.
+          grep -o 'src="[^"]*\.js"' /tmp/index.html | sed 's/src="//;s/"//' | sort -u > /tmp/bundles.txt
+          if [ ! -s /tmp/bundles.txt ]; then
+            echo "::error::${URL} returned 200 but referenced no JS bundles — the page is not the app."
+            exit 1
+          fi
+
+          : > /tmp/bundles.js
+          while read -r path; do
+            curl -sf --max-time 15 "$URL$path" >> /tmp/bundles.js \
+              || { echo "::error::could not fetch $URL$path"; exit 1; }
+          done < /tmp/bundles.txt
+
+          if ! grep -qF "$MARKER" /tmp/bundles.js; then
+            echo "::error::${URL} is serving a build without \"${MARKER}\" — the deploy reported success but the live site is stale, or the marker in this workflow is out of date."
+            exit 1
+          fi
+          echo "live and current: found \"${MARKER}\" in the served bundles"
