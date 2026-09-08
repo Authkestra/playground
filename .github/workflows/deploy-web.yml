@@ -9,10 +9,16 @@
 # CI owns the build here, so what ships is this checkout by construction rather
 # than whatever the dashboard last happened to build.
 #
-# Required secrets (Settings > Secrets and variables > Actions):
-#   VERCEL_TOKEN       — Account Settings > Tokens
-#   VERCEL_ORG_ID      — from .vercel/project.json after `vercel link`
-#   VERCEL_PROJECT_ID  — likewise
+# Required secrets, set on the `production` environment rather than on the
+# repository (Settings > Environments > production):
+#   VERCEL_TOKEN       — Account Settings > Tokens, scoped to the team that
+#                        owns the project. It must be a full-access token: one
+#                        restricted to a project reads the project fine and
+#                        still cannot drive the CLI, which resolves its scope
+#                        through /v2/user and /teams first. The preflight below
+#                        checks for exactly that.
+#   VERCEL_ORG_ID      — Team Settings > General > Team ID
+#   VERCEL_PROJECT_ID  — Project Settings > General > Project ID (prj_…)
 # Without them the workflow warns and skips, so forks and unconfigured clones
 # stay green. That matches deploy.yml's handling of FLY_API_TOKEN.
 #
@@ -137,6 +143,24 @@ jobs:
               ORG="$VERCEL_ORG_ID"
             fi
 
+            # A token restricted to a project reads the project fine and still
+            # cannot drive the CLI, which resolves its scope through /v2/user
+            # and /teams/<org> before touching the project at all. That pair
+            # failing is the whole of "Could not retrieve Project Settings", so
+            # check it here where the remedy can be named.
+            ucode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+              -H "Authorization: Bearer $VERCEL_TOKEN" https://api.vercel.com/v2/user || true)
+            case "$VERCEL_ORG_ID" in
+              team_*) tcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+                        -H "Authorization: Bearer $VERCEL_TOKEN" \
+                        "https://api.vercel.com/v2/teams/$VERCEL_ORG_ID" || true) ;;
+              *)      tcode=200 ;;
+            esac
+            if [ "$ucode" != "200" ] || [ "$tcode" != "200" ]; then
+              echo "::error::The token reads this project but not its own scope (/v2/user HTTP $ucode, /v2/teams HTTP $tcode), so the Vercel CLI cannot use it. Create a full-access token: Account Settings > Tokens, scoped to the team that owns the project — not one restricted to a project or an access group."
+              exit 1
+            fi
+
             # Write the link file rather than relying on the env vars alone:
             # the CLI reads .vercel/project.json first, and this removes any
             # ambiguity about which scope it resolves.
@@ -154,41 +178,6 @@ jobs:
             *)   echo "::error::HTTP $code ($slug) resolving the project: $(jq -r '.error.message // "no message"' /tmp/vproj.json 2>/dev/null)" ;;
           esac
           exit 1
-
-      # Temporary. `vercel pull` says only "Could not retrieve Project
-      # Settings" while the REST API resolves the same project with the same
-      # token, so this prints what the token actually is and which scopes it
-      # can see. Names and slugs only — no ids, no token. Remove once the
-      # deploy is working.
-      - name: Diagnose the token scope
-        if: steps.check.outputs.ready == 'true'
-        continue-on-error: true
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: |
-          auth="Authorization: Bearer $VERCEL_TOKEN"
-
-          echo "--- who is this token? ---"
-          curl -s --max-time 20 -H "$auth" https://api.vercel.com/v2/user > /tmp/u.json || true
-          echo "user:  $(jq -r '.user.username // .user.email // .error.code // "?"' /tmp/u.json)"
-          echo "org id matches this user's id: $([ "$(jq -r '.user.id // ""' /tmp/u.json)" = "$VERCEL_ORG_ID" ] && echo yes || echo no)"
-
-          echo "--- teams this token can see ---"
-          curl -s --max-time 20 -H "$auth" https://api.vercel.com/v2/teams > /tmp/t.json || true
-          jq -r '.teams[]? | "  team: \(.slug)"' /tmp/t.json || true
-          echo "org id matches one of those teams: $(jq -r --arg o "$VERCEL_ORG_ID" '[.teams[]?.id] | index($o) | if . == null then "no" else "yes" end' /tmp/t.json)"
-
-          echo "--- project record ---"
-          curl -s --max-time 20 -H "$auth" \
-            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID" > /tmp/p.json || true
-          echo "accountId present: $(jq -r 'if has("accountId") then "yes" else "no" end' /tmp/p.json)"
-          echo "accountId equals VERCEL_ORG_ID: $([ "$(jq -r '.accountId // ""' /tmp/p.json)" = "$VERCEL_ORG_ID" ] && echo yes || echo no)"
-
-          echo "--- what the CLI actually hits ---"
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --debug 2>&1 \
-            | grep -iE "GET |POST |error|scope|team|401|403|404" | tail -20 || true
 
       # Brings down the project settings — Root Directory, framework preset and
       # the environment variables the build needs, NEXT_PUBLIC_API_BASE_URL
