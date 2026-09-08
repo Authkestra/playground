@@ -229,36 +229,48 @@ jobs:
           URL: https://play.authkestra.com
           MARKER: Unpublished key
         run: |
-          for attempt in $(seq 1 10); do
+          # Verify the whole chain on each attempt rather than once through.
+          # Immediately after aliasing, the edge can serve the new HTML while a
+          # chunk it references is still propagating, so a single pass can read
+          # a fresh page and 404 on its own bundle — which says nothing about
+          # whether the deploy is good. Only a run that never comes together,
+          # or one that comes together around an old build, is a failure.
+          reason="never got a 200 from $URL"
+          for attempt in $(seq 1 12); do
+            if [ "$attempt" -gt 1 ]; then sleep 10; fi
+
             code=$(curl -s -o /tmp/index.html -w '%{http_code}' --max-time 15 "$URL/?cb=$RANDOM$RANDOM" || true)
-            if [ "$code" = "200" ]; then
-              break
+            if [ "$code" != "200" ]; then
+              reason="HTTP ${code:-000} from $URL"
+              echo "attempt ${attempt}: $reason"
+              continue
             fi
-            echo "attempt ${attempt}: HTTP ${code:-000}"
-            sleep 6
+
+            grep -o 'src="[^"]*\.js"' /tmp/index.html | sed 's/src="//;s/"//' | sort -u > /tmp/bundles.txt
+            if [ ! -s /tmp/bundles.txt ]; then
+              reason="200 but no JS bundles referenced — the page is not the app"
+              echo "attempt ${attempt}: $reason"
+              continue
+            fi
+
+            : > /tmp/bundles.js
+            incomplete=""
+            while read -r path; do
+              curl -sf --max-time 15 "$URL$path" >> /tmp/bundles.js || incomplete="$path"
+            done < /tmp/bundles.txt
+            if [ -n "$incomplete" ]; then
+              reason="could not fetch $incomplete (still propagating?)"
+              echo "attempt ${attempt}: $reason"
+              continue
+            fi
+
+            if grep -qF "$MARKER" /tmp/bundles.js; then
+              echo "live and current: found \"$MARKER\" in the served bundles after ${attempt} attempt(s)"
+              exit 0
+            fi
+            reason="served a complete build with no \"$MARKER\" in it — the live site is stale, or the marker in this workflow is out of date"
+            echo "attempt ${attempt}: $reason"
           done
-          if [ "$code" != "200" ]; then
-            echo "::error::${URL} never returned 200 (last: HTTP ${code:-000})."
-            exit 1
-          fi
 
-          # List the bundles to a file first and read from a redirect rather
-          # than piping into `while`: a pipeline runs its right-hand side in a
-          # subshell, which swallows failures here.
-          grep -o 'src="[^"]*\.js"' /tmp/index.html | sed 's/src="//;s/"//' | sort -u > /tmp/bundles.txt
-          if [ ! -s /tmp/bundles.txt ]; then
-            echo "::error::${URL} returned 200 but referenced no JS bundles — the page is not the app."
-            exit 1
-          fi
-
-          : > /tmp/bundles.js
-          while read -r path; do
-            curl -sf --max-time 15 "$URL$path" >> /tmp/bundles.js \
-              || { echo "::error::could not fetch $URL$path"; exit 1; }
-          done < /tmp/bundles.txt
-
-          if ! grep -qF "$MARKER" /tmp/bundles.js; then
-            echo "::error::${URL} is serving a build without \"${MARKER}\" — the deploy reported success but the live site is stale, or the marker in this workflow is out of date."
-            exit 1
-          fi
-          echo "live and current: found \"${MARKER}\" in the served bundles"
+          echo "::error::${URL}: ${reason}"
+          exit 1
