@@ -48,6 +48,13 @@ jobs:
   deploy-web:
     name: Deploy frontend to Vercel
     runs-on: ubuntu-latest
+    # The Vercel secrets live on this environment, not on the repo. Without
+    # this line `secrets.VERCEL_TOKEN` resolves to empty, the check below
+    # skips every deploy step, and the run still reports success — the same
+    # silent-skip this workflow exists to stop.
+    environment:
+      name: production
+      url: https://play.authkestra.com
     steps:
       - uses: actions/checkout@v4
 
