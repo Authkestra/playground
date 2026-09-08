@@ -155,6 +155,41 @@ jobs:
           esac
           exit 1
 
+      # Temporary. `vercel pull` says only "Could not retrieve Project
+      # Settings" while the REST API resolves the same project with the same
+      # token, so this prints what the token actually is and which scopes it
+      # can see. Names and slugs only — no ids, no token. Remove once the
+      # deploy is working.
+      - name: Diagnose the token scope
+        if: steps.check.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          auth="Authorization: Bearer $VERCEL_TOKEN"
+
+          echo "--- who is this token? ---"
+          curl -s --max-time 20 -H "$auth" https://api.vercel.com/v2/user > /tmp/u.json || true
+          echo "user:  $(jq -r '.user.username // .user.email // .error.code // "?"' /tmp/u.json)"
+          echo "org id matches this user's id: $([ "$(jq -r '.user.id // ""' /tmp/u.json)" = "$VERCEL_ORG_ID" ] && echo yes || echo no)"
+
+          echo "--- teams this token can see ---"
+          curl -s --max-time 20 -H "$auth" https://api.vercel.com/v2/teams > /tmp/t.json || true
+          jq -r '.teams[]? | "  team: \(.slug)"' /tmp/t.json || true
+          echo "org id matches one of those teams: $(jq -r --arg o "$VERCEL_ORG_ID" '[.teams[]?.id] | index($o) | if . == null then "no" else "yes" end' /tmp/t.json)"
+
+          echo "--- project record ---"
+          curl -s --max-time 20 -H "$auth" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID" > /tmp/p.json || true
+          echo "accountId present: $(jq -r 'if has("accountId") then "yes" else "no" end' /tmp/p.json)"
+          echo "accountId equals VERCEL_ORG_ID: $([ "$(jq -r '.accountId // ""' /tmp/p.json)" = "$VERCEL_ORG_ID" ] && echo yes || echo no)"
+
+          echo "--- what the CLI actually hits ---"
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --debug 2>&1 \
+            | grep -iE "GET |POST |error|scope|team|401|403|404" | tail -20 || true
+
       # Brings down the project settings — Root Directory, framework preset and
       # the environment variables the build needs, NEXT_PUBLIC_API_BASE_URL
       # among them. Without this the build would run with none of them set and
