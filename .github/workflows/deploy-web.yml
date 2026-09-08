@@ -95,6 +95,45 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         run: pnpm add -g vercel@latest
 
+      # `vercel pull` answers a wrong project id, an org id that is not the
+      # team owning the project, and a token scoped to a different team with
+      # the same opaque "Could not retrieve Project Settings". Ask the API
+      # directly first so the run names which of the three it is. Values are
+      # never echoed — only the HTTP status and Vercel's own error code.
+      - name: Verify the project ids resolve
+        if: steps.check.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          case "$VERCEL_PROJECT_ID" in
+            prj_*) ;;
+            *) echo "::error::VERCEL_PROJECT_ID does not begin with 'prj_'. It wants the Project ID from Project Settings > General, not the project's name or slug."; exit 1 ;;
+          esac
+
+          code=$(curl -s -o /tmp/vproj.json -w '%{http_code}' --max-time 20 \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" || true)
+
+          if [ "$code" = "200" ]; then
+            echo "project resolves: $(jq -r '.name // "?"' /tmp/vproj.json)"
+            echo "root directory:   $(jq -r '.rootDirectory // "(not set — must be apps/web)"' /tmp/vproj.json)"
+            if [ "$(jq -r '.rootDirectory // ""' /tmp/vproj.json)" != "apps/web" ]; then
+              echo "::warning::Root Directory is not 'apps/web'. The build will run at the workspace root and Next.js will not be found."
+            fi
+            exit 0
+          fi
+
+          slug=$(jq -r '.error.code // "unknown"' /tmp/vproj.json 2>/dev/null || echo unknown)
+          case "$code" in
+            403) echo "::error::HTTP 403 ($slug): the token is valid but not scoped to this team. Recreate it under the team that owns the project (Account Settings > Tokens > Scope)." ;;
+            404) echo "::error::HTTP 404 ($slug): no project with this id under this team. Either VERCEL_PROJECT_ID belongs to a different project, or VERCEL_ORG_ID is not the team that owns it — a personal-account id where the project lives in a team is the usual cause." ;;
+            401) echo "::error::HTTP 401 ($slug): the token is rejected outright. Generate a new one." ;;
+            *)   echo "::error::HTTP $code ($slug) resolving the project: $(jq -r '.error.message // "no message"' /tmp/vproj.json 2>/dev/null)" ;;
+          esac
+          exit 1
+
       # Brings down the project settings — Root Directory, framework preset and
       # the environment variables the build needs, NEXT_PUBLIC_API_BASE_URL
       # among them. Without this the build would run with none of them set and
