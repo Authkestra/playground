@@ -122,6 +122,27 @@ jobs:
             if [ "$(jq -r '.rootDirectory // ""' /tmp/vproj.json)" != "apps/web" ]; then
               echo "::warning::Root Directory is not 'apps/web'. The build will run at the workspace root and Next.js will not be found."
             fi
+
+            # The project's own accountId is the org that owns it. The API
+            # ignores a teamId that the token already scopes past, so the call
+            # above can succeed on a VERCEL_ORG_ID the CLI will then reject —
+            # which is exactly how `vercel pull` ends up saying only "Could not
+            # retrieve Project Settings". Trust the accountId and say so when
+            # the secret disagrees.
+            account=$(jq -r '.accountId // ""' /tmp/vproj.json)
+            if [ -n "$account" ] && [ "$account" != "$VERCEL_ORG_ID" ]; then
+              echo "::warning::VERCEL_ORG_ID is not the account that owns this project; using the project's own accountId for this run. Update the secret — Team Settings > General > Team ID, or the personal account id if the project is not in a team."
+              ORG="$account"
+            else
+              ORG="$VERCEL_ORG_ID"
+            fi
+
+            # Write the link file rather than relying on the env vars alone:
+            # the CLI reads .vercel/project.json first, and this removes any
+            # ambiguity about which scope it resolves.
+            mkdir -p .vercel
+            printf '{"orgId":"%s","projectId":"%s"}\n' "$ORG" "$VERCEL_PROJECT_ID" > .vercel/project.json
+            echo "wrote .vercel/project.json"
             exit 0
           fi
 
