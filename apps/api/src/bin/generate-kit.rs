@@ -10,6 +10,7 @@
 //! generate-kit --list-json --exhaustive  # a GitHub Actions matrix
 //! generate-kit --name all --out ./out
 //! generate-kit --spec "passkeys,oauth=github" --out ./out
+//! generate-kit --spec passkeys --deploy docker,render --out ./out
 //! ```
 
 use std::process::ExitCode;
@@ -27,6 +28,44 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Read `--deploy docker,render` into a target set.
+///
+/// Absent means none, which is the opposite of the HTTP route's default. That
+/// asymmetry is deliberate: a visitor downloading a project wants a Dockerfile
+/// without having to ask, whereas a CI leg that did not ask for manifests
+/// should not have to explain why its output contains them.
+fn deploy_targets(args: &[String]) -> api::scenario::DeployTargets {
+    let mut targets = api::scenario::DeployTargets {
+        docker: false,
+        render: false,
+        fly: false,
+        railway: false,
+    };
+
+    let Some(list) = args
+        .iter()
+        .position(|a| a == "--deploy")
+        .and_then(|i| args.get(i + 1))
+    else {
+        return targets;
+    };
+
+    for name in list.split(',').map(str::trim) {
+        match name.to_ascii_lowercase().as_str() {
+            "docker" => targets.docker = true,
+            "render" => targets.render = true,
+            "fly" | "fly.io" | "flyio" => targets.fly = true,
+            "railway" => targets.railway = true,
+            other if !other.is_empty() => {
+                eprintln!("generate-kit: ignoring unknown deploy target `{other}`");
+            }
+            _ => {}
+        }
+    }
+
+    targets
 }
 
 fn run() -> Result<(), String> {
@@ -90,6 +129,12 @@ fn run() -> Result<(), String> {
     let options = api::scenario::KitOptions {
         openapi: named.openapi || args.iter().any(|a| a == "--openapi"),
         ts_client: named.ts_client || args.iter().any(|a| a == "--ts-client"),
+        // None by default: this binary's main job is compiling the generated
+        // Rust project in CI, and a manifest is not Rust. `--deploy` opts in,
+        // so the manifests can be generated for inspection and so a workflow
+        // that wants to build the Dockerfile can ask for one — without every
+        // matrix leg carrying files `cargo check` will never look at.
+        deploy: deploy_targets(&args),
     };
 
     let registry = matrix::ci_registry();
@@ -131,4 +176,4 @@ Emit a generated starter project to disk.
   --spec <spec>          generate an ad-hoc one, e.g. \"passkeys,oauth=github\"
   --out <dir>            where to write it (required to generate)
   --openapi              annotate the handlers and serve an OpenAPI document
-  --ts-client            emit a typed TypeScript client for the ceremonies";
+  --ts-client            emit a typed TypeScript client for the ceremonies\n  --deploy <list>        deployment manifests to emit: docker,render,fly,railway";

@@ -14,6 +14,10 @@ pub mod diff;
 pub mod engine;
 pub mod error;
 pub mod events;
+pub mod github_api;
+pub mod github_push;
+pub mod github_routes;
+pub mod github_token_store;
 pub mod killswitch;
 pub mod kit;
 pub mod oauth_routes;
@@ -378,6 +382,17 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         settings.cookie_secure,
     ));
 
+    // The push token only has to survive one visitor clicking Connect and then
+    // Push, so it gets its own short TTL rather than the session's twelve
+    // hours — see `github_token_store`'s module docs.
+    let github_push = Arc::new(crate::github_push::GithubPushState::new(
+        Arc::new(crate::github_api::HttpGitHubApi::new()),
+        crate::github_token_store::GithubTokenStore::new(
+            kv.clone(),
+            crate::github_token_store::TOKEN_TTL,
+        ),
+    ));
+
     Ok(AppState {
         sessions,
         kill_switch,
@@ -387,6 +402,7 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
         events: Arc::new(crate::events::EventLog::new(kv, session_ttl)),
         signing,
+        github_push,
     })
 }
 
@@ -480,6 +496,11 @@ pub fn build_router(state: AppState) -> Router {
                 // Every OAuth login reaches a third party, so it shares the
                 // tighter bucket that protects provider quota.
                 .merge(crate::oauth_routes::router())
+                // The GitHub push feature reaches a third party on every one
+                // of its three routes — the navigation pair and the push
+                // itself — so all three share the same tighter bucket.
+                .merge(crate::github_routes::navigation_router())
+                .merge(crate::github_routes::action_router())
                 .layer(GovernorLayer { config: sensitive }),
         )
         .merge(routes::standard_router().layer(GovernorLayer { config: standard }));

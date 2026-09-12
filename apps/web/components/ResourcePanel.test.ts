@@ -51,29 +51,29 @@ describe("FORGERIES", () => {
 });
 
 describe("verdictStyle", () => {
-  // A 401 is the ordinary answer here, so red has to mean more than "refused"
-  // or it means nothing.
-  it("reserves red for a forgery and for a broken validator", () => {
+  // A 401 is the ordinary answer here, so destructive has to mean more than
+  // "refused" or it means nothing.
+  it("reserves destructive for a forgery and for a broken validator", () => {
     for (const verdict of ["bad_signature", "keys_unreachable"]) {
-      expect(verdictStyle(verdict)).toContain("rose");
+      expect(verdictStyle(verdict)).toContain("destructive");
     }
   });
 
-  it("treats an ordinary rejection as amber, not red", () => {
+  it("treats an ordinary rejection as warning, not destructive", () => {
     for (const verdict of ["expired", "wrong_audience", "unknown_kid", "untrusted_issuer"]) {
-      expect(verdictStyle(verdict)).toContain("amber");
-      expect(verdictStyle(verdict)).not.toContain("rose");
+      expect(verdictStyle(verdict)).toContain("warning");
+      expect(verdictStyle(verdict)).not.toContain("destructive");
     }
   });
 
-  it("styles acceptance as emerald and an absent token as neutral", () => {
-    expect(verdictStyle("accepted")).toContain("emerald");
-    expect(verdictStyle("absent")).toContain("slate");
+  it("styles acceptance as success and an absent token as neutral", () => {
+    expect(verdictStyle("accepted")).toContain("success");
+    expect(verdictStyle("absent")).toContain("muted");
   });
 
   // A verdict added upstream must still render as *something* legible.
   it("falls back rather than returning nothing for an unknown verdict", () => {
-    expect(verdictStyle("something_new_upstream")).toContain("amber");
+    expect(verdictStyle("something_new_upstream")).toContain("warning");
   });
 });
 

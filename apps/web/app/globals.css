@@ -3,24 +3,122 @@
 @tailwind utilities;
 
 /*
-  The playground is dark to match the framework's own site. `color-scheme` is
-  what makes the browser's own chrome follow — form controls, scrollbars and
-  the flash of background before CSS applies. Without it a dark page still
-  renders light native checkboxes and a white scrollbar.
+  Design tokens.
+
+  The playground is dark to match the framework's own site (#45). Before the
+  shadcn pass every component hardcoded Tailwind palette classes — `bg-slate-900`
+  on a card, `text-slate-400` on a caption — which meant a colour decision lived
+  in forty places and the "on" state of a switch was near-white because nothing
+  in the UI had claimed an accent.
+
+  These are the shadcn token names, carrying this project's values. Components
+  address colour only through them (`bg-card`, `text-muted-foreground`), so the
+  palette is changed here or nowhere.
+
+  Values are `H S% L%` triples without the `hsl()` wrapper: that is what lets
+  Tailwind compose them with an opacity modifier (`bg-primary/10`).
+
+  Only `:root` is defined. The UI is dark by construction, not by preference,
+  so there is no `.dark` scope to switch into — but every value is named by role
+  rather than by shade, so adding a light scope later is a matter of adding a
+  second block here and touching no component.
 */
 :root {
+  /* Page and surfaces. Lifted in steps so a card reads above the page and a
+     popover above the card, without any of them needing a border to do it. */
+  --background: 229 84% 5%; /* was slate-950 */
+  --foreground: 210 40% 96%; /* was slate-100 */
+
+  --card: 222 47% 9%;
+  --card-foreground: 210 40% 96%;
+
+  --popover: 222 45% 11%;
+  --popover-foreground: 210 40% 96%;
+
+  /* Muted carries captions, helper text and inert surfaces. The foreground is
+     deliberately lighter than the slate-400 it replaces: slate-400 on the
+     raised card surface sat at 4.3:1, just under AA, which the old audit never
+     caught because it measured every caption against the page rather than
+     against the card it actually sits on. */
+  --muted: 217 33% 16%;
+  --muted-foreground: 215 25% 72%;
+
+  /* The accent the UI never had. Used for the active state of a control, the
+     primary action in each step, and the focus ring — one colour meaning
+     "this is on / this is the way forward".
+
+     It is split in two because one indigo cannot do both jobs: as a filled
+     surface it must be dark enough for white text to clear AA on it, and as
+     text on this dark page it must be light enough to clear AA against the
+     page. A single mid shade fails one of the two, and at 239 84% 67% it
+     failed both — 4.41:1 under white, 3.46:1 as a link. `primary` is the
+     surface; `primary-accent` is the shade to use when the indigo is the
+     text (a link, a `variant="link"` button, an active step number). */
+  --primary: 239 84% 60%;
+  --primary-foreground: 0 0% 100%;
+  --primary-accent: 239 84% 76%;
+
+  --secondary: 217 33% 18%;
+  --secondary-foreground: 210 40% 96%;
+
+  --accent: 217 33% 20%;
+  --accent-foreground: 210 40% 96%;
+
+  /* Verdict colours. The auth panels report outcomes constantly — a token
+     accepted, a signature forged, a captcha pending — and those three states
+     need to stay distinguishable from each other and readable on both the page
+     and a card. Foregrounds are the text shade; the DEFAULT is the surface. */
+  --success: 152 60% 36%;
+  --success-foreground: 151 70% 80%;
+
+  --warning: 38 92% 40%;
+  --warning-foreground: 45 93% 76%;
+
+  /* Darker than red-500: white on red-500 is 4.0:1, under AA for body text. */
+  --destructive: 0 63% 42%;
+  --destructive-foreground: 0 0% 100%;
+  --destructive-muted: 0 91% 80%;
+
+  --border: 217 33% 21%;
+  --input: 217 33% 24%;
+  --ring: 239 84% 67%;
+
+  --radius: 0.625rem;
+
+  /* Makes the browser's own chrome follow: form controls, scrollbars, and the
+     flash of background before CSS applies. Without it a dark page still
+     renders light native checkboxes and a white scrollbar. */
   color-scheme: dark;
 }
 
-html,
-body {
-  padding: 0;
-  margin: 0;
-  background-color: rgb(2 6 23); /* slate-950 */
-}
+@layer base {
+  * {
+    @apply border-border;
+  }
 
-/* Native controls inherit the accent, so checkboxes and radios in the method
-   picker match the rest of the UI rather than the OS default blue. */
-:root {
-  accent-color: rgb(226 232 240); /* slate-200 */
+  html,
+  body {
+    padding: 0;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+
+  /* Every interactive element gets the same ring, so focus never depends on a
+     component remembering to style it. Auth flows are keyboard-heavy and the
+     old UI styled focus per-component, which meant some panels had none. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Tabular numerals for anything counting down. The session bar's expiry
+     ticks once a second, and proportional digits make the whole row shuffle. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }

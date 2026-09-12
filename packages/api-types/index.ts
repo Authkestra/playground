@@ -35,3 +35,6 @@ export type { Forgery } from "./generated/Forgery";
 export type { CaptchaWidget } from "./generated/CaptchaWidget";
 export type { CaptchaWidgets } from "./generated/CaptchaWidgets";
 export type { CaptchaVerification } from "./generated/CaptchaVerification";
+export type { GitHubPushRequest } from "./generated/GitHubPushRequest";
+export type { GitHubPushResponse } from "./generated/GitHubPushResponse";
+export type { GithubPushDeployTargets } from "./generated/GithubPushDeployTargets";

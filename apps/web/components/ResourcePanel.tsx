@@ -3,6 +3,11 @@
 import { useState } from "react";
 import type { Forgery, IssuedToken, ProtectedCall } from "@playground/api-types";
 import { scenarioAction } from "@/lib/api";
+import { cn } from "@/lib/cn";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 
 interface Props {
   scenarioId: string;
@@ -13,22 +18,22 @@ interface Props {
 /**
  * Colour by what the outcome means, not by HTTP status.
  *
- * A 401 is the normal answer here, so red is reserved for the two outcomes
- * that mean something is actually wrong: a signature that does not verify
- * (someone forged or tampered), and a key set that could not be fetched (the
- * resource server is broken, not under attack).
+ * A 401 is the normal answer here, so destructive is reserved for the two
+ * outcomes that mean something is actually wrong: a signature that does not
+ * verify (someone forged or tampered), and a key set that could not be
+ * fetched (the resource server is broken, not under attack).
  */
 export function verdictStyle(verdict: string): string {
   switch (verdict) {
     case "accepted":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+      return "border-success/30 bg-success/10 text-success-foreground";
     case "absent":
-      return "border-slate-600 bg-slate-800/60 text-slate-300";
+      return "border-border bg-muted/60 text-muted-foreground";
     case "bad_signature":
     case "keys_unreachable":
-      return "border-rose-500/30 bg-rose-500/10 text-rose-300";
+      return "border-destructive/30 bg-destructive/10 text-destructive-foreground";
     default:
-      return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+      return "border-warning/30 bg-warning/10 text-warning-foreground";
   }
 }
 
@@ -134,131 +139,128 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-muted-foreground">
         A route that validates a token it did not issue. It holds no secret — only the
         issuer&apos;s name and the URL of its published keys. Issue a token, then present
         it, then present one built to fail and watch the reason change.
       </p>
 
       {banner && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-          {banner}
-        </p>
+        <Alert className="border-warning/30 bg-warning/10 text-warning-foreground [&>svg]:text-warning-foreground">
+          <AlertDescription>{banner}</AlertDescription>
+        </Alert>
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void mint("issue")}
-          disabled={working}
-          className="rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/50"
-        >
+        <Button type="button" size="sm" onClick={() => void mint("issue")} disabled={working}>
           {busy === "issue" ? "Issuing…" : "Issue a valid token"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          size="sm"
+          variant="outline"
           onClick={() => void call(token || null)}
           disabled={working}
-          className="rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy === "call" ? "Calling…" : "Call the route"}
-        </button>
-        <button
-          type="button"
-          onClick={() => void call(null)}
-          disabled={working}
-          className="rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => void call(null)} disabled={working}>
           Call with no token
-        </button>
+        </Button>
       </div>
 
       <div>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-muted-foreground">
           Or mint a token built to fail one specific check. Each is really signed — the
           verdict comes from real validation, not from a label.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {FORGERIES.map((f) => (
-            <button
+            <Button
               key={f.kind}
               type="button"
+              size="sm"
+              variant="outline"
               onClick={() => void mint("forge", f.kind)}
               disabled={working}
-              className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy === f.kind ? "Minting…" : f.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       {issued && (
-        <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
-          {issued.forged_as ? (
-            <p className="text-xs text-amber-400">
-              This one is built to fail: it {issued.forged_as}.
-            </p>
-          ) : (
-            <p className="text-xs text-slate-400">A valid token, signed by the live key.</p>
-          )}
-
-          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-            <dt className="text-slate-400">kid</dt>
-            <dd className="break-all font-mono text-slate-300">{issued.kid ?? "(none)"}</dd>
-            <dt className="text-slate-400">iss</dt>
-            <dd className="break-all font-mono text-slate-300">{issued.issuer}</dd>
-            <dt className="text-slate-400">aud</dt>
-            <dd className="break-all font-mono text-slate-300">{issued.audience}</dd>
-            {decoded && (
-              <>
-                <dt className="text-slate-400">header</dt>
-                <dd className="break-all font-mono text-slate-300">{decoded}</dd>
-              </>
+        <Card>
+          <CardContent className="p-3">
+            {issued.forged_as ? (
+              <p className="text-xs text-warning-foreground">
+                This one is built to fail: it {issued.forged_as}.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">A valid token, signed by the live key.</p>
             )}
-          </dl>
 
-          {/*
-            The invitation that makes "unpublished key" checkable rather than
-            asserted. A visitor who opens this and searches for the kid above
-            has verified the demo instead of believing it.
-          */}
-          <p className="mt-2 text-xs text-slate-400">
-            Look the <code className="font-mono">kid</code> up yourself:{" "}
-            <a
-              href={issued.jwks_url}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-slate-200 underline underline-offset-2"
-            >
-              {issued.jwks_url}
-            </a>
-          </p>
+            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+              <dt className="text-muted-foreground">kid</dt>
+              <dd className="break-all font-mono text-foreground">{issued.kid ?? "(none)"}</dd>
+              <dt className="text-muted-foreground">iss</dt>
+              <dd className="break-all font-mono text-foreground">{issued.issuer}</dd>
+              <dt className="text-muted-foreground">aud</dt>
+              <dd className="break-all font-mono text-foreground">{issued.audience}</dd>
+            </dl>
 
-          <label className="mt-3 block text-xs text-slate-400" htmlFor="resource-token">
-            Edit before calling to see the rest — change a character in the last segment
-            for a bad signature, or delete one to make it unreadable. Whatever is here is
-            what gets sent.
-          </label>
-          <textarea
-            id="resource-token"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            spellCheck={false}
-            rows={3}
-            className="mt-1 w-full resize-y break-all rounded border border-slate-700 bg-slate-950 p-2 font-mono text-xs text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          />
-        </div>
+            {decoded && (
+              <div className="mt-2">
+                <p className="text-xs text-muted-foreground">Decoded header</p>
+                <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground">
+                  <code>{decoded}</code>
+                </pre>
+              </div>
+            )}
+
+            {/*
+              The invitation that makes "unpublished key" checkable rather than
+              asserted. A visitor who opens this and searches for the kid above
+              has verified the demo instead of believing it.
+            */}
+            <p className="mt-2 text-xs text-muted-foreground">
+              Look the <code className="font-mono">kid</code> up yourself:{" "}
+              <a
+                href={issued.jwks_url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-foreground underline underline-offset-2"
+              >
+                {issued.jwks_url}
+              </a>
+            </p>
+
+            <Label className="mt-3 block text-xs font-normal text-muted-foreground" htmlFor="resource-token">
+              Edit before calling to see the rest — change a character in the last segment
+              for a bad signature, or delete one to make it unreadable. Whatever is here is
+              what gets sent.
+            </Label>
+            <textarea
+              id="resource-token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              spellCheck={false}
+              rows={3}
+              className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
+            />
+          </CardContent>
+        </Card>
       )}
 
       <div aria-live="polite">
         {sentHeader && (
-          <p className="mb-1 break-all font-mono text-[11px] text-slate-400">
+          <p className="mb-1 break-all font-mono text-[11px] text-muted-foreground">
             GET /api/protected · {sentHeader}
           </p>
         )}
         {result && (
-          <div className={`rounded-md border px-3 py-2 text-sm ${verdictStyle(result.verdict)}`}>
+          <div className={cn("rounded-md border px-3 py-2 text-sm", verdictStyle(result.verdict))}>
             <p className="font-medium">
               {result.status} · {VERDICT_LABELS[result.verdict] ?? result.verdict}
             </p>

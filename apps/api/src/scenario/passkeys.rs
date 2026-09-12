@@ -611,12 +611,12 @@ async fn passkey_login_finish(
                 CrateRequirement::new("serde", &["derive"]),
             ],
             env: vec![
-                KitEnvVar::with_default(
+                KitEnvVar::local_default(
                     "WEBAUTHN_ORIGIN",
                     "The origin the browser loads your app from, exactly.",
                     "http://localhost:3000",
                 ),
-                KitEnvVar::with_default(
+                KitEnvVar::local_default(
                     "WEBAUTHN_RP_ID",
                     "Relying-party ID. May be a registrable suffix of the origin.",
                     "localhost",

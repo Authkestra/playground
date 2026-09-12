@@ -105,6 +105,7 @@ pub fn representative() -> Vec<Combination> {
         KitOptions {
             openapi: true,
             ts_client: true,
+            ..KitOptions::default()
         },
     ));
     out

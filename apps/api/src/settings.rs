@@ -2,6 +2,90 @@
 
 use crate::session::DEFAULT_TTL_HOURS;
 
+/// Credentials for the GitHub OAuth App used to push a generated project to a
+/// visitor's own repository (#40) — deliberately **separate** from the
+/// sign-in scenario's own GitHub credentials (`GITHUB_CLIENT_ID` /
+/// `GITHUB_CLIENT_SECRET`, read in `engine::ProviderCredentials`).
+///
+/// The sign-in scenario exists to demonstrate identity, and the honest way to
+/// demonstrate it is to ask for the narrowest scope that proves who someone
+/// is. This feature needs `public_repo`, a scope with nothing to do with
+/// identity. Folding the two together would mean the identity demo started
+/// silently asking for repo-write access on every visitor's behalf — exactly
+/// the kind of scope creep a playground teaching OAuth should model as
+/// abnormal, not ship as its own default.
+///
+/// Like every other provider in this deployment, absent credentials are not a
+/// startup error: the feature reports itself unavailable at the point a
+/// visitor would use it, the same way `ProviderCredentials` degrades.
+#[derive(Clone, Default)]
+pub struct GithubKitCredentials {
+    client_id: Option<String>,
+    client_secret: Option<String>,
+}
+
+impl std::fmt::Debug for GithubKitCredentials {
+    /// The secret is redacted by hand — a derived `Debug` would print it in
+    /// any log line or panic message that ever formats `Settings`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GithubKitCredentials")
+            .field("client_id", &self.client_id)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+impl GithubKitCredentials {
+    pub fn from_env() -> Self {
+        let client_id = std::env::var("GITHUB_KIT_CLIENT_ID")
+            .ok()
+            .filter(|v| !v.is_empty());
+        let client_secret = std::env::var("GITHUB_KIT_CLIENT_SECRET")
+            .ok()
+            .filter(|v| !v.is_empty());
+
+        if client_id.is_none() || client_secret.is_none() {
+            tracing::warn!(
+                "GITHUB_KIT_CLIENT_ID/GITHUB_KIT_CLIENT_SECRET not set; pushing a project to \
+                 GitHub will report as not configured"
+            );
+        } else {
+            tracing::info!("GitHub push credentials loaded");
+        }
+
+        Self {
+            client_id,
+            client_secret,
+        }
+    }
+
+    /// Inject credentials without touching the environment, for tests.
+    pub fn for_test(client_id: &str, client_secret: &str) -> Self {
+        Self {
+            client_id: Some(client_id.to_string()),
+            client_secret: Some(client_secret.to_string()),
+        }
+    }
+
+    pub fn is_configured(&self) -> bool {
+        self.client_id.is_some() && self.client_secret.is_some()
+    }
+
+    /// The client id and secret, only when both are present — a deployment
+    /// with just one of the two is exactly as unusable as one with neither,
+    /// and treating it otherwise would send a visitor to GitHub with a
+    /// request that can only fail there instead of here.
+    pub fn credentials(&self) -> Option<(&str, &str)> {
+        match (&self.client_id, &self.client_secret) {
+            (Some(id), Some(secret)) => Some((id.as_str(), secret.as_str())),
+            _ => None,
+        }
+    }
+}
+
 /// WebAuthn relying-party identity.
 ///
 /// The RP ID must be the site's registrable domain and the origin must match
@@ -208,6 +292,8 @@ pub struct Settings {
     /// fetches. Point it at something a validator cannot reach and tokens are
     /// issued fine and then fail to validate, which is a confusing way round.
     pub public_base_url: String,
+    /// Credentials for the separate "push to GitHub" OAuth app (#40).
+    pub github_kit: GithubKitCredentials,
 }
 
 impl Settings {
@@ -288,6 +374,7 @@ impl Settings {
             xff_position: XffPosition::from_env(),
             cookie_same_site: CookieSameSite::from_env(cookie_secure),
             public_base_url,
+            github_kit: GithubKitCredentials::from_env(),
         }
     }
 }

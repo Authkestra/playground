@@ -98,6 +98,41 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 
 # --- support ---
+# GitHub API client for the "push generated project to GitHub" feature (#40):
+# create a repo and push a generated project via the Git Data API.
+#
+# Pinned to the 0.13 line, which is what `authkestra-engine` itself already
+# resolves to transitively (currently 0.13.4) — NOT the 0.12 line the
+# [dev-dependencies] entry below uses for the plaintext-only parity test.
+#
+# Renamed to `github_reqwest`: the test target links [dependencies] and
+# [dev-dependencies] into one crate, and two *different major versions* of a
+# crate both called plain `reqwest` there is `E0464: multiple candidates for
+# rlib dependency` — Cargo will not guess which one `use reqwest::...` means.
+# Renaming this one sidesteps it without touching the 0.12 dev-dependency,
+# which several existing integration tests already `use reqwest::` by that
+# name.
+#
+# `rustls` is reqwest 0.13's feature name for "TLS via rustls with the
+# aws-lc-rs provider" (its own Cargo.toml: `rustls = ["__rustls-aws-lc-rs",
+# "dep:rustls-platform-verifier", "__rustls"]`). It is already active in this
+# dependency graph — `authkestra-engine`'s own `rustls-aws-lc-rs` feature
+# (enabled above) turns it on for its reqwest dependency via feature
+# unification — so enabling it here activates no *second* TLS backend, it just
+# names the one already there. `default-features = false` keeps `default-tls`
+# (OpenSSL/native-tls) out, the same trap noted for `redis` and `jsonwebtoken`
+# above: two TLS/crypto backends in one crate panics at the first handshake.
+#
+# The 0.12 dev-dependency below MUST NOT gain a `rustls*` feature of its own:
+# reqwest 0.12's rustls integration only knows the `ring` provider, and
+# enabling it would put a second crypto provider on the one `rustls` in this
+# graph — precisely the boot-time panic `install_crypto_provider` and its
+# regression test in `store.rs` exist to prevent. It stays TLS-less, which is
+# safe only because it is used exclusively against `http://127.0.0.1`.
+github_reqwest = { package = "reqwest", version = "0.13", default-features = false, features = [
+    "json",
+    "rustls",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }

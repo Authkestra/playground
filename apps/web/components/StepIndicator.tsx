@@ -1,5 +1,7 @@
 "use client";
 
+import { cn } from "@/lib/cn";
+
 export interface WizardStep {
   id: 1 | 2 | 3;
   title: string;
@@ -34,13 +36,16 @@ export default function StepIndicator({ current, maxReached, onNavigate }: Props
                   type="button"
                   aria-current={isCurrent ? "step" : undefined}
                   onClick={() => onNavigate(step.id)}
-                  className="flex items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
                 >
                   <StepBadge id={step.id} isCurrent={isCurrent} isComplete={isComplete} />
                   <StepLabel title={step.title} isCurrent={isCurrent} />
                 </button>
               ) : (
-                <div aria-current={isCurrent ? "step" : undefined} className="flex items-center gap-2 px-1 py-1">
+                <div
+                  aria-current={isCurrent ? "step" : undefined}
+                  className="flex items-center gap-2.5 px-2 py-1.5"
+                >
                   <StepBadge id={step.id} isCurrent={isCurrent} isComplete={isComplete} />
                   <StepLabel title={step.title} isCurrent={isCurrent} />
                 </div>
@@ -48,9 +53,10 @@ export default function StepIndicator({ current, maxReached, onNavigate }: Props
               {i < WIZARD_STEPS.length - 1 && (
                 <div
                   aria-hidden="true"
-                  className={`hidden h-px flex-1 sm:block ${
-                    step.id < current ? "bg-slate-600" : "bg-slate-700"
-                  }`}
+                  className={cn(
+                    "hidden h-px flex-1 sm:block",
+                    step.id < current ? "bg-primary/60" : "bg-border",
+                  )}
                 />
               )}
             </li>
@@ -72,13 +78,14 @@ function StepBadge({
 }) {
   return (
     <span
-      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+      className={cn(
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors",
         isCurrent
-          ? "bg-slate-200 text-slate-900"
+          ? "bg-primary text-primary-foreground"
           : isComplete
-            ? "bg-slate-700 text-slate-200"
-            : "bg-slate-800 text-slate-400"
-      }`}
+            ? "bg-secondary text-secondary-foreground"
+            : "bg-muted text-muted-foreground",
+      )}
     >
       {isComplete ? "✓" : id}
     </span>
@@ -87,7 +94,7 @@ function StepBadge({
 
 function StepLabel({ title, isCurrent }: { title: string; isCurrent: boolean }) {
   return (
-    <span className={`text-sm ${isCurrent ? "font-semibold text-slate-100" : "text-slate-400"}`}>
+    <span className={cn("text-sm", isCurrent ? "font-semibold text-foreground" : "text-muted-foreground")}>
       {title}
     </span>
   );

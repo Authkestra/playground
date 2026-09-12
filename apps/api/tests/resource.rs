@@ -356,8 +356,9 @@ async fn a_token_whose_signature_was_altered_fails_on_the_signature() {
     let (signed_part, signature) = token.rsplit_once('.').expect("a signature");
     let mut chars = signature.chars();
     let first = chars.next().expect("a non-empty signature");
-    let altered: String =
-        std::iter::once(if first == 'A' { 'B' } else { 'A' }).chain(chars).collect();
+    let altered: String = std::iter::once(if first == 'A' { 'B' } else { 'A' })
+        .chain(chars)
+        .collect();
 
     let result = server
         .call("198.20.4.2", Some(&format!("{signed_part}.{altered}")))

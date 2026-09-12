@@ -25,14 +25,13 @@ describe("PROVIDER_SCRIPTS", () => {
 });
 
 describe("verdictStyle", () => {
-  it("styles a verified token as emerald", () => {
-    expect(verdictStyle(true)).toContain("emerald");
+  it("styles a verified token as success", () => {
+    expect(verdictStyle(true)).toContain("success");
   });
 
-  it("styles a not-verified token as amber, not red — a failed captcha is expected here", () => {
-    expect(verdictStyle(false)).toContain("amber");
-    expect(verdictStyle(false)).not.toContain("red");
-    expect(verdictStyle(false)).not.toContain("rose");
+  it("styles a not-verified token as warning, not destructive — a failed captcha is expected here", () => {
+    expect(verdictStyle(false)).toContain("warning");
+    expect(verdictStyle(false)).not.toContain("destructive");
   });
 });
 

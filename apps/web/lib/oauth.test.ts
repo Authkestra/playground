@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readOAuthReturn } from "./oauth";
+import { readGithubPushReturn, readOAuthReturn } from "./oauth";
 
 describe("readOAuthReturn", () => {
   describe("non-OAuth queries", () => {
@@ -175,5 +175,52 @@ describe("readOAuthReturn", () => {
       expect(readOAuthReturn("?oauth=pending&provider=google")).toBeNull();
       expect(readOAuthReturn("?oauth=&provider=google")).toBeNull();
     });
+  });
+});
+
+describe("readGithubPushReturn", () => {
+  it("returns null when there is no github_push parameter", () => {
+    expect(readGithubPushReturn("")).toBeNull();
+    expect(readGithubPushReturn("?foo=bar")).toBeNull();
+  });
+
+  it("returns connected with no other fields", () => {
+    expect(readGithubPushReturn("?github_push=connected")).toEqual({ status: "connected" });
+  });
+
+  it("returns denied with the reason GitHub reported", () => {
+    expect(readGithubPushReturn("?github_push=denied&reason=access_denied")).toEqual({
+      status: "denied",
+      reason: "access_denied",
+    });
+  });
+
+  it("returns denied with a null reason when none is present", () => {
+    expect(readGithubPushReturn("?github_push=denied")).toEqual({
+      status: "denied",
+      reason: null,
+    });
+  });
+
+  it("returns error with its reason code", () => {
+    expect(readGithubPushReturn("?github_push=error&reason=token_rejected")).toEqual({
+      status: "error",
+      reason: "token_rejected",
+    });
+  });
+
+  it("returns error with a null reason when none is present", () => {
+    expect(readGithubPushReturn("?github_push=error")).toEqual({
+      status: "error",
+      reason: null,
+    });
+  });
+
+  it("returns null for an unrecognised outcome", () => {
+    expect(readGithubPushReturn("?github_push=pending")).toBeNull();
+  });
+
+  it("requires an exact case match", () => {
+    expect(readGithubPushReturn("?github_push=Connected")).toBeNull();
   });
 });

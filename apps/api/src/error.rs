@@ -34,6 +34,27 @@ pub enum ApiError {
     /// The starter kit could not be packed. Always a bug here, never the
     /// visitor's doing.
     ArchiveFailed(String),
+    /// This deployment has no `GITHUB_KIT_CLIENT_ID`/`SECRET` configured, so
+    /// pushing to GitHub cannot be offered at all (#40).
+    GithubPushNotConfigured,
+    /// The visitor tried to push before connecting a GitHub account, or their
+    /// connection's short TTL ran out first.
+    GithubNotConnected,
+    /// GitHub rejected the repository name because one like it already
+    /// exists on the connected account.
+    GithubRepoNameTaken,
+    /// The repository name is not one GitHub will accept.
+    GithubInvalidRepoName(String),
+    /// The connected token is dead — expired, revoked, or never valid.
+    GithubTokenRejected,
+    /// The connected token lacks the scope a step needed.
+    GithubScopeMissing,
+    /// GitHub's own rate limit was hit.
+    GithubRateLimited,
+    /// The request never reached GitHub, or its response never reached us.
+    GithubNetworkError(String),
+    /// GitHub refused the request for a reason not covered above.
+    GithubPushFailed(String),
 }
 
 impl ApiError {
@@ -90,6 +111,76 @@ impl ApiError {
                 "state_unavailable",
                 format!("The playground's state store is unreachable: {detail}"),
             ),
+            ApiError::GithubPushNotConfigured => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "github_push_not_configured",
+                "Pushing to GitHub is not configured on this deployment yet.".to_string(),
+            ),
+            ApiError::GithubNotConnected => (
+                StatusCode::BAD_REQUEST,
+                "github_not_connected",
+                "Connect a GitHub account first: GET /api/github/connect.".to_string(),
+            ),
+            ApiError::GithubRepoNameTaken => (
+                StatusCode::CONFLICT,
+                "github_repo_name_taken",
+                "A repository with that name already exists on your GitHub account. Choose a \
+                 different name."
+                    .to_string(),
+            ),
+            ApiError::GithubInvalidRepoName(detail) => (
+                StatusCode::BAD_REQUEST,
+                "github_invalid_repo_name",
+                format!(
+                    "`{detail}` is not a repository name GitHub will accept. Use letters, \
+                     digits, hyphens, underscores and periods only."
+                ),
+            ),
+            ApiError::GithubTokenRejected => (
+                StatusCode::UNAUTHORIZED,
+                "github_token_rejected",
+                "Your GitHub connection has expired or was revoked. Connect again.".to_string(),
+            ),
+            ApiError::GithubScopeMissing => (
+                StatusCode::FORBIDDEN,
+                "github_scope_missing",
+                "The connected GitHub token does not carry the `public_repo` scope this needs."
+                    .to_string(),
+            ),
+            ApiError::GithubRateLimited => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "github_rate_limited",
+                "GitHub's own rate limit was hit. Wait a few minutes and try again.".to_string(),
+            ),
+            ApiError::GithubNetworkError(detail) => (
+                StatusCode::BAD_GATEWAY,
+                "github_network_error",
+                format!("Could not reach GitHub: {detail}"),
+            ),
+            ApiError::GithubPushFailed(detail) => (
+                StatusCode::BAD_GATEWAY,
+                "github_push_failed",
+                format!("GitHub rejected the request: {detail}"),
+            ),
+        }
+    }
+}
+
+impl From<crate::github_api::GitHubApiError> for ApiError {
+    /// Each of `GitHubApiError`'s variants keeps its own identity rather than
+    /// collapsing into one generic failure — a repo-name clash, a dead token
+    /// and a rate limit each have an unrelated fix, and a visitor can only act
+    /// on the one that actually happened.
+    fn from(e: crate::github_api::GitHubApiError) -> Self {
+        use crate::github_api::GitHubApiError as E;
+        match e {
+            E::RepoNameTaken => ApiError::GithubRepoNameTaken,
+            E::InvalidRepoName(detail) => ApiError::GithubInvalidRepoName(detail),
+            E::TokenRejected => ApiError::GithubTokenRejected,
+            E::ScopeMissing => ApiError::GithubScopeMissing,
+            E::RateLimited => ApiError::GithubRateLimited,
+            E::Network(detail) => ApiError::GithubNetworkError(detail),
+            E::Other(detail) => ApiError::GithubPushFailed(detail),
         }
     }
 }
