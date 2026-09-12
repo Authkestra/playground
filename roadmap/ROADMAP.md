@@ -10,11 +10,11 @@
 | `P1` | Playground core | 7 | The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows. |
 | `P2` | Scenarios | 8 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
-| `P4` | Downloadable starter kit | 10 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
+| `P4` | Downloadable starter kit | 12 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
-| `P6` | Post-launch / wizard path | 7 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
+| `P6` | Post-launch / wizard path | 6 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**52 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**53 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -816,6 +816,41 @@ Originally scoped as a gate: prove you starred `marcjazz/authkestra` before down
 ### Acceptance
 The download works for everyone; the ask is visible and honest.
 
+#### Emit deploy-to-cloud manifests in the generated project
+
+`area:starter-kit` `type:feature`
+
+The generated project compiles and runs locally, and then stops. Getting it onto a host is left entirely to the visitor, which is the widest gap between "I downloaded it" and "it is serving traffic".
+
+Manifests are driven by the same `Plan` that writes `.env.example`, so the env vars a host is told to set are the ones the code actually reads rather than a list that drifts.
+
+### Tasks
+- [ ] `Dockerfile` + `.dockerignore`, emitted by default — useful on every host and costs nothing
+- [ ] `render.yaml`, `fly.toml` and `railway.json` as opt-ins
+- [ ] Secrets declared as required-but-unset on every host; the archive must never carry a filled-in secret
+- [ ] The port a manifest exposes matches what the generated `main.rs` actually binds
+- [ ] README section with real next steps per host, and deploy buttons only where the host genuinely supports deploy-from-repo
+
+### Acceptance
+A generated project with a host selected deploys from its manifest without hand-editing anything but the secrets.
+
+#### Push the generated project to the visitor's GitHub repo
+
+`area:starter-kit` `type:feature`
+
+A zip is fine; "create this as a repo in my account" is the v0-style magic moment. It is also what makes the deploy-to-cloud manifests useful: every one-click deploy button a host offers takes a repository URL, so without a repo the buttons have nothing to point at.
+
+### Tasks
+- [ ] Decide GitHub App vs OAuth app and the minimum scope, and record it as an ADR
+- [ ] A separate OAuth app from the sign-in scenario, so the identity demo is never the thing asking for write access to someone's repositories
+- [ ] Push as a single commit via the Git Data API, not a commit per file
+- [ ] Handle failure modes distinctly (name collisions, revoked access, missing scope, rate limits) — a generic 500 for any of these is a bug
+- [ ] Token stays server-side, session-scoped, short-lived, and never logged
+- [ ] Keep the zip path as the no-auth fallback
+
+### Acceptance
+A visitor with a GitHub account gets a public repo holding the same project the zip would have given them, in one commit; a visitor without one still gets the zip.
+
 ---
 
 ## P5 — Launch hardening
@@ -943,17 +978,6 @@ Offering "pick your data layer" in the generator is a strong DX story, but it mu
 ### Tasks
 - [ ] Evaluate the maintenance cost of three store paths in the matrix
 - [ ] Decide whether these become generator options or documentation only
-
-#### Backlog: push generated project to the visitor's GitHub repo
-
-`area:starter-kit` `type:feature`
-
-A zip is fine; "create this as a repo in my account" is the v0-style magic moment. Needs a GitHub App/OAuth scope, and careful thought about what permissions people will tolerate granting a demo site.
-
-### Tasks
-- [ ] Decide GitHub App vs OAuth app and the minimum scope
-- [ ] Handle failure modes (name collisions, revoked access, rate limits)
-- [ ] Keep the zip path as the no-auth fallback
 
 #### Backlog: ephemeral live-preview container per generated config
 
