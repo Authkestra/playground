@@ -327,7 +327,16 @@ export default function Playground() {
 
   return (
     <Shell wide>
-      <div aria-live="polite" className="min-h-10">
+      {/*
+        `empty:hidden`, not a reserved `min-h`: the region has to stay in the
+        DOM for a screen reader to announce a banner that appears later, but
+        reserving height for a banner that is usually absent left a permanent
+        gap under the header — and because it is a flex child, an empty box
+        also collects the column's `gap-8` on both sides, so the hole was the
+        reserved height plus two gaps rather than the 40px it looked like.
+        Collapsing it when empty removes it from the layout entirely.
+      */}
+      <div aria-live="polite" className="empty:hidden">
         {banner && (
           <Alert className="border-warning/40 bg-warning/10 text-warning-foreground [&>svg]:text-warning-foreground">
             <AlertDescription>{banner}</AlertDescription>
