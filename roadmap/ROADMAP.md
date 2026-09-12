@@ -825,11 +825,11 @@ The generated project compiles and runs locally, and then stops. Getting it onto
 Manifests are driven by the same `Plan` that writes `.env.example`, so the env vars a host is told to set are the ones the code actually reads rather than a list that drifts.
 
 ### Tasks
-- [ ] `Dockerfile` + `.dockerignore`, emitted by default — useful on every host and costs nothing
-- [ ] `render.yaml`, `fly.toml` and `railway.json` as opt-ins
-- [ ] Secrets declared as required-but-unset on every host; the archive must never carry a filled-in secret
-- [ ] The port a manifest exposes matches what the generated `main.rs` actually binds
-- [ ] README section with real next steps per host, and deploy buttons only where the host genuinely supports deploy-from-repo
+- [x] `Dockerfile` + `.dockerignore`, emitted by default — useful on every host and costs nothing
+- [x] `render.yaml`, `fly.toml` and `railway.json` as opt-ins
+- [x] Secrets declared as required-but-unset on every host; the archive must never carry a filled-in secret
+- [x] The port a manifest exposes matches what the generated `main.rs` actually binds
+- [x] README section with real next steps per host, and deploy buttons only where the host genuinely supports deploy-from-repo
 
 ### Acceptance
 A generated project with a host selected deploys from its manifest without hand-editing anything but the secrets.
