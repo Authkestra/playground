@@ -271,11 +271,92 @@ jobs:
           PARITY_TARGET: http://127.0.0.1:8300
         run: cargo test -p api --test parity -- --ignored
 
+  # Does the *deployment* half of what visitors download actually work?
+  #
+  # `cargo check` cannot answer this. A Dockerfile that does not build, or a
+  # render.yaml that Render rejects, fails at the moment someone is trying to
+  # put their project online — the point at which they are least willing to
+  # debug someone else's template. So this builds the image for real and runs
+  # it, rather than asserting on the text of the file.
+  #
+  # One combination, not the matrix: the manifests vary with the *env vars* a
+  # configuration needs, not with which scenarios are on, and passkeys+OAuth
+  # exercises both a host-bound variable and a secret. Building fourteen
+  # identical images would buy nothing.
+  deploy-manifests:
+    name: Generated deployment manifests work
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: generate-kit
+      - run: chmod +x ./generate-kit
+
+      - name: Generate a project with every manifest
+        run: ./generate-kit --spec "passkeys,oauth=github" --deploy docker,render,fly,railway --out generated
+
+      # A default that is right locally is not automatically right on a host.
+      # `WEBAUTHN_ORIGIN` defaults to http://localhost:3000 for `cargo run`,
+      # and a manifest that copies it deploys a service whose passkey flow
+      # cannot succeed while looking configured. The generator has unit tests
+      # for this; this asserts it on the bytes actually shipped.
+      - name: No manifest carries a localhost value
+        working-directory: generated
+        run: |
+          for f in render.yaml fly.toml railway.json; do
+            # Comments are stripped first: fly.toml legitimately *names* these
+            # variables in a commented block telling you to fill them in once
+            # the hostname exists. It is an assigned value that is the bug.
+            if grep -v '^[[:space:]]*#' "$f" | grep -q 'localhost'; then
+              echo "::error file=$f::a deployment manifest must not carry a localhost value"
+              grep -n 'localhost' "$f"
+              exit 1
+            fi
+          done
+          echo "OK"
+
+      - name: The manifests are well-formed
+        working-directory: generated
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 -c "import json; json.load(open('railway.json')); print('railway.json OK')"
+          python3 -c "import tomllib; tomllib.load(open('fly.toml','rb')); print('fly.toml OK')"
+          python3 -c "import yaml; d=yaml.safe_load(open('render.yaml')); assert d['services'][0]['runtime']=='docker', d; print('render.yaml OK')"
+
+      - name: Build the image the manifests point at
+        working-directory: generated
+        run: docker build -t authkestra-starter-ci .
+
+      # Building proves it compiles; running proves the image is actually
+      # usable — the binary is where the Dockerfile said, the non-root user
+      # can execute it, and the port it exposes is the port it binds.
+      - name: Run it and wait for health
+        run: |
+          docker run -d --name starter -p 8400:3000 \
+            -e WEBAUTHN_ORIGIN=http://localhost:8400 \
+            -e WEBAUTHN_RP_ID=localhost \
+            -e OAUTH_REDIRECT_BASE=http://localhost:8400 \
+            -e GITHUB_CLIENT_ID=unused -e GITHUB_CLIENT_SECRET=unused \
+            authkestra-starter-ci
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8400/health >/dev/null && { echo "healthy"; exit 0; }
+            sleep 2
+          done
+          echo "::error::the container never became healthy"
+          docker logs starter
+          exit 1
+
+      - name: Container logs
+        if: always()
+        run: docker logs starter || true
+
   # A single check to make required, so branch protection does not need
   # updating every time the matrix changes shape.
   result:
     name: Generated projects build
-    needs: [build, parity]
+    needs: [build, parity, deploy-manifests]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -288,5 +369,9 @@ jobs:
           case "${{ needs.parity.result }}" in
             success|skipped) ;;
             *) echo "The generated project does not behave like the playground."; exit 1 ;;
+          esac
+          case "${{ needs.deploy-manifests.result }}" in
+            success|skipped) ;;
+            *) echo "The generated deployment manifests do not work."; exit 1 ;;
           esac
           echo "OK"
