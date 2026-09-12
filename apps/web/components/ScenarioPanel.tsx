@@ -102,6 +102,8 @@ export default function ScenarioPanel({
             unmetDeps.length === 0 &&
             isSatisfied(config, scenario.id);
 
+          const inlineControl = scenario.control.kind === "toggle";
+
           const disabledExplanation = !controlDisabled
             ? undefined
             : isPending
@@ -161,7 +163,31 @@ export default function ScenarioPanel({
                     </p>
                   )}
                 </div>
-                <div className="shrink-0">
+                {/*
+                  Only a toggle rides on the header row. A `select_one` or
+                  `select_many` is a stack of three or four options — OAuth's
+                  provider list, the captcha vendors — and putting that in the
+                  right-hand column squeezes it into a narrow strip beside the
+                  description while the header grows to match its height. Those
+                  belong in the body, at full width.
+                */}
+                {inlineControl && (
+                  <div className="shrink-0 pt-0.5">
+                    <ScenarioControl
+                      scenario={scenario}
+                      value={value}
+                      disabled={controlDisabled}
+                      describedBy={
+                        disabledExplanation ? `${scenario.id}-disabled-reason` : undefined
+                      }
+                      onChange={(next) => onChange(scenario.id, next)}
+                    />
+                  </div>
+                )}
+              </CardHeader>
+
+              {!inlineControl && (
+                <CardContent className="pt-0">
                   <ScenarioControl
                     scenario={scenario}
                     value={value}
@@ -171,8 +197,8 @@ export default function ScenarioPanel({
                     }
                     onChange={(next) => onChange(scenario.id, next)}
                   />
-                </div>
-              </CardHeader>
+                </CardContent>
+              )}
 
               {showActionPanel && ActionPanel && (
                 <CardContent className="pt-0">
@@ -229,6 +255,9 @@ function ScenarioControl({
         value={selected ?? undefined}
         onValueChange={(next) => onChange({ kind: "select_one", selected: next })}
         disabled={disabled}
+        aria-label={scenario.name}
+        aria-describedby={describedBy}
+        className="gap-2"
       >
         {control.options.map((option) => {
           const id = `${scenario.id}-${option.id}`;
@@ -251,7 +280,12 @@ function ScenarioControl({
     return <EmptyControlNote scenario={scenario} />;
   }
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      role="group"
+      aria-label={scenario.name}
+      aria-describedby={describedBy}
+      className="flex flex-col gap-2"
+    >
       {control.options.map((option) => {
         const checked = selected.includes(option.id);
         const id = `${scenario.id}-${option.id}`;
