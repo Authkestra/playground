@@ -4,6 +4,8 @@ import type {
   ConfigureResponse,
   DemoSessionView,
   FlowEvent,
+  GitHubPushRequest,
+  GitHubPushResponse,
   HealthResponse,
   ScenarioSpec,
 } from "@playground/api-types";
@@ -16,11 +18,35 @@ export type ApiError =
   | { kind: "demo_disabled" } // 503 { error: "demo_disabled" }
   | { kind: "state_unavailable"; detail: string } // 503 { error: "state_unavailable" }
   | { kind: "rate_limited"; detail: string } // 429 { error: "rate_limited", detail }
-  | { kind: "http_error"; status: number; detail: string };
+  | { kind: "http_error"; status: number; detail: string }
+  // The rest are `POST /api/github/push` (and its connect/callback pair)'s
+  // own error vocabulary (#40). Each is its own kind rather than folding into
+  // `http_error` because each has an unrelated fix, and a visitor can only
+  // act on the one that actually happened — see docs on `error.rs`.
+  | { kind: "github_push_not_configured" } // 503 { error: "github_push_not_configured" }
+  | { kind: "github_not_connected" } // 400 { error: "github_not_connected" }
+  | { kind: "github_repo_name_taken" } // 409 { error: "github_repo_name_taken" }
+  | { kind: "github_invalid_repo_name"; detail: string } // 400 { error: "github_invalid_repo_name", detail }
+  | { kind: "github_token_rejected" } // 401 { error: "github_token_rejected" }
+  | { kind: "github_scope_missing" } // 403 { error: "github_scope_missing" }
+  | { kind: "github_rate_limited"; detail: string } // 429 { error: "github_rate_limited", detail }
+  | { kind: "github_network_error"; detail: string }; // 502 { error: "github_network_error", detail }
 
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: ApiError };
+
+/**
+ * The human-readable text an `ApiError` carries, when it carries one at all.
+ * Several kinds — `demo_disabled`, `github_token_rejected`, and the like —
+ * are self-explanatory from their `kind` alone and were never given one.
+ * Callers that render one generic line for "whatever wasn't specifically
+ * handled" (most `default:` branches across this frontend) use this rather
+ * than reading `.detail` directly, since not every kind has it.
+ */
+export function errorDetail(error: ApiError): string {
+  return "detail" in error ? error.detail : "Request failed";
+}
 
 async function request<T>(
   path: string,
@@ -66,47 +92,85 @@ async function safeJson(res: Response): Promise<any | null> {
 }
 
 /**
- * Handle non-ok HTTP responses: check status codes and parse response bodies
- * to produce an ApiError. This factors out the shared 503/429/!ok logic that
- * would otherwise be duplicated across request handlers.
+ * Turn a parsed error body (plus the status/statusText it arrived with) into
+ * an `ApiError`. Pure and exported so the mapping from the backend's
+ * per-feature error codes onto actionable `ApiError` kinds can be unit
+ * tested without mocking a `fetch` `Response`.
+ *
+ * Read by `error` code first, regardless of status, because several kinds —
+ * `github_push_not_configured` at 503, `github_rate_limited` at 429 — would
+ * otherwise collide with the generic status-only handling below. Falls back
+ * to a generic `http_error` for anything this vocabulary doesn't name, which
+ * is also what keeps an old frontend talking to a newer backend working
+ * rather than throwing on an error code it doesn't recognise yet.
+ */
+export function errorFromBody(status: number, statusText: string, body: unknown): ApiError {
+  const record = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const code = typeof record.error === "string" ? record.error : "";
+  const detail = typeof record.detail === "string" ? record.detail : undefined;
+
+  switch (code) {
+    case "state_unavailable":
+      return {
+        kind: "state_unavailable",
+        detail: detail ?? "The playground's state store is unreachable. This is temporary.",
+      };
+    case "demo_disabled":
+      return { kind: "demo_disabled" };
+    case "rate_limited":
+      return {
+        kind: "rate_limited",
+        detail: detail ?? "You're sending requests a bit too fast. Please slow down and try again shortly.",
+      };
+    case "github_push_not_configured":
+      return { kind: "github_push_not_configured" };
+    case "github_not_connected":
+      return { kind: "github_not_connected" };
+    case "github_repo_name_taken":
+      return { kind: "github_repo_name_taken" };
+    case "github_invalid_repo_name":
+      return {
+        kind: "github_invalid_repo_name",
+        detail: detail ?? "That repository name is not one GitHub will accept.",
+      };
+    case "github_token_rejected":
+      return { kind: "github_token_rejected" };
+    case "github_scope_missing":
+      return { kind: "github_scope_missing" };
+    case "github_rate_limited":
+      return {
+        kind: "github_rate_limited",
+        detail: detail ?? "GitHub's own rate limit was hit. Wait a few minutes and try again.",
+      };
+    case "github_network_error":
+      return { kind: "github_network_error", detail: detail ?? "Could not reach GitHub." };
+    default:
+    // Falls through to the status-based and generic handling below.
+  }
+
+  // A 429 with no recognised `error` code is still a rate limit.
+  if (status === 429) {
+    return {
+      kind: "rate_limited",
+      detail: detail ?? "You're sending requests a bit too fast. Please slow down and try again shortly.",
+    };
+  }
+
+  // Every other HTTP error (4xx, 5xx) this vocabulary has no name for.
+  return {
+    kind: "http_error",
+    status,
+    detail: detail || code || statusText || "Request failed",
+  };
+}
+
+/**
+ * Handle non-ok HTTP responses: parse the body and hand it to `errorFromBody`
+ * along with the status this response actually arrived with.
  */
 async function handleErrorResponse(res: Response): Promise<ApiError> {
   const body = await safeJson(res);
-
-  // 503 can mean two different things: the demo is switched off, or the state
-  // backend is unreachable. Read the error field to discriminate.
-  if (res.status === 503) {
-    const error = typeof body?.error === "string" ? body.error : "";
-    if (error === "state_unavailable") {
-      const detail =
-        typeof body?.detail === "string"
-          ? body.detail
-          : "The playground's state store is unreachable. This is temporary.";
-      return { kind: "state_unavailable", detail };
-    }
-    if (error === "demo_disabled") {
-      return { kind: "demo_disabled" };
-    }
-    // Unrecognized 503 (neither demo_disabled nor state_unavailable) falls
-    // through to be treated as a generic http_error.
-  }
-
-  // 429: rate limited.
-  if (res.status === 429) {
-    const detail =
-      typeof body?.detail === "string"
-        ? body.detail
-        : "You're sending requests a bit too fast. Please slow down and try again shortly.";
-    return { kind: "rate_limited", detail };
-  }
-
-  // Other HTTP errors (4xx, 5xx).
-  const detail =
-    (typeof body?.detail === "string" && body.detail) ||
-    (typeof body?.error === "string" && body.error) ||
-    res.statusText ||
-    "Request failed";
-  return { kind: "http_error", status: res.status, detail };
+  return errorFromBody(res.status, res.statusText, body);
 }
 
 export function getHealth(): Promise<ApiResult<HealthResponse>> {
@@ -170,6 +234,33 @@ export type StarterKitDownload = { blob: Blob; filename: string };
 
 const FALLBACK_FILENAME = "authkestra-starter.zip";
 
+/** The deployment manifests `GET /api/starter-kit`'s `deploy` parameter names. */
+export type DeployTarget = "docker" | "render" | "fly" | "railway";
+
+const DEPLOY_TARGETS: readonly DeployTarget[] = ["docker", "render", "fly", "railway"];
+
+/**
+ * Which manifests a visitor picked. Every field is independent — "Docker and
+ * Render" is one visitor's choice, not a reason to imply the other two.
+ */
+export type DeploySelection = Partial<Record<DeployTarget, boolean>>;
+
+/**
+ * Serialise a deploy-target selection into the `deploy` query value
+ * `GET /api/starter-kit` reads.
+ *
+ * `undefined` means the visitor never touched the control at all, so the
+ * parameter is omitted and the server's own default (Docker only) applies.
+ * A defined selection is sent even when it selects nothing, because
+ * "nothing" is a real, distinct choice — someone who deploys by hand and
+ * wants no manifests — and the server can only tell the two apart if the
+ * parameter arrives present-but-empty (`deploy=`) rather than absent.
+ */
+export function serializeDeployTargets(selection: DeploySelection | undefined): string | undefined {
+  if (selection === undefined) return undefined;
+  return DEPLOY_TARGETS.filter((target) => selection[target]).join(",");
+}
+
 /**
  * What the visitor asked of the download itself, as opposed to of the auth.
  * Independent flags: someone may want the spec and no TypeScript, or the
@@ -178,6 +269,8 @@ const FALLBACK_FILENAME = "authkestra-starter.zip";
 export interface StarterKitOptions {
   openapi: boolean;
   tsClient: boolean;
+  /** See `serializeDeployTargets` for the absent-vs-empty distinction. */
+  deploy?: DeploySelection;
 }
 
 export async function downloadStarterKit(
@@ -186,6 +279,8 @@ export async function downloadStarterKit(
   const query = new URLSearchParams();
   if (options.openapi) query.set("openapi", "1");
   if (options.tsClient) query.set("client", "1");
+  const deployParam = serializeDeployTargets(options.deploy);
+  if (deployParam !== undefined) query.set("deploy", deployParam);
   const suffix = query.size > 0 ? `?${query}` : "";
 
   let res: Response;
@@ -219,4 +314,30 @@ function filenameFrom(res: Response): string {
   // The server asserts its names need no quoting or escaping. Anything else
   // did not come from it, and is not worth handing to a file save.
   return /^[A-Za-z0-9._-]+$/.test(name) ? name : FALLBACK_FILENAME;
+}
+
+/**
+ * `/api/github/connect` is a navigation, not a fetch — the browser has to
+ * actually leave for GitHub's consent screen and come back through
+ * `/api/github/callback` (#40). Callers set `window.location.href` to this
+ * rather than calling `fetch`, the same shape `loginUrl` in `lib/oauth.ts`
+ * uses for the sign-in scenario's own, unrelated OAuth app.
+ */
+export function githubConnectUrl(): string {
+  return `${API_BASE}/api/github/connect`;
+}
+
+/**
+ * Push the visitor's current configuration to a new repository on the
+ * connected GitHub account. The connected token is single-use — the backend
+ * clears it after this call regardless of whether it succeeds, except when
+ * the request is rejected before the token is ever loaded (an invalid repo
+ * name, or the feature not being configured at all) — so a caller should
+ * treat every other outcome, success included, as ending the connection.
+ */
+export function pushToGithub(body: GitHubPushRequest): Promise<ApiResult<GitHubPushResponse>> {
+  return request<GitHubPushResponse>("/api/github/push", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }

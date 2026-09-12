@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { CheckCircle2, Circle, Loader2 } from "lucide-react";
 import type { TotpProvision, TotpVerification } from "@playground/api-types";
-import { scenarioAction } from "@/lib/api";
+import { errorDetail, scenarioAction } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,7 +81,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
           setBanner(result.error.detail);
           return;
         default:
-          setBanner(`Could not set up the authenticator: ${result.error.detail}`);
+          setBanner(`Could not set up the authenticator: ${errorDetail(result.error)}`);
           return;
       }
     }
@@ -111,7 +111,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
           setBanner(result.error.detail);
           return;
         default:
-          setBanner(`Could not verify the code: ${result.error.detail}`);
+          setBanner(`Could not verify the code: ${errorDetail(result.error)}`);
           return;
       }
     }

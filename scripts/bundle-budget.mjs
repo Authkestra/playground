@@ -67,11 +67,26 @@ const NEXT = join(APP, ".next");
  * `lucide-react` adds nothing measurable; Next already rewrites its barrel
  * imports to deep paths.
  *
- * The number stays deliberately close to actual (134.8 kB at the time of
+ * ## And why it then went 136 -> 138
+ *
+ * The second delivery path: pushing a generated project straight to a GitHub
+ * repository instead of downloading a zip, plus the deploy-target picker that
+ * chooses which manifests come with it. That is a connect/authorise/name/push
+ * flow and seven distinct error states, each with its own message, because the
+ * API deliberately distinguishes a taken repo name from a dead token from a
+ * missing scope and flattening them back into "something went wrong" in the UI
+ * would waste the whole point.
+ *
+ * It measured 136.8 kB — 0.8 over — and the alternative was stripping
+ * decorative icons to buy the difference. Two kilobytes for a second way to
+ * get your project out of the playground is a better trade than a page that
+ * fits by being slightly worse to look at.
+ *
+ * The number stays deliberately close to actual (136.8 kB at the time of
  * writing). If a future change needs more, it needs a paragraph here too.
  */
 const BUDGETS_KB = {
-  "/page": 136,
+  "/page": 138,
   "/_not-found/page": 92,
 };
 

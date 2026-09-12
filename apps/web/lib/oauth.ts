@@ -57,3 +57,44 @@ export function clearOAuthReturnParams(): void {
   url.searchParams.delete("mode");
   window.history.replaceState(null, "", url.pathname + url.search + url.hash);
 }
+
+/**
+ * Outcome `GET /api/github/callback` hands back on the frontend's URL after
+ * the push-to-GitHub connect round trip (#40). A separate shape from
+ * `OAuthReturn` above rather than a reuse of it: this is a different OAuth
+ * app, with its own query vocabulary (`github_push=...` rather than
+ * `oauth=...`) and no `mode` at all.
+ */
+export type GithubPushReturn =
+  | { status: "connected" }
+  | { status: "denied"; reason: string | null }
+  | { status: "error"; reason: string | null };
+
+/**
+ * Reads the outcome of a completed GitHub-push connect round trip from the
+ * current URL's query string, if present. Returns null when this load isn't
+ * a return from that flow at all (the common case).
+ */
+export function readGithubPushReturn(search: string): GithubPushReturn | null {
+  const params = new URLSearchParams(search);
+  const outcome = params.get("github_push");
+  if (!outcome) return null;
+
+  if (outcome === "connected") return { status: "connected" };
+  if (outcome === "denied") return { status: "denied", reason: params.get("reason") };
+  if (outcome === "error") return { status: "error", reason: params.get("reason") };
+  return null;
+}
+
+/**
+ * Strips the `github_push`/`reason` query params from the current URL
+ * without a navigation, so reloading or sharing the link doesn't replay the
+ * same result.
+ */
+export function clearGithubPushReturnParams(): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("github_push");
+  url.searchParams.delete("reason");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+}

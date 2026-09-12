@@ -13,12 +13,20 @@ import type {
 import {
   API_BASE,
   configureScenario,
+  errorDetail,
   getHealth,
   getScenarios,
   getSession,
   resetSession,
 } from "@/lib/api";
-import { clearOAuthReturnParams, readOAuthReturn, type OAuthReturn } from "@/lib/oauth";
+import {
+  clearGithubPushReturnParams,
+  clearOAuthReturnParams,
+  readGithubPushReturn,
+  readOAuthReturn,
+  type GithubPushReturn,
+  type OAuthReturn,
+} from "@/lib/oauth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -49,6 +57,7 @@ export default function Playground() {
   const [step, setStep] = useState<Step>(1);
   const [maxReached, setMaxReached] = useState<Step>(1);
   const [oauthReturn, setOauthReturn] = useState<OAuthReturn | null>(null);
+  const [githubPushReturn, setGithubPushReturn] = useState<GithubPushReturn | null>(null);
 
   // Focus moves into the step that just appeared.
   //
@@ -108,7 +117,7 @@ export default function Playground() {
           setPhase("unavailable");
           break;
         default:
-          setBanner(`Could not load scenarios (${scenariosResult.error.detail}).`);
+          setBanner(`Could not load scenarios (${errorDetail(scenariosResult.error)}).`);
           setPhase("unavailable");
       }
       return;
@@ -128,7 +137,7 @@ export default function Playground() {
           setPhase("unavailable");
           break;
         default:
-          setBanner(`Could not load session (${sessionResult.error.detail}).`);
+          setBanner(`Could not load session (${errorDetail(sessionResult.error)}).`);
           setPhase("unavailable");
       }
       return;
@@ -147,6 +156,15 @@ export default function Playground() {
       setOauthReturn(parsedOauthReturn);
       clearOAuthReturnParams();
       goToStep(2);
+    }
+
+    // Same idea for the push-to-GitHub connect round trip (#40), which lands
+    // back on step 3 rather than step 2 — that's where the GitHub card lives.
+    const parsedGithubPushReturn = readGithubPushReturn(window.location.search);
+    if (parsedGithubPushReturn) {
+      setGithubPushReturn(parsedGithubPushReturn);
+      clearGithubPushReturnParams();
+      goToStep(3);
     }
   }, [goToStep]);
 
@@ -182,6 +200,7 @@ export default function Playground() {
     setDiff(null);
     setDiffScenarioName(null);
     setOauthReturn(null);
+    setGithubPushReturn(null);
     setStep(1);
     setMaxReached(1);
   }, []);
@@ -225,7 +244,7 @@ export default function Playground() {
             setBanner(result.error.detail);
             break;
           default:
-            setBanner(`Could not update "${id}": ${result.error.detail}`);
+            setBanner(`Could not update "${id}": ${errorDetail(result.error)}`);
         }
         return;
       }
@@ -359,6 +378,8 @@ export default function Playground() {
             config={config}
             onDemoDisabled={() => setPhase("explainer")}
             onBack={() => goToStep(2)}
+            githubPushReturn={githubPushReturn}
+            onDismissGithubPushReturn={() => setGithubPushReturn(null)}
           />
         )}
       </div>

@@ -1,28 +1,18 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Fingerprint,
-  Globe,
-  LogIn,
-  ShieldQuestion,
-  Smartphone,
-  XCircle,
-  type LucideIcon,
-} from "lucide-react";
+import { Fingerprint, Globe, LogIn, ShieldQuestion, Smartphone, type LucideIcon } from "lucide-react";
 import type { DemoConfig, OAuthMode, ScenarioSpec } from "@playground/api-types";
 import { loginUrl, type OAuthReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
+import { OutcomeBanner } from "@/components/OutcomeBanner";
 import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 import ResourcePanel from "@/components/ResourcePanel";
 import CaptchaPanel from "@/components/CaptchaPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -296,29 +286,6 @@ function describeOauthErrorReason(reason: string): string {
   }
 }
 
-const ALERT_STYLE: Record<
-  OAuthReturn["status"],
-  { variant: "default" | "destructive"; className: string; Icon: LucideIcon }
-> = {
-  success: {
-    variant: "default",
-    className: "border-success/40 bg-success/10 text-success-foreground [&>svg]:text-success-foreground",
-    Icon: CheckCircle2,
-  },
-  // Cancelling at the provider is an ordinary outcome — calm warning tone, not
-  // an error.
-  denied: {
-    variant: "default",
-    className: "border-warning/40 bg-warning/10 text-warning-foreground [&>svg]:text-warning-foreground",
-    Icon: AlertTriangle,
-  },
-  error: {
-    variant: "destructive",
-    className: "bg-destructive/10",
-    Icon: XCircle,
-  },
-};
-
 function OAuthReturnBanner({
   result,
   onDismiss,
@@ -343,35 +310,6 @@ function OAuthReturnBanner({
     }.`;
   }
 
-  // The visitor left for the provider and came back. The browser drops focus
-  // at the top of a freshly loaded document, so without moving it the outcome
-  // of the thing they just did is somewhere below, unannounced — and for a
-  // screen-reader user, the round trip appears to have done nothing.
-  //
-  // `role="status"` announces it; the ref focuses it, so keyboard users
-  // continue from the result rather than tabbing back to it.
-  const bannerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    bannerRef.current?.focus();
-  }, []);
-
-  const { variant, className, Icon } = ALERT_STYLE[result.status];
-
-  return (
-    <Alert ref={bannerRef} tabIndex={-1} role="status" variant={variant} className={className}>
-      <Icon className="h-4 w-4" aria-hidden />
-      <AlertDescription className="flex items-start justify-between gap-3">
-        <p>{message}</p>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-auto shrink-0 px-2 py-1 text-xs underline underline-offset-2"
-          onClick={onDismiss}
-        >
-          Dismiss
-        </Button>
-      </AlertDescription>
-    </Alert>
-  );
+  const tone = result.status === "success" ? "success" : result.status === "denied" ? "warning" : "error";
+  return <OutcomeBanner tone={tone} message={message} onDismiss={onDismiss} />;
 }
