@@ -260,7 +260,7 @@ impl Scenario for OAuthScenario {
 
         let mut imports = vec!["use authkestra_engine::OAuth2Flow;".to_string()];
         let mut builder_calls = Vec::new();
-        let mut env = vec![KitEnvVar::with_default(
+        let mut env = vec![KitEnvVar::local_default(
             "OAUTH_REDIRECT_BASE",
             "Base URL the provider redirects back to. Must match what you registered.",
             "http://localhost:3000",

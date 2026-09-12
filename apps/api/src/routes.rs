@@ -19,7 +19,7 @@ use crate::engine::EngineFactory;
 use crate::error::ApiError;
 use crate::killswitch::KillSwitch;
 use crate::kit::StarterKit;
-use crate::scenario::KitOptions;
+use crate::scenario::{DeployTargets, KitOptions};
 use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec};
 use crate::session::{DemoSession, DemoSessionStore, DemoSessionView, COOKIE_NAME};
 use crate::settings::Settings;
@@ -38,6 +38,10 @@ pub struct AppState {
     pub events: Arc<crate::events::EventLog>,
     /// This deployment's token-signing identity, and the JWKS it publishes.
     pub signing: Arc<crate::signing::SigningKeys>,
+    /// The GitHub client and short-lived token store behind "push to GitHub"
+    /// (#40). Bundled into one `Arc` so this struct grows one field rather
+    /// than two — see `github_push::GithubPushState`.
+    pub github_push: Arc<crate::github_push::GithubPushState>,
 }
 
 // ---------------------------------------------------------------- wire types
@@ -76,7 +80,14 @@ pub struct AdminKillSwitchBody {
 
 /// Resolve the caller's session from the cookie, creating one when needed, and
 /// write the cookie back if it changed.
-async fn resolve_session(state: &AppState, cookies: &Cookies) -> Result<DemoSession, ApiError> {
+///
+/// `pub(crate)` rather than private: `github_routes`'s push handler needs the
+/// same session resolution every other authenticated action uses, and
+/// duplicating it there would be the one place it could drift from this one.
+pub(crate) async fn resolve_session(
+    state: &AppState,
+    cookies: &Cookies,
+) -> Result<DemoSession, ApiError> {
     let existing = cookies
         .get(COOKIE_NAME)
         .and_then(|c| Uuid::parse_str(c.value()).ok());
@@ -381,6 +392,13 @@ async fn admin_client_ip(
 struct StarterKitQuery {
     openapi: Option<String>,
     client: Option<String>,
+    /// Deployment manifests to include, as a comma-separated list of host
+    /// names (`docker,render,fly,railway`).
+    ///
+    /// One parameter rather than four booleans because the set is what the
+    /// visitor picks — "Docker and Render" is one choice, not two — and a
+    /// list keeps the query string readable when it lands in a bug report.
+    deploy: Option<String>,
 }
 
 impl StarterKitQuery {
@@ -388,8 +406,46 @@ impl StarterKitQuery {
         KitOptions {
             openapi: is_truthy(self.openapi.as_deref()),
             ts_client: is_truthy(self.client.as_deref()),
+            deploy: parse_deploy_targets(self.deploy.as_deref()),
         }
     }
+}
+
+/// Read the deploy list, ignoring anything unrecognised.
+///
+/// An absent parameter means the generator's own default — a Dockerfile and
+/// nothing else — so an old client, a plain `curl`, or a bookmarked URL keeps
+/// working and still gets the one manifest that is useful everywhere.
+///
+/// An unknown host name is dropped rather than refused. The alternative is a
+/// download that 400s because a future frontend learned a host this build has
+/// not: the visitor loses their project to a typo in a list they did not write.
+fn parse_deploy_targets(value: Option<&str>) -> DeployTargets {
+    let Some(value) = value else {
+        return DeployTargets::default();
+    };
+
+    // An explicitly empty list means "no manifests at all", which is a real
+    // choice — someone who deploys by hand and does not want the clutter —
+    // and has to be distinguishable from the parameter being absent.
+    let mut targets = DeployTargets {
+        docker: false,
+        render: false,
+        fly: false,
+        railway: false,
+    };
+
+    for name in value.split(',').map(str::trim) {
+        match name.to_ascii_lowercase().as_str() {
+            "docker" => targets.docker = true,
+            "render" => targets.render = true,
+            "fly" | "fly.io" | "flyio" => targets.fly = true,
+            "railway" => targets.railway = true,
+            _ => {}
+        }
+    }
+
+    targets
 }
 
 /// Accepts what a browser or a curl user would plausibly send.
@@ -469,4 +525,72 @@ pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/admin/kill-switch", post(admin_kill_switch))
         .route("/admin/client-ip", get(admin_client_ip))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_absent_deploy_parameter_keeps_the_generator_default() {
+        // A plain `curl` or an old frontend still gets the Dockerfile.
+        let targets = parse_deploy_targets(None);
+        assert_eq!(targets, DeployTargets::default());
+        assert!(targets.docker);
+    }
+
+    #[test]
+    fn an_empty_deploy_parameter_means_no_manifests() {
+        // Distinct from absent: someone deploying by hand asked for none.
+        let targets = parse_deploy_targets(Some(""));
+        assert!(!targets.docker);
+        assert!(!targets.render);
+        assert!(!targets.fly);
+        assert!(!targets.railway);
+    }
+
+    #[test]
+    fn a_list_selects_exactly_what_it_names() {
+        let targets = parse_deploy_targets(Some("render,railway"));
+        assert!(targets.render);
+        assert!(targets.railway);
+        assert!(!targets.docker, "docker is not implied by naming others");
+        assert!(!targets.fly);
+    }
+
+    #[test]
+    fn the_list_tolerates_spacing_and_case() {
+        let targets = parse_deploy_targets(Some(" Docker , RENDER "));
+        assert!(targets.docker);
+        assert!(targets.render);
+    }
+
+    #[test]
+    fn fly_answers_to_the_names_people_actually_type() {
+        for spelling in ["fly", "fly.io", "flyio", "Fly.io"] {
+            assert!(
+                parse_deploy_targets(Some(spelling)).fly,
+                "`{spelling}` should select Fly"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_host_is_ignored_rather_than_refused() {
+        // Losing a whole project to one unrecognised word in a list the
+        // visitor never typed is the failure this avoids.
+        let targets = parse_deploy_targets(Some("docker,heroku"));
+        assert!(targets.docker);
+        assert!(!targets.render && !targets.fly && !targets.railway);
+    }
+
+    #[test]
+    fn truthiness_matches_what_a_browser_or_curl_would_send() {
+        for yes in [Some("1"), Some("true"), Some("YES"), Some("on"), Some("")] {
+            assert!(is_truthy(yes), "{yes:?} should be true");
+        }
+        for no in [None, Some("0"), Some("false"), Some("off")] {
+            assert!(!is_truthy(no), "{no:?} should be false");
+        }
+    }
 }

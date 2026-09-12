@@ -841,12 +841,12 @@ A generated project with a host selected deploys from its manifest without hand-
 A zip is fine; "create this as a repo in my account" is the v0-style magic moment. It is also what makes the deploy-to-cloud manifests useful: every one-click deploy button a host offers takes a repository URL, so without a repo the buttons have nothing to point at.
 
 ### Tasks
-- [ ] Decide GitHub App vs OAuth app and the minimum scope, and record it as an ADR
-- [ ] A separate OAuth app from the sign-in scenario, so the identity demo is never the thing asking for write access to someone's repositories
-- [ ] Push as a single commit via the Git Data API, not a commit per file
-- [ ] Handle failure modes distinctly (name collisions, revoked access, missing scope, rate limits) — a generic 500 for any of these is a bug
-- [ ] Token stays server-side, session-scoped, short-lived, and never logged
-- [ ] Keep the zip path as the no-auth fallback
+- [x] Decide GitHub App vs OAuth app and the minimum scope, and record it as an ADR
+- [x] A separate OAuth app from the sign-in scenario, so the identity demo is never the thing asking for write access to someone's repositories
+- [x] Push as a single commit via the Git Data API, not a commit per file
+- [x] Handle failure modes distinctly (name collisions, revoked access, missing scope, rate limits) — a generic 500 for any of these is a bug
+- [x] Token stays server-side, session-scoped, short-lived, and never logged
+- [x] Keep the zip path as the no-auth fallback
 
 ### Acceptance
 A visitor with a GitHub account gets a public repo holding the same project the zip would have given them, in one commit; a visitor without one still gets the zip.

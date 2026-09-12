@@ -17,9 +17,32 @@ regenerating (CI enforces this — see P0 "Mirror the framework's CI quality bar
 | GET    | `/api/scenarios`              | —               | `ScenarioSpec[]`  |
 | POST   | `/api/scenarios/:id/configure`| `ConfigureBody` | `ConfigureResponse` |
 | POST   | `/api/scenarios/:id/action/:action` | scenario-specific | scenario-specific |
+| GET    | `/api/starter-kit`            | —               | `application/zip` |
+| GET    | `/api/github/connect`         | —                | redirect to GitHub |
+| GET    | `/api/github/callback`        | —                | redirect to the frontend |
+| POST   | `/api/github/push`            | `GitHubPushRequest` | `GitHubPushResponse` |
 
 The demo session id travels in an HttpOnly cookie (`ak_demo`). Every endpoint under
 `/api` lazily materialises a session if the cookie is absent or stale.
+
+### `GET /api/starter-kit` query parameters
+
+The zip is generated from the session's config; these only control what is added
+alongside it. All are optional, and each accepts `1`, `true`, `yes`, `on` or a
+bare presence (`?openapi`) as true.
+
+| Parameter | Default | Meaning |
+| --------- | ------- | ------- |
+| `openapi` | off | Emit an OpenAPI spec and the `utoipa` annotations behind it |
+| `client`  | off | Emit the typed TypeScript client under `client/` |
+| `deploy`  | `docker` | Comma-separated deployment manifests: `docker`, `render`, `fly`, `railway` |
+
+`deploy` is a list rather than four flags because the set is a single choice.
+Omitting it means `docker` — a Dockerfile is useful on every host, so the
+default is not "nothing". Passing it empty (`?deploy=`) means genuinely no
+manifests, which is a real choice for someone who deploys by hand. Unrecognised
+names are ignored rather than refused, so a frontend that learns a host this
+build does not know still returns a project instead of a 400.
 
 ## The flow log
 
@@ -223,6 +246,89 @@ from the request, so the callback cannot be turned into an open redirect.
 
 The redirect URI to register is `{OAUTH_REDIRECT_BASE}/auth/callback/{provider}`
 — note the order: `/auth/callback/github`, **not** `/auth/github/callback`.
+
+## Pushing a generated project to GitHub (#40)
+
+A **separate** GitHub OAuth App from the sign-in scenario's — its own
+`GITHUB_KIT_CLIENT_ID` / `GITHUB_KIT_CLIENT_SECRET`, its own, narrower scope
+(`public_repo` only, never `repo`). See `docs/decisions/0006-github-push.md`
+for why the two must never be merged. Structured like the sign-in OAuth
+routes: `connect`/`callback` are a browser navigation, `push` is an ordinary
+JSON action once a token is on file.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/github/connect` | Redirects to GitHub's consent screen, scope `public_repo`. Sets a short-lived, `HttpOnly` CSRF state cookie (`ak_github_push_state`). |
+| GET | `/api/github/callback` | Verifies `state` in constant time, exchanges the code, stores the token server-side against the visitor's demo session for **fifteen minutes**, then redirects to the frontend. |
+| POST | `/api/github/push` | `GitHubPushRequest` → `GitHubPushResponse`. Regenerates the kit from the session's current configuration and pushes it as **one commit** via the Git Data API. |
+
+The token never reaches the browser and is deleted immediately once a push
+attempt finishes, success or failure — it is not meant to outlive one click of
+the Push button.
+
+**The callback always redirects to the frontend**, result on the query string,
+same convention as the sign-in OAuth callback:
+
+| Parameter | Meaning |
+| --- | --- |
+| `github_push=connected` | Token exchanged and stored; ready to push |
+| `github_push=denied&reason=…` | Visitor declined at GitHub's consent screen — ordinary, not an error |
+| `github_push=error&reason=…` | Could not complete — see below |
+
+| Reason | Means |
+| --- | --- |
+| `not_configured` | This deployment has no `GITHUB_KIT_CLIENT_ID`/`SECRET` |
+| `missing_code` | Not a real callback |
+| `state_missing` | The CSRF cookie did not come back (>15 min elapsed, cookie blocked, or a different browser) |
+| `state_invalid` | The `state` on the query string did not match the cookie |
+| `token_rejected` \| `rate_limited` \| `network_error` \| `exchange_failed` | The code-exchange call itself failed this way |
+
+```ts
+interface GithubPushDeployTargets {
+  docker: boolean | null;
+  render: boolean | null;
+  fly: boolean | null;
+  railway: boolean | null;
+}
+
+interface GitHubPushRequest {
+  repo_name: string;
+  description: string | null;
+  openapi: boolean;
+  ts_client: boolean;
+  deploy: GithubPushDeployTargets | null;   // omitted fields keep the kit's own defaults
+}
+
+interface GitHubPushResponse {
+  owner: string;
+  repo: string;
+  html_url: string;
+  default_branch: string;
+  commit_sha: string;
+}
+```
+
+`POST /api/github/push` fails distinctly per cause, never a flat `500`:
+
+| `error` | Status | Cause |
+| --- | --- | --- |
+| `github_push_not_configured` | 503 | No push credentials configured on this deployment |
+| `github_not_connected` | 400 | No token on file — connect first, or the 15-minute window ran out |
+| `github_invalid_repo_name` | 400 | Not a name GitHub will accept |
+| `github_repo_name_taken` | 409 | A repository with that name already exists on the account |
+| `github_token_rejected` | 401 | The connected token is dead — expired or revoked |
+| `github_scope_missing` | 403 | The token lacks `public_repo` |
+| `github_rate_limited` | 429 | GitHub's own rate limit was hit |
+| `github_network_error` | 502 | The request never reached GitHub, or its response never reached us |
+| `github_push_failed` | 502 | GitHub refused the request for another reason |
+
+Shares the tighter rate-limit bucket with the OAuth routes and
+`/api/starter-kit`, since it reaches a third party and packages a project on
+every call.
+
+**The zip download (`/api/starter-kit`) is unaffected and unauthenticated** —
+it needs no GitHub account and remains the fallback for anyone who does not
+want to connect one.
 
 ## Errors
 

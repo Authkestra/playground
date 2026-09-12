@@ -357,6 +357,18 @@ pub struct KitEnvVar {
     pub comment: String,
     /// A usable default, or `None` when the value must be supplied.
     pub default: Option<String>,
+    /// True when the default is only correct while running locally.
+    ///
+    /// `WEBAUTHN_ORIGIN` is the case that forced this: `http://localhost:3000`
+    /// is exactly right for `cargo run` and exactly wrong everywhere else, and
+    /// a deployment manifest that copies it produces a service whose passkey
+    /// registration cannot succeed — the origin the browser reports will never
+    /// match. That is worse than leaving it unset, because it looks configured.
+    ///
+    /// So `.env.example` still gets the default (it is for local development,
+    /// where the default is right), and the deploy manifests treat it as a
+    /// value the host must supply.
+    pub local_only: bool,
 }
 
 impl KitEnvVar {
@@ -365,15 +377,37 @@ impl KitEnvVar {
             name: name.to_string(),
             comment: comment.to_string(),
             default: None,
+            local_only: false,
         }
     }
 
+    /// A default that is correct wherever the project runs.
     pub fn with_default(name: &str, comment: &str, default: &str) -> Self {
         Self {
             name: name.to_string(),
             comment: comment.to_string(),
             default: Some(default.to_string()),
+            local_only: false,
         }
+    }
+
+    /// A default that is correct for `cargo run` and wrong once deployed —
+    /// anything naming `localhost`, a loopback port, or this machine.
+    pub fn local_default(name: &str, comment: &str, default: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            comment: comment.to_string(),
+            default: Some(default.to_string()),
+            local_only: true,
+        }
+    }
+
+    /// Whether a host has to be told this value, rather than inheriting it.
+    ///
+    /// True when there is no default at all, and true when the default only
+    /// holds locally. Deployment manifests ask this; `.env.example` does not.
+    pub fn must_be_supplied_on_a_host(&self) -> bool {
+        self.default.is_none() || self.local_only
     }
 }
 
@@ -381,15 +415,45 @@ impl KitEnvVar {
 ///
 /// Kept apart from `DemoConfig` on purpose: these are properties of the kit,
 /// not authentication methods, and putting them among the login toggles would
-/// misrepresent both. They are two independent opt-ins because they serve
+/// misrepresent both. They are independent opt-ins because they serve
 /// different people — someone on htmx wants the spec and no TypeScript,
-/// someone on Next.js may want the client and no `utoipa`.
+/// someone on Next.js may want the client and no `utoipa`, someone deploying
+/// to Fly has no use for a `render.yaml`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KitOptions {
     /// Annotate the handlers and serve an OpenAPI document.
     pub openapi: bool,
     /// Emit a typed TypeScript client for the ceremony endpoints.
     pub ts_client: bool,
+    /// Which deployment manifests to include.
+    pub deploy: DeployTargets,
+}
+
+/// Which deployment manifests a download should carry, beyond the project
+/// itself.
+///
+/// A `Dockerfile` is useful to almost anyone shipping a Rust service and costs
+/// a download nothing to include, so it is on unless a caller turns it off.
+/// The rest name a specific host, so each is its own opt-in — the same
+/// reasoning as `openapi` and `ts_client` above, just one host wider: someone
+/// deploying to Fly should not find a `render.yaml` they never asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeployTargets {
+    pub docker: bool,
+    pub render: bool,
+    pub fly: bool,
+    pub railway: bool,
+}
+
+impl Default for DeployTargets {
+    fn default() -> Self {
+        Self {
+            docker: true,
+            render: false,
+            fly: false,
+            railway: false,
+        }
+    }
 }
 
 /// One documented endpoint, when the visitor asked for a spec.
