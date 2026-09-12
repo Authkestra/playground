@@ -24,64 +24,63 @@
   second block here and touching no component.
 */
 :root {
-  /* Page and surfaces. Lifted in steps so a card reads above the page and a
-     popover above the card, without any of them needing a border to do it. */
-  --background: 229 84% 5%; /* was slate-950 */
-  --foreground: 210 40% 96%; /* was slate-100 */
+  /* Page and surfaces. Warm near-black rather than the blue-slate this began
+     with: a rust accent on a blue ground reads as two unrelated decisions, and
+     Rust's own material is black, white and that orange. Lifted in steps so a
+     card sits above the page and a popover above the card without needing a
+     border to say so. */
+  --background: 20 30% 5%;
+  --foreground: 30 25% 95%;
 
-  --card: 222 47% 9%;
-  --card-foreground: 210 40% 96%;
+  --card: 20 18% 9%;
+  --card-foreground: 30 25% 95%;
 
-  --popover: 222 45% 11%;
-  --popover-foreground: 210 40% 96%;
+  --popover: 20 17% 11%;
+  --popover-foreground: 30 25% 95%;
 
-  /* Muted carries captions, helper text and inert surfaces. The foreground is
-     deliberately lighter than the slate-400 it replaces: slate-400 on the
-     raised card surface sat at 4.3:1, just under AA, which the old audit never
-     caught because it measured every caption against the page rather than
-     against the card it actually sits on. */
-  --muted: 217 33% 16%;
-  --muted-foreground: 215 25% 72%;
+  /* Muted carries captions, helper text and inert surfaces. */
+  --muted: 20 14% 17%;
+  --muted-foreground: 25 15% 72%;
 
-  /* The accent the UI never had. Used for the active state of a control, the
-     primary action in each step, and the focus ring — one colour meaning
-     "this is on / this is the way forward".
+  /* Rust's orange, which is the point of this theme. Still two tokens, for the
+     reason the previous accent needed two: as a filled surface it must be dark
+     enough for white to clear AA on it, and as text on this page it must be
+     light enough to clear AA against it. No single shade does both.
 
-     It is split in two because one indigo cannot do both jobs: as a filled
-     surface it must be dark enough for white text to clear AA on it, and as
-     text on this dark page it must be light enough to clear AA against the
-     page. A single mid shade fails one of the two, and at 239 84% 67% it
-     failed both — 4.41:1 under white, 3.46:1 as a link. `primary` is the
-     surface; `primary-accent` is the shade to use when the indigo is the
-     text (a link, a `variant="link"` button, an active step number). */
-  --primary: 239 84% 60%;
+     `primary` at 14 75% 44% sits in the same family as the logo's #CE422B and
+     crates.io's #B7410E; white on it is 5.0:1. `primary-accent` is the shade to
+     use when the orange is the text — a link, a `variant="link"` button, the
+     current step's number. */
+  --primary: 14 75% 44%;
   --primary-foreground: 0 0% 100%;
-  --primary-accent: 239 84% 76%;
+  --primary-accent: 14 85% 66%;
 
-  --secondary: 217 33% 18%;
-  --secondary-foreground: 210 40% 96%;
+  --secondary: 20 14% 19%;
+  --secondary-foreground: 30 25% 95%;
 
-  --accent: 217 33% 20%;
-  --accent-foreground: 210 40% 96%;
+  --accent: 20 14% 22%;
+  --accent-foreground: 30 25% 95%;
 
-  /* Verdict colours. The auth panels report outcomes constantly — a token
-     accepted, a signature forged, a captcha pending — and those three states
-     need to stay distinguishable from each other and readable on both the page
-     and a card. Foregrounds are the text shade; the DEFAULT is the surface. */
-  --success: 152 60% 36%;
-  --success-foreground: 151 70% 80%;
+  /* Verdict colours. These carry more weight now than under the old palette:
+     with a warm orange as `primary`, an amber warning and a red destructive sit
+     close enough in hue to be confused with it and with each other. So they are
+     pushed apart deliberately — warning to a yellow at 45, destructive to a
+     crimson at 352 — leaving the 14-to-20 band to mean "this is the accent" and
+     nothing else. Colour is never the only signal in this UI, but it should not
+     actively mislead. */
+  --success: 152 60% 34%;
+  --success-foreground: 151 65% 78%;
 
-  --warning: 38 92% 40%;
-  --warning-foreground: 45 93% 76%;
+  --warning: 45 92% 38%;
+  --warning-foreground: 45 90% 72%;
 
-  /* Darker than red-500: white on red-500 is 4.0:1, under AA for body text. */
-  --destructive: 0 63% 42%;
+  --destructive: 352 62% 42%;
   --destructive-foreground: 0 0% 100%;
-  --destructive-muted: 0 91% 80%;
+  --destructive-muted: 352 90% 80%;
 
-  --border: 217 33% 21%;
-  --input: 217 33% 24%;
-  --ring: 239 84% 67%;
+  --border: 20 14% 21%;
+  --input: 20 14% 24%;
+  --ring: 14 85% 60%;
 
   --radius: 0.625rem;
 
