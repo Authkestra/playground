@@ -360,13 +360,24 @@ pub fn readme_section(plan: &Plan) -> String {
         );
     }
 
-    let required = plan.required_env_vars();
+    // Everything the *host* has to be told, which is a wider set than the
+    // variables with no default at all: one whose default is
+    // `http://localhost:3000` has a default, and it is still a value this
+    // deployment cannot use. Listing only the former is how someone deploys,
+    // sets both secrets, and then finds passkey registration failing against
+    // an origin nothing ever asked them for.
+    let required: Vec<_> = plan
+        .all_env_vars()
+        .into_iter()
+        .filter(|v| v.must_be_supplied_on_a_host())
+        .collect();
     let required_list = if required.is_empty() {
         String::new()
     } else {
         format!(
-            "\nWhatever the target, these have no default and every one of them \
-             leaves it unset rather than guessing:\n\n{}\n",
+            "\nWhatever the target, set every one of these — each is either a secret \
+             or depends on the URL your app ends up at, so no manifest here guesses \
+             a value for it:\n\n{}\n",
             required
                 .iter()
                 .map(|v| format!("- `{}` — {}", v.name, v.comment))
@@ -738,5 +749,60 @@ mod host_bound_env_tests {
             !fly.contains("depend on the URL Fly gives"),
             "the hint should only appear when it applies:\n{fly}"
         );
+    }
+}
+
+#[cfg(test)]
+mod readme_deploy_list_tests {
+    use crate::kit::matrix::ci_registry;
+    use crate::scenario::{DeployTargets, KitOptions};
+
+    /// The README's "set every one of these" list must name the host-bound
+    /// variables, not only the ones with no default at all. Listing only the
+    /// secrets is how someone deploys, sets both of them, and then finds
+    /// passkey registration failing against an origin nothing asked them for.
+    #[test]
+    fn the_deploy_section_lists_host_bound_variables_too() {
+        let registry = ci_registry();
+        let config = crate::kit::matrix::config_from_spec("passkeys,oauth=github", &registry)
+            .expect("spec parses");
+        let kit = crate::kit::StarterKit::generate_with(
+            &config,
+            &registry,
+            KitOptions {
+                openapi: false,
+                ts_client: false,
+                deploy: DeployTargets {
+                    docker: true,
+                    render: true,
+                    fly: false,
+                    railway: false,
+                },
+            },
+        );
+        let readme = &kit
+            .files
+            .iter()
+            .find(|f| f.path == "README.md")
+            .expect("a README is always emitted")
+            .contents;
+
+        let deploy_section = readme
+            .split_once("## Deploy it")
+            .expect("the deploy section should be present")
+            .1;
+
+        for name in [
+            "WEBAUTHN_ORIGIN",
+            "WEBAUTHN_RP_ID",
+            "OAUTH_REDIRECT_BASE",
+            "GITHUB_CLIENT_ID",
+            "GITHUB_CLIENT_SECRET",
+        ] {
+            assert!(
+                deploy_section.contains(&format!("- `{name}`")),
+                "the deploy section should tell you to set {name}:\n{deploy_section}"
+            );
+        }
     }
 }
