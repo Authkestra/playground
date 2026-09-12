@@ -398,7 +398,8 @@ async fn push(
         ts_client: body.ts_client,
         deploy: merge_deploy_targets(body.deploy),
     };
-    let kit = crate::kit::StarterKit::generate_with(&session.config, state.sessions.registry(), options);
+    let kit =
+        crate::kit::StarterKit::generate_with(&session.config, state.sessions.registry(), options);
 
     let result = crate::github_push::push_kit(
         state.github_push.api.as_ref(),

@@ -144,7 +144,12 @@ mod tests {
         assert!(blobs.iter().any(|c| c == "contents-b"));
         assert!(blobs.iter().any(|c| c == "contents-c"));
 
-        let tree = fake.tree_entries.lock().unwrap().clone().expect("tree built");
+        let tree = fake
+            .tree_entries
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("tree built");
         let paths: Vec<&str> = tree.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(paths, vec!["Cargo.toml", "src/main.rs", "README.md"]);
 
@@ -185,7 +190,9 @@ mod tests {
         *fake.create_repo_result.lock().unwrap() = Some(Err(GitHubApiError::RepoNameTaken));
         let kit = kit_with(&[("a.txt", "1")]);
 
-        let err = push_kit(&fake, "tok", "taken", None, &kit).await.unwrap_err();
+        let err = push_kit(&fake, "tok", "taken", None, &kit)
+            .await
+            .unwrap_err();
         assert!(matches!(err, GitHubApiError::RepoNameTaken));
     }
 
@@ -195,7 +202,9 @@ mod tests {
         *fake.current_user_result.lock().unwrap() = Some(Err(GitHubApiError::TokenRejected));
         let kit = kit_with(&[("a.txt", "1")]);
 
-        let err = push_kit(&fake, "tok", "repo", None, &kit).await.unwrap_err();
+        let err = push_kit(&fake, "tok", "repo", None, &kit)
+            .await
+            .unwrap_err();
         assert!(matches!(err, GitHubApiError::TokenRejected));
         // Nothing past the failing step should have been attempted.
         assert!(fake.blobs_created.lock().unwrap().is_empty());
@@ -207,7 +216,9 @@ mod tests {
         *fake.create_tree_error.lock().unwrap() = Some(GitHubApiError::RateLimited);
         let kit = kit_with(&[("a.txt", "1"), ("b.txt", "2")]);
 
-        let err = push_kit(&fake, "tok", "repo", None, &kit).await.unwrap_err();
+        let err = push_kit(&fake, "tok", "repo", None, &kit)
+            .await
+            .unwrap_err();
         assert!(matches!(err, GitHubApiError::RateLimited));
         // Blobs for both files were created before the tree step failed...
         assert_eq!(fake.blobs_created.lock().unwrap().len(), 2);

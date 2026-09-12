@@ -26,7 +26,12 @@ const CLIENT_SECRET: &str = "kit-client-secret";
 
 fn configured_state() -> (AppState, Arc<FakeGitHubApi>) {
     let fake = Arc::new(FakeGitHubApi::default());
-    let state = test_state_with_github(KillSwitch::default(), CLIENT_ID, CLIENT_SECRET, fake.clone());
+    let state = test_state_with_github(
+        KillSwitch::default(),
+        CLIENT_ID,
+        CLIENT_SECRET,
+        fake.clone(),
+    );
     (state, fake)
 }
 
@@ -135,10 +140,7 @@ async fn connect_and_complete(app: &axum::Router) -> String {
 }
 
 fn push_body() -> Body {
-    Body::from(
-        serde_json::to_vec(&json!({ "repo_name": "my-new-project" }))
-            .unwrap(),
-    )
+    Body::from(serde_json::to_vec(&json!({ "repo_name": "my-new-project" })).unwrap())
 }
 
 fn push_request(session: &str) -> Request<Body> {
@@ -155,11 +157,18 @@ fn push_request(session: &str) -> Request<Body> {
 async fn connect_is_refused_cleanly_when_no_credentials_are_configured() {
     let app = api::build_router(test_state(KillSwitch::default(), None));
     let resp = app
-        .oneshot(req("GET", "/api/github/connect").body(Body::empty()).unwrap())
+        .oneshot(
+            req("GET", "/api/github/connect")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let detail = body_json(resp).await["detail"].as_str().unwrap().to_string();
+    let detail = body_json(resp).await["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(detail.to_lowercase().contains("not configured"), "{detail}");
 }
 
@@ -199,7 +208,9 @@ async fn callback_degrades_cleanly_when_credentials_disappear_mid_flight() {
 async fn the_kill_switch_stops_the_whole_feature() {
     let (state, _fake) = configured_state();
     let mut switch_state = KillSwitchState::default();
-    switch_state.disabled_scenarios.insert("github_push".to_string());
+    switch_state
+        .disabled_scenarios
+        .insert("github_push".to_string());
     let mut state = state;
     state.kill_switch = Arc::new(KillSwitch::new(None, switch_state));
     let app = api::build_router(state);
@@ -241,10 +252,16 @@ async fn connect_sets_an_http_only_state_cookie_and_redirects_to_github() {
 
     assert!(resp.status().is_redirection());
     let url = location(&resp);
-    assert!(url.starts_with("https://github.com/login/oauth/authorize"), "{url}");
+    assert!(
+        url.starts_with("https://github.com/login/oauth/authorize"),
+        "{url}"
+    );
     assert!(url.contains(&format!("client_id={CLIENT_ID}")), "{url}");
     assert!(url.contains("scope=public_repo"), "{url}");
-    assert!(!url.contains("scope=repo&"), "must not ask for the wider `repo` scope: {url}");
+    assert!(
+        !url.contains("scope=repo&"),
+        "must not ask for the wider `repo` scope: {url}"
+    );
 
     let raw = resp
         .headers()
@@ -273,7 +290,9 @@ async fn a_callback_whose_state_does_not_match_the_cookie_is_refused() {
         .await
         .unwrap();
     let cookies = set_cookies(&connect_resp);
-    let state_cookie = cookie_named(&cookies, "ak_github_push_state").unwrap().to_string();
+    let state_cookie = cookie_named(&cookies, "ak_github_push_state")
+        .unwrap()
+        .to_string();
 
     // A forged `state` — the CSRF value an attacker would have to guess.
     let resp = app
@@ -362,7 +381,11 @@ async fn the_full_connect_then_push_round_trip_succeeds() {
         !fake.blobs_created.lock().unwrap().is_empty(),
         "the kit's files must have been pushed as blobs"
     );
-    assert_eq!(*fake.commit_calls.lock().unwrap(), 1, "one commit for the whole kit");
+    assert_eq!(
+        *fake.commit_calls.lock().unwrap(),
+        1,
+        "one commit for the whole kit"
+    );
     assert_eq!(*fake.ref_calls.lock().unwrap(), 1);
 }
 
@@ -445,14 +468,26 @@ async fn an_implausible_repo_name_is_rejected_before_any_github_call() {
 #[tokio::test]
 async fn each_github_failure_mode_maps_to_its_own_error() {
     let cases: [(GitHubApiError, StatusCode, &str); 6] = [
-        (GitHubApiError::RepoNameTaken, StatusCode::CONFLICT, "github_repo_name_taken"),
+        (
+            GitHubApiError::RepoNameTaken,
+            StatusCode::CONFLICT,
+            "github_repo_name_taken",
+        ),
         (
             GitHubApiError::InvalidRepoName("bad name".into()),
             StatusCode::BAD_REQUEST,
             "github_invalid_repo_name",
         ),
-        (GitHubApiError::TokenRejected, StatusCode::UNAUTHORIZED, "github_token_rejected"),
-        (GitHubApiError::ScopeMissing, StatusCode::FORBIDDEN, "github_scope_missing"),
+        (
+            GitHubApiError::TokenRejected,
+            StatusCode::UNAUTHORIZED,
+            "github_token_rejected",
+        ),
+        (
+            GitHubApiError::ScopeMissing,
+            StatusCode::FORBIDDEN,
+            "github_scope_missing",
+        ),
         (
             GitHubApiError::RateLimited,
             StatusCode::TOO_MANY_REQUESTS,
@@ -494,7 +529,10 @@ async fn a_successful_push_reports_the_repository_it_created() {
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
     assert_eq!(json["repo"], "my-new-project");
-    assert_eq!(json["html_url"], "https://github.com/fake-user/my-new-project");
+    assert_eq!(
+        json["html_url"],
+        "https://github.com/fake-user/my-new-project"
+    );
     assert_eq!(json["default_branch"], "main");
     assert!(json["commit_sha"].as_str().is_some());
 }

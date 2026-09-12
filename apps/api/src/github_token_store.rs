@@ -74,7 +74,8 @@ impl GithubTokenStore {
     /// The token for a session, if one is on file and has not expired.
     #[tracing::instrument(skip_all, fields(%session_id))]
     pub async fn load(&self, session_id: Uuid) -> Result<Option<String>, StoreError> {
-        let stored: Option<StoredToken> = store::get_json(&*self.kv, &Self::key(session_id)).await?;
+        let stored: Option<StoredToken> =
+            store::get_json(&*self.kv, &Self::key(session_id)).await?;
         Ok(stored.map(|t| t.access_token))
     }
 

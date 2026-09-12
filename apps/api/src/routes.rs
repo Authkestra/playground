@@ -19,8 +19,8 @@ use crate::engine::EngineFactory;
 use crate::error::ApiError;
 use crate::killswitch::KillSwitch;
 use crate::kit::StarterKit;
-use crate::scenario::{DeployTargets, KitOptions};
 use crate::scenario::{ControlValue, ScenarioContext, ScenarioSpec};
+use crate::scenario::{DeployTargets, KitOptions};
 use crate::session::{DemoSession, DemoSessionStore, DemoSessionView, COOKIE_NAME};
 use crate::settings::Settings;
 

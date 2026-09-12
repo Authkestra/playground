@@ -96,10 +96,14 @@ pub enum GitHubApiError {
 impl std::fmt::Display for GitHubApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GitHubApiError::RepoNameTaken => write!(f, "a repository with that name already exists"),
+            GitHubApiError::RepoNameTaken => {
+                write!(f, "a repository with that name already exists")
+            }
             GitHubApiError::InvalidRepoName(m) => write!(f, "invalid repository name: {m}"),
             GitHubApiError::TokenRejected => write!(f, "the GitHub token was rejected"),
-            GitHubApiError::ScopeMissing => write!(f, "the GitHub token is missing a required scope"),
+            GitHubApiError::ScopeMissing => {
+                write!(f, "the GitHub token is missing a required scope")
+            }
             GitHubApiError::RateLimited => write!(f, "GitHub's rate limit was hit"),
             GitHubApiError::Network(m) => write!(f, "could not reach GitHub: {m}"),
             GitHubApiError::Other(m) => write!(f, "{m}"),
@@ -304,7 +308,9 @@ impl GitHubApi for HttpGitHubApi {
                 .get("login")
                 .and_then(Value::as_str)
                 .map(str::to_string)
-                .ok_or_else(|| GitHubApiError::Other("GitHub's /user response had no login".into()));
+                .ok_or_else(|| {
+                    GitHubApiError::Other("GitHub's /user response had no login".into())
+                });
         }
         Err(classify_status(status, &headers, &body)
             .unwrap_or_else(|| GitHubApiError::Other(generic_message(&body))))
@@ -327,8 +333,9 @@ impl GitHubApi for HttpGitHubApi {
             // follow give it its one commit.
             "auto_init": false,
         });
-        let (status, headers, resp_body) =
-            self.call(Method::POST, "/user/repos", token, Some(body)).await?;
+        let (status, headers, resp_body) = self
+            .call(Method::POST, "/user/repos", token, Some(body))
+            .await?;
 
         if status == StatusCode::CREATED {
             let html_url = resp_body
@@ -515,7 +522,11 @@ impl GitHubApi for HttpGitHubApi {
 /// status this shared logic has no opinion on, leaving the caller to fall back
 /// to a generic message — `create_repo`'s `422` handling is deliberately
 /// *not* here, because "name taken" only means something for that one call.
-fn classify_status(status: StatusCode, headers: &HeaderMap, body: &Value) -> Option<GitHubApiError> {
+fn classify_status(
+    status: StatusCode,
+    headers: &HeaderMap,
+    body: &Value,
+) -> Option<GitHubApiError> {
     match status {
         StatusCode::UNAUTHORIZED => Some(GitHubApiError::TokenRejected),
         StatusCode::FORBIDDEN => {
@@ -624,7 +635,11 @@ mod tests {
     #[test]
     fn a_429_is_rate_limited() {
         assert!(matches!(
-            classify_status(StatusCode::TOO_MANY_REQUESTS, &HeaderMap::new(), &Value::Null),
+            classify_status(
+                StatusCode::TOO_MANY_REQUESTS,
+                &HeaderMap::new(),
+                &Value::Null
+            ),
             Some(GitHubApiError::RateLimited)
         ));
     }
