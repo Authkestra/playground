@@ -41,9 +41,37 @@ const NEXT = join(APP, ".next");
  * every ceremony panel. `/_not-found` is the floor — what Next.js costs before
  * any of our code — and is budgeted so a framework upgrade that doubles the
  * baseline is visible rather than absorbed.
+ *
+ * ## Why `/page` went from 115 to 136
+ *
+ * The shadcn/ui pass. What that bought, since a raised budget is worthless
+ * without the reason attached:
+ *
+ * The controls in this UI are the UI — it is a panel of switches, radios and
+ * checkboxes — and they were hand-rolled. The switch was a `<button>` with an
+ * absolutely-positioned span whose travel had been hand-measured to
+ * `translate-x-[22px]`, and the radios and checkboxes were bare native inputs
+ * carrying no styling at all. Radix's primitives replace that with the
+ * keyboard handling, focus management, form association and ARIA wiring that
+ * a correct switch/radio/checkbox actually needs, none of which the hand-
+ * rolled versions had in full. That is roughly 20 kB gzipped and it is the
+ * whole of the increase.
+ *
+ * It is not more than that because the increase was audited rather than
+ * accepted. Radix's Tooltip — the single heaviest primitive, since it pulls
+ * in the popper/floating-ui machinery — came to about 14 kB on its own and
+ * was removed outright: its only use was explaining why a control was
+ * disabled, and a tooltip on a disabled control is unreachable by keyboard
+ * and unreliable by mouse, so the explanation is plain visible text tied to
+ * the control with `aria-describedby` instead. Cheaper and more accessible.
+ * `lucide-react` adds nothing measurable; Next already rewrites its barrel
+ * imports to deep paths.
+ *
+ * The number stays deliberately close to actual (134.8 kB at the time of
+ * writing). If a future change needs more, it needs a paragraph here too.
  */
 const BUDGETS_KB = {
-  "/page": 115,
+  "/page": 136,
   "/_not-found/page": 92,
 };
 

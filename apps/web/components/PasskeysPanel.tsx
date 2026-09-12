@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CheckCircle2, Circle, Loader2 } from "lucide-react";
 import type { PasskeyAuthResult, PasskeyEnrolment } from "@playground/api-types";
 import { scenarioAction, type ApiError } from "@/lib/api";
+import { cn } from "@/lib/cn";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 
 interface Props {
   scenarioId: string;
@@ -382,111 +389,168 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
   }, [scenarioId, onDemoDisabled]);
 
   if (capability === "checking") {
-    return <p className="text-xs text-slate-400">Checking passkey support in this browser…</p>;
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Passkeys (WebAuthn)</CardTitle>
+          <CardDescription>Register a passkey with this device, then authenticate with it.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            Checking passkey support in this browser…
+          </p>
+        </CardContent>
+      </Card>
+    );
   }
 
   if (capability === "unsupported") {
     return (
-      <div className="rounded-md border border-slate-800 bg-slate-900 p-3">
-        <p className="text-xs text-slate-300">
-          {unsupportedReason ? UNSUPPORTED_MESSAGES[unsupportedReason] : UNSUPPORTED_MESSAGES["no-webauthn"]}
-        </p>
-      </div>
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle>Passkeys (WebAuthn)</CardTitle>
+            <CardDescription>Register a passkey with this device, then authenticate with it.</CardDescription>
+          </div>
+          <Badge variant="destructive">Unsupported</Badge>
+        </CardHeader>
+        <CardContent>
+          <Alert role="presentation" className="border-warning/40 bg-warning/10 text-warning-foreground">
+            <AlertDescription>
+              {unsupportedReason ? UNSUPPORTED_MESSAGES[unsupportedReason] : UNSUPPORTED_MESSAGES["no-webauthn"]}
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      {advisory && (
-        <div className="rounded-md border border-slate-700 bg-slate-800 p-3">
-          <p className="text-xs text-slate-300">
-            {ADVISORY_MESSAGES[advisory]}
-          </p>
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Passkeys (WebAuthn)</CardTitle>
+          <CardDescription>Register a passkey with this device, then authenticate with it.</CardDescription>
         </div>
-      )}
-      <div className="flex flex-col gap-2">
-        {/*
-          Deliberately not "this browser's platform authenticator": the panel
-          now also runs for devices that have none, where the browser offers a
-          security key or a nearby phone instead. Naming the platform one would
-          contradict the advisory shown directly above.
-        */}
-        <p className="text-xs text-slate-400">
-          Registers a passkey with whichever authenticator this browser offers.
-        </p>
-        <div>
-          <button
-            type="button"
-            onClick={() => void handleRegister()}
-            disabled={registering}
-            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {registering ? "Registering…" : "Register a passkey"}
-          </button>
+        <Badge variant="secondary">Supported</Badge>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        {advisory && (
+          <Alert role="presentation" className="border-warning/40 bg-warning/10 text-warning-foreground">
+            <AlertDescription>{ADVISORY_MESSAGES[advisory]}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex flex-col gap-2">
+          {/*
+            Deliberately not "this browser's platform authenticator": the panel
+            now also runs for devices that have none, where the browser offers a
+            security key or a nearby phone instead. Naming the platform one would
+            contradict the advisory shown directly above.
+          */}
+          <p className="text-xs text-muted-foreground">
+            Registers a passkey with whichever authenticator this browser offers.
+          </p>
+          <div>
+            <Button type="button" size="sm" onClick={() => void handleRegister()} disabled={registering}>
+              {registering && <Loader2 className="animate-spin" aria-hidden="true" />}
+              {registering ? "Registering…" : "Register a passkey"}
+            </Button>
+          </div>
+          <div aria-live="polite" role="status">
+            {registerBanner && (
+              <Alert
+                role="presentation"
+                className="border-warning/40 bg-warning/10 py-2 text-warning-foreground"
+              >
+                <AlertDescription>{registerBanner}</AlertDescription>
+              </Alert>
+            )}
+            {registerResult && (
+              <Alert
+                role="presentation"
+                className="border-success/40 bg-success/10 py-2 text-success-foreground"
+              >
+                <AlertDescription className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Passkey registered. This browser now has {registerResult.count}{" "}
+                  passkey{registerResult.count === 1 ? "" : "s"} enrolled.
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
         </div>
-        {registerBanner && (
-          <p className="flex items-center gap-1.5 text-xs text-amber-400">
-            {registerBanner}
-          </p>
-        )}
-        {registerResult && (
-          <p className="flex items-center gap-1.5 text-xs text-emerald-400">
-            <span aria-hidden="true">✓</span>
-            Passkey registered. This browser now has {registerResult.count}{" "}
-            passkey{registerResult.count === 1 ? "" : "s"} enrolled.
-          </p>
-        )}
-      </div>
 
-      <div className="flex flex-col gap-2 border-t border-slate-800 pt-4">
-        <p className="text-xs text-slate-400">
-          Authenticates using a previously registered passkey.
-        </p>
-        <div>
-          <button
-            type="button"
-            onClick={() => void handleAuthenticate()}
-            disabled={authenticating}
-            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {authenticating ? "Authenticating…" : "Authenticate with a passkey"}
-          </button>
-        </div>
-        {/* A passkey ceremony hands control to the browser and the
-            authenticator, so nothing on screen changes for seconds at a time.
-            Sighted users have the button's "Authenticating…" label; without a
-            live region a screen-reader user gets silence, then a result they
-            did not know was coming. */}
-        <div aria-live="polite" role="status">
-          {authenticating && (
-            <p className="text-xs text-slate-400">
-              Waiting for your authenticator…
-            </p>
-          )}
-          {authBanner && (
-            <p className="flex items-center gap-1.5 text-xs text-amber-400">{authBanner}</p>
-          )}
-          {authResult && (
-          <div
-            className={`flex flex-col gap-1 text-xs ${
-              authResult.verified ? "text-emerald-400" : "text-slate-300"
-            }`}
-          >
-            <p className="flex items-center gap-1.5">
-              <span aria-hidden="true">{authResult.verified ? "✓" : "•"}</span>
-              {authResult.detail}
-            </p>
-            {authResult.counter !== null && (
-              <p className="text-slate-400">
-                Signature counter: {authResult.counter}. A counter that fails to
-                advance between authentications is how cloned authenticators are
-                detected.
+        <Separator />
+
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
+            Authenticates using a previously registered passkey.
+          </p>
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleAuthenticate()}
+              disabled={authenticating}
+            >
+              {authenticating && <Loader2 className="animate-spin" aria-hidden="true" />}
+              {authenticating ? "Authenticating…" : "Authenticate with a passkey"}
+            </Button>
+          </div>
+          {/* A passkey ceremony hands control to the browser and the
+              authenticator, so nothing on screen changes for seconds at a time.
+              Sighted users have the button's "Authenticating…" label; without a
+              live region a screen-reader user gets silence, then a result they
+              did not know was coming. */}
+          <div aria-live="polite" role="status">
+            {authenticating && (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Waiting for your authenticator…
               </p>
             )}
-            </div>
-          )}
+            {authBanner && (
+              <Alert
+                role="presentation"
+                className="border-warning/40 bg-warning/10 py-2 text-warning-foreground"
+              >
+                <AlertDescription>{authBanner}</AlertDescription>
+              </Alert>
+            )}
+            {authResult && (
+              <Alert
+                role="presentation"
+                className={cn(
+                  "py-2",
+                  authResult.verified
+                    ? "border-success/40 bg-success/10 text-success-foreground"
+                    : "border-border bg-muted/40 text-muted-foreground",
+                )}
+              >
+                <AlertDescription className="flex flex-col gap-1">
+                  <span className="flex items-center gap-1.5">
+                    {authResult.verified ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <Circle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    )}
+                    {authResult.detail}
+                  </span>
+                  {authResult.counter !== null && (
+                    <span className="text-muted-foreground">
+                      Signature counter: {authResult.counter}. A counter that fails to
+                      advance between authentications is how cloned authenticators are
+                      detected.
+                    </span>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

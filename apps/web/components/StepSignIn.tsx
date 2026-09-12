@@ -2,6 +2,17 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Fingerprint,
+  Globe,
+  LogIn,
+  ShieldQuestion,
+  Smartphone,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import type { DemoConfig, OAuthMode, ScenarioSpec } from "@playground/api-types";
 import { loginUrl, type OAuthReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
@@ -9,6 +20,11 @@ import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 import ResourcePanel from "@/components/ResourcePanel";
 import CaptchaPanel from "@/components/CaptchaPanel";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Props {
   scenarios: ScenarioSpec[];
@@ -19,18 +35,6 @@ interface Props {
   onBack: () => void;
   onContinue: () => void;
 }
-
-// Brand-ish surfaces, so these carry light text regardless of the dark theme.
-// A blanket light->dark recolour got this wrong once: it turned white label
-// text dark, leaving near-black text on a near-black GitHub button.
-const PROVIDER_STYLES: Record<string, string> = {
-  github: "bg-slate-100 text-slate-900 hover:bg-white",
-  google: "border border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700",
-  discord: "bg-indigo-500 text-white hover:bg-indigo-400",
-};
-
-const PROVIDER_FALLBACK_STYLE =
-  "border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800";
 
 /**
  * Scenarios with a panel in the sign-in step, in the order they appear.
@@ -82,6 +86,20 @@ export function hasSignInMethod(visible: string[]): boolean {
   return visible.some((id) => id === "oauth" || id === "passkeys" || id === "totp");
 }
 
+const PANEL_ICON: Record<string, LucideIcon> = {
+  captcha: ShieldQuestion,
+  passkeys: Fingerprint,
+  totp: Smartphone,
+  resource: Globe,
+};
+
+const PANEL_TITLE: Record<string, string> = {
+  captcha: "Bot protection",
+  passkeys: "Passkey",
+  totp: "Authenticator app",
+  resource: "Protected API route",
+};
+
 export default function StepSignIn({
   scenarios,
   config,
@@ -107,74 +125,58 @@ export default function StepSignIn({
     switch (id) {
       case "captcha":
         return (
-          <div className="rounded-md border border-slate-800 p-4">
-            <h4 className="mb-2 text-sm font-medium text-slate-200">Bot protection</h4>
-            <CaptchaPanel
-              scenarioId="captcha"
-              onDemoDisabled={onDemoDisabled}
-            />
-          </div>
+          <MethodPanel id="captcha">
+            <CaptchaPanel scenarioId="captcha" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
         );
       case "oauth":
         return (
           <div className="flex flex-col gap-2">
             {activeOauthOptions.map((option) => (
-              <button
+              <Button
                 key={option.id}
                 type="button"
+                variant="outline"
+                className="w-full justify-center gap-2"
                 onClick={() => {
                   window.location.href = loginUrl(option.id, oauthMode);
                 }}
-                className={`flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${
-                  PROVIDER_STYLES[option.id] ?? PROVIDER_FALLBACK_STYLE
-                }`}
               >
+                <LogIn className="h-4 w-4" aria-hidden />
                 Continue with {option.label}
-              </button>
+              </Button>
             ))}
-            <div className="mt-1 flex items-center justify-center gap-2 text-xs text-slate-400">
-              <span>Identity mode:</span>
-              <div className="inline-flex rounded-md border border-slate-800 p-0.5">
-                <ModeButton
-                  label="Session"
-                  active={oauthMode === "session"}
-                  onClick={() => setOauthMode("session")}
-                />
-                <ModeButton
-                  label="Stateless (JWT)"
-                  active={oauthMode === "jwt"}
-                  onClick={() => setOauthMode("jwt")}
-                />
-              </div>
+            <div className="mt-2 flex flex-col items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Identity mode</span>
+              <Tabs
+                value={oauthMode}
+                onValueChange={(value) => setOauthMode(value as OAuthMode)}
+              >
+                <TabsList>
+                  <TabsTrigger value="session">Session</TabsTrigger>
+                  <TabsTrigger value="jwt">Stateless (JWT)</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
           </div>
         );
       case "passkeys":
         return (
-          <div className="rounded-md border border-slate-800 p-4">
-            <h4 className="mb-2 text-sm font-medium text-slate-200">Passkey</h4>
-            <PasskeysPanel
-              scenarioId="passkeys"
-              onDemoDisabled={onDemoDisabled}
-            />
-          </div>
+          <MethodPanel id="passkeys">
+            <PasskeysPanel scenarioId="passkeys" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
         );
       case "totp":
         return (
-          <div className="rounded-md border border-slate-800 p-4">
-            <h4 className="mb-2 text-sm font-medium text-slate-200">Authenticator app</h4>
+          <MethodPanel id="totp">
             <TotpPanel scenarioId="totp" onDemoDisabled={onDemoDisabled} />
-          </div>
+          </MethodPanel>
         );
       case "resource":
         return (
-          <div className="rounded-md border border-slate-800 p-4">
-            <h4 className="mb-2 text-sm font-medium text-slate-200">Protected API route</h4>
-            <ResourcePanel
-              scenarioId="resource"
-              onDemoDisabled={onDemoDisabled}
-            />
-          </div>
+          <MethodPanel id="resource">
+            <ResourcePanel scenarioId="resource" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
         );
       default:
         return null;
@@ -184,105 +186,91 @@ export default function StepSignIn({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">Sign in</h2>
-        <p className="text-sm text-slate-400">
+        <h2 className="text-lg font-semibold text-foreground">Sign in</h2>
+        <p className="text-sm text-muted-foreground">
           A real sign-in screen assembled from what you chose in step 1. Each panel shows
           the request it made and what came back, so nothing here has to be taken on
           trust.
         </p>
       </div>
 
-      <div>
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6">
+      <Card className="mx-auto w-full max-w-2xl">
+        <CardContent className="flex flex-col gap-5 pt-6">
           {oauthReturn && (
             <OAuthReturnBanner result={oauthReturn} onDismiss={onDismissOauthReturn} />
           )}
 
           {visible.length === 0 ? (
-            <p className="text-sm text-slate-400">
+            <p className="text-center text-sm text-muted-foreground">
               Nothing is turned on yet.{" "}
-              <button
+              <Button
                 type="button"
+                variant="link"
+                className="h-auto p-0 align-baseline text-sm"
                 onClick={onBack}
-                className="font-medium text-slate-200 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded"
               >
                 Go back to step 1
-              </button>{" "}
+              </Button>{" "}
               to choose something.
             </p>
           ) : (
-            <div className="mx-auto flex max-w-2xl flex-col gap-5">
+            <>
               <div className="text-center">
-                <h3 className="text-base font-semibold text-slate-100">
+                <h3 className="text-base font-semibold text-foreground">
                   Sign in to Authkestra
                 </h3>
-                <p className="text-sm text-slate-400">
+                <p className="text-sm text-muted-foreground">
                   {signInMethodOn
                     ? "Choose how you'd like to continue."
                     : "No sign-in method is on — try what you did turn on below."}
                 </p>
               </div>
 
-              {visible.map((id, i) => (
-                <Fragment key={id}>
-                  {i > 0 && <Divider />}
-                  {renderPanel(id)}
-                </Fragment>
-              ))}
-            </div>
+              <div className="mx-auto flex w-full max-w-sm flex-col gap-5">
+                {visible.map((id, i) => (
+                  <Fragment key={id}>
+                    {i > 0 && <Divider />}
+                    {renderPanel(id)}
+                  </Fragment>
+                ))}
+              </div>
+            </>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
-        >
+        <Button type="button" variant="secondary" onClick={onBack}>
           Back
-        </button>
-        <button
-          type="button"
-          onClick={onContinue}
-          className="rounded-md bg-slate-200 px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
-        >
+        </Button>
+        <Button type="button" variant="default" onClick={onContinue}>
           Continue
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
-function ModeButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
+/** A bordered sub-panel for one ceremony (captcha, passkeys, TOTP, protected route). */
+function MethodPanel({ id, children }: { id: string; children: ReactNode }) {
+  const Icon = PANEL_ICON[id];
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={`rounded px-2 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
-        active ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:bg-slate-800"
-      }`}
-    >
-      {label}
-    </button>
+    <Card>
+      <CardHeader className="flex-row items-center gap-2 space-y-0 p-4 pb-2">
+        {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />}
+        <CardTitle className="text-sm font-medium">{PANEL_TITLE[id]}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 pt-0">{children}</CardContent>
+    </Card>
   );
 }
 
 function Divider() {
   return (
-    <div className="flex items-center gap-3 text-xs text-slate-400">
-      <div className="h-px flex-1 bg-slate-700" />
+    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+      <Separator className="flex-1" />
       or
-      <div className="h-px flex-1 bg-slate-700" />
+      <Separator className="flex-1" />
     </div>
   );
 }
@@ -308,6 +296,29 @@ function describeOauthErrorReason(reason: string): string {
   }
 }
 
+const ALERT_STYLE: Record<
+  OAuthReturn["status"],
+  { variant: "default" | "destructive"; className: string; Icon: LucideIcon }
+> = {
+  success: {
+    variant: "default",
+    className: "border-success/40 bg-success/10 text-success-foreground [&>svg]:text-success-foreground",
+    Icon: CheckCircle2,
+  },
+  // Cancelling at the provider is an ordinary outcome — calm warning tone, not
+  // an error.
+  denied: {
+    variant: "default",
+    className: "border-warning/40 bg-warning/10 text-warning-foreground [&>svg]:text-warning-foreground",
+    Icon: AlertTriangle,
+  },
+  error: {
+    variant: "destructive",
+    className: "bg-destructive/10",
+    Icon: XCircle,
+  },
+};
+
 function OAuthReturnBanner({
   result,
   onDismiss,
@@ -315,13 +326,6 @@ function OAuthReturnBanner({
   result: OAuthReturn;
   onDismiss: () => void;
 }) {
-  const styles: Record<OAuthReturn["status"], string> = {
-    success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
-    // Cancelling at the provider is an ordinary outcome — calm amber, not red.
-    denied: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-    error: "border-red-500/30 bg-red-500/10 text-red-300",
-  };
-
   let message: string;
   if (result.status === "success") {
     let modeDescription = "";
@@ -351,21 +355,23 @@ function OAuthReturnBanner({
     bannerRef.current?.focus();
   }, []);
 
+  const { variant, className, Icon } = ALERT_STYLE[result.status];
+
   return (
-    <div
-      ref={bannerRef}
-      tabIndex={-1}
-      role="status"
-      className={`mb-4 flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current ${styles[result.status]}`}
-    >
-      <p>{message}</p>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="shrink-0 rounded text-xs underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
-      >
-        Dismiss
-      </button>
-    </div>
+    <Alert ref={bannerRef} tabIndex={-1} role="status" variant={variant} className={className}>
+      <Icon className="h-4 w-4" aria-hidden />
+      <AlertDescription className="flex items-start justify-between gap-3">
+        <p>{message}</p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-auto shrink-0 px-2 py-1 text-xs underline underline-offset-2"
+          onClick={onDismiss}
+        >
+          Dismiss
+        </Button>
+      </AlertDescription>
+    </Alert>
   );
 }

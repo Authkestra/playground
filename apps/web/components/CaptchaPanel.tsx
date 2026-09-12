@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CaptchaVerification, CaptchaWidget, CaptchaWidgets } from "@playground/api-types";
 import { scenarioAction } from "@/lib/api";
+import { cn } from "@/lib/cn";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Props {
   scenarioId: string;
@@ -45,11 +51,11 @@ function truncate(value: string, keep = 48): string {
   return value.length <= keep ? value : `${value.slice(0, keep)}… (${value.length} chars)`;
 }
 
-/** A failed captcha is the expected outcome of the failure button, not an error — amber, not red. */
+/** A failed captcha is the expected outcome of the failure button, not an error — warning, not destructive. */
 export function verdictStyle(verified: boolean): string {
   return verified
-    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-    : "border-amber-500/30 bg-amber-500/10 text-amber-300";
+    ? "border-success/30 bg-success/10 text-success-foreground"
+    : "border-warning/30 bg-warning/10 text-warning-foreground";
 }
 
 export function verdictLabel(verified: boolean): string {
@@ -153,27 +159,27 @@ export default function CaptchaPanel({ scenarioId, onDemoDisabled }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-muted-foreground">
         One implementation, three providers — solve each widget below, then verify its
         token against the server. The failure button sends a token no provider issued,
         so you can see what a forged or replayed token looks like to the check.
       </p>
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-muted-foreground">
         In a real application this check is not a step of its own: it goes at the top of
         the handler you want protected, before any lookup and before any work. The diff
         in step 1 names the route it guards.
       </p>
 
       {banner && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-          {banner}
-        </p>
+        <Alert className="border-warning/30 bg-warning/10 text-warning-foreground [&>svg]:text-warning-foreground">
+          <AlertDescription>{banner}</AlertDescription>
+        </Alert>
       )}
 
-      {loading && <p className="text-xs text-slate-400">Loading widgets…</p>}
+      {loading && <Skeleton className="h-[110px] w-full" />}
 
       {!loading && widgets?.length === 0 && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-muted-foreground">
           No captcha provider is both selected and configured with keys on this deployment.
         </p>
       )}
@@ -207,6 +213,7 @@ function CaptchaWidgetCard({
   const [token, setToken] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [result, setResult] = useState<CaptchaVerification | null>(null);
@@ -226,6 +233,7 @@ function CaptchaWidgetCard({
         await loadScript(config.src);
       } catch {
         if (!cancelled) {
+          setReady(true);
           setRenderError(
             `Could not fetch the ${widget.label} script. An ad blocker or strict ` +
               `tracking protection will do this; so will being offline.`,
@@ -239,6 +247,7 @@ function CaptchaWidgetCard({
         api = await awaitRenderable(config.global);
       } catch (e) {
         if (!cancelled) {
+          setReady(true);
           setRenderError(
             `The ${widget.label} script loaded but never became usable (${message(e)}).`,
           );
@@ -266,10 +275,12 @@ function CaptchaWidgetCard({
             if (!cancelled) setToken("");
           },
         });
+        if (!cancelled) setReady(true);
       } catch (e) {
         // Most often a site key the provider will not accept here — which is
         // worth saying, rather than blaming the network.
         if (!cancelled) {
+          setReady(true);
           setRenderError(`${widget.label} would not render this site key: ${message(e)}`);
         }
       }
@@ -327,63 +338,73 @@ function CaptchaWidgetCard({
 
   if (!config) {
     return (
-      <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
-        <p className="text-xs text-amber-400">Unknown captcha provider &quot;{widget.provider}&quot;.</p>
-      </div>
+      <Card>
+        <CardContent className="p-3">
+          <p className="text-xs text-warning-foreground">
+            Unknown captcha provider &quot;{widget.provider}&quot;.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
-      <p className="text-sm font-medium text-slate-200">{widget.label}</p>
+    <Card>
+      <CardHeader className="p-3 pb-0">
+        <CardTitle className="text-sm font-medium">{widget.label}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-3 pt-2">
+        {/* Reserved space so the panel does not jump when the third-party
+            script finishes loading. The container node below is the one the
+            provider's script mounts its widget into and must stay in the DOM
+            for the whole lifetime of this card — the skeleton is only ever a
+            sibling laid on top, never a replacement for it. */}
+        <div className="relative min-h-[78px]">
+          <div ref={containerRef} className="min-h-[78px]" />
+          {!ready && <Skeleton className="absolute inset-0" />}
+        </div>
 
-      <div ref={containerRef} className="mt-2 min-h-[78px]" />
+        {renderError && <p className="mt-2 text-xs text-warning-foreground">{renderError}</p>}
 
-      {renderError && <p className="mt-2 text-xs text-amber-400">{renderError}</p>}
+        <Label className="mt-3 block text-xs font-normal text-muted-foreground" htmlFor={`captcha-token-${widget.provider}`}>
+          The token the widget produced. Edit a character to see a forged one
+          rejected, or empty the box to see what arrives with no token at all —
+          whatever is here is exactly what gets sent.
+        </Label>
+        <textarea
+          id={`captcha-token-${widget.provider}`}
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          spellCheck={false}
+          rows={3}
+          placeholder="Solve the widget above, or paste a token to try"
+          className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
+        />
 
-      <label className="mt-3 block text-xs text-slate-400" htmlFor={`captcha-token-${widget.provider}`}>
-        The token the widget produced. Edit a character to see a forged one
-        rejected, or empty the box to see what arrives with no token at all —
-        whatever is here is exactly what gets sent.
-      </label>
-      <textarea
-        id={`captcha-token-${widget.provider}`}
-        value={token}
-        onChange={(e) => setToken(e.target.value)}
-        spellCheck={false}
-        rows={3}
-        placeholder="Solve the widget above, or paste a token to try"
-        className="mt-1 w-full resize-y break-all rounded border border-slate-700 bg-slate-950 p-2 font-mono text-xs text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-      />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button type="button" size="sm" onClick={() => void verify(token)} disabled={verifying}>
+            {verifying ? "Verifying…" : "Verify this token"}
+          </Button>
+        </div>
 
-      <div className="mt-2 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void verify(token)}
-          disabled={verifying}
-          className="rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/50"
-        >
-          {verifying ? "Verifying…" : "Verify this token"}
-        </button>
-      </div>
+        {banner && <p className="mt-2 text-xs text-warning-foreground">{banner}</p>}
 
-      {banner && <p className="mt-2 text-xs text-amber-400">{banner}</p>}
-
-      <div aria-live="polite" className="mt-2">
-        {sent !== null && (
-          <p className="mb-1 break-all font-mono text-[11px] text-slate-400">
-            sent: {sent === "" ? "(nothing — no token field)" : truncate(sent)}
-          </p>
-        )}
-        {result && (
-          <div className={`rounded-md border px-3 py-2 text-sm ${verdictStyle(result.verified)}`}>
-            <p className="font-medium">
-              {result.label} · {verdictLabel(result.verified)}
+        <div aria-live="polite" className="mt-2">
+          {sent !== null && (
+            <p className="mb-1 break-all font-mono text-[11px] text-muted-foreground">
+              sent: {sent === "" ? "(nothing — no token field)" : truncate(sent)}
             </p>
-            <p className="mt-1 text-xs opacity-90">{result.detail}</p>
-          </div>
-        )}
-      </div>
-    </div>
+          )}
+          {result && (
+            <div className={cn("rounded-md border px-3 py-2 text-sm", verdictStyle(result.verified))}>
+              <p className="font-medium">
+                {result.label} · {verdictLabel(result.verified)}
+              </p>
+              <p className="mt-1 text-xs opacity-90">{result.detail}</p>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

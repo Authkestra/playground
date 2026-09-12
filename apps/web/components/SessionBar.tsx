@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { DemoSessionView } from "@playground/api-types";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/cn";
 
 interface Props {
   session: DemoSessionView | null;
@@ -75,11 +78,11 @@ export default function SessionBar({ session, onReset, resetting }: Props) {
   }, [session]);
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-sm">
+    <Card className="flex items-center justify-between px-4 py-3 text-sm">
       <div className="flex flex-col gap-0.5">
-        <span className="font-medium text-slate-200">Demo session</span>
+        <span className="font-medium text-card-foreground">Demo session</span>
         {session ? (
-          <span className="text-slate-400" title={expiryDisplay?.absolute}>
+          <span className={cn("tabular text-muted-foreground")} title={expiryDisplay?.absolute}>
             {/*
               Before the effect has run there is no countdown yet. Fall back to
               the absolute form rather than the raw RFC3339 string: this renders
@@ -92,17 +95,12 @@ export default function SessionBar({ session, onReset, resetting }: Props) {
               : `Expires ${new Date(session.expires_at).toLocaleString()}`}
           </span>
         ) : (
-          <span className="text-slate-400">No session yet</span>
+          <span className="text-muted-foreground">No session yet</span>
         )}
       </div>
-      <button
-        type="button"
-        onClick={onReset}
-        disabled={resetting}
-        className="rounded-md border border-slate-700 px-3 py-1.5 font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <Button type="button" variant="outline" size="sm" onClick={onReset} disabled={resetting}>
         {resetting ? "Resetting…" : "Reset session"}
-      </button>
-    </div>
+      </Button>
+    </Card>
   );
 }

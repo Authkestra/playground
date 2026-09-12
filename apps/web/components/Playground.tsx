@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   ConfigDiff,
   ControlValue,
@@ -18,6 +19,11 @@ import {
   resetSession,
 } from "@/lib/api";
 import { clearOAuthReturnParams, readOAuthReturn, type OAuthReturn } from "@/lib/oauth";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/cn";
 import SessionBar from "@/components/SessionBar";
 import ScenarioPanel from "@/components/ScenarioPanel";
 import StepIndicator from "@/components/StepIndicator";
@@ -234,62 +240,57 @@ export default function Playground() {
 
   if (phase === "loading") {
     return (
-      <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8" aria-busy="true" aria-label="Loading playground">
-        <Header />
-        <div className="flex flex-col gap-3">
-          <div className="h-10 bg-slate-800/60 rounded animate-pulse" />
-          <div className="h-6 bg-slate-800/60 rounded animate-pulse w-3/4" />
+      <Shell busy>
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-6 w-3/4" />
         </div>
         <div className="flex flex-col gap-2">
-          <div className="h-5 bg-slate-800/60 rounded animate-pulse w-1/2" />
-          <div className="h-5 bg-slate-800/60 rounded animate-pulse w-2/3" />
+          <Skeleton className="h-5 w-1/2" />
+          <Skeleton className="h-5 w-2/3" />
         </div>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-muted-foreground">
           Loading playground… The API runs on a free tier and can take up to a minute to wake
           up on its first request.
         </p>
-      </main>
+      </Shell>
     );
   }
 
   if (phase === "unavailable") {
     return (
-      <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
-        <Header />
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6 text-center">
-          <h2 className="font-medium text-slate-200">API unavailable</h2>
-          <p className="mt-2 text-sm text-slate-400">
-            The playground couldn&apos;t reach the API at{" "}
-            <code className="font-mono">{API_BASE}</code>. Start the backend and
-            reload this page.
-          </p>
-          {banner && <p className="mt-2 text-sm text-amber-400">{banner}</p>}
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="mt-4 rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
-          >
-            Retry
-          </button>
-        </div>
-      </main>
+      <Shell>
+        <Alert variant="destructive">
+          <AlertTitle>API unavailable</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3">
+            <p>
+              The playground couldn&apos;t reach the API at{" "}
+              <code className="font-mono">{API_BASE}</code>. Start the backend and
+              reload this page.
+            </p>
+            {banner && <p className="font-medium text-warning-foreground">{banner}</p>}
+            <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </Shell>
     );
   }
 
   if (phase === "explainer") {
     return (
-      <main className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
-        <Header />
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6">
-          <h2 className="font-medium text-slate-200">Demo currently disabled</h2>
-          <p className="mt-2 text-sm text-slate-400">
+      <Shell>
+        <Alert>
+          <AlertTitle>Demo currently disabled</AlertTitle>
+          <AlertDescription>
             The live playground is switched off right now, so controls below are
             shown for reference only. This is expected behaviour, not an error —
             check back later to try the flows interactively.
-          </p>
-        </div>
+          </AlertDescription>
+        </Alert>
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Scenarios
           </h2>
           <ScenarioPanel
@@ -301,23 +302,20 @@ export default function Playground() {
             onChange={() => {}}
           />
         </section>
-      </main>
+      </Shell>
     );
   }
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 p-8">
-      <Header />
-      <div
-        aria-live="polite"
-        className="min-h-10"
-      >
+    <Shell wide>
+      <div aria-live="polite" className="min-h-10">
         {banner && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300">
-            {banner}
-          </div>
+          <Alert className="border-warning/40 bg-warning/10 text-warning-foreground [&>svg]:text-warning-foreground">
+            <AlertDescription>{banner}</AlertDescription>
+          </Alert>
         )}
       </div>
+
       <SessionBar
         session={session}
         onReset={() => void handleReset()}
@@ -326,72 +324,109 @@ export default function Playground() {
 
       <StepIndicator current={step} maxReached={maxReached} onNavigate={goToStep} />
 
+      <Separator />
+
       {/* The focus target for a step change. `tabIndex={-1}` makes it
           programmatically focusable without adding a tab stop of its own. */}
       <div ref={stepHeadingRef} tabIndex={-1} className="focus-visible:outline-none">
-      {step === 1 && (
-        <StepChooseMethods
-          scenarios={scenarios}
-          config={config}
-          pendingIds={pendingIds}
-          onChange={(id, value) => void handleChange(id, value)}
-          diff={diff}
-          diffScenarioName={diffScenarioName}
-          onContinue={() => goToStep(2)}
-        />
-      )}
+        {step === 1 && (
+          <StepChooseMethods
+            scenarios={scenarios}
+            config={config}
+            pendingIds={pendingIds}
+            onChange={(id, value) => void handleChange(id, value)}
+            diff={diff}
+            diffScenarioName={diffScenarioName}
+            onContinue={() => goToStep(2)}
+          />
+        )}
 
-      {step === 2 && (
-        <StepSignIn
-          scenarios={scenarios}
-          config={config}
-          oauthReturn={oauthReturn}
-          onDismissOauthReturn={() => setOauthReturn(null)}
-          onDemoDisabled={() => setPhase("explainer")}
-          onBack={() => goToStep(1)}
-          onContinue={() => goToStep(3)}
-        />
-      )}
+        {step === 2 && (
+          <StepSignIn
+            scenarios={scenarios}
+            config={config}
+            oauthReturn={oauthReturn}
+            onDismissOauthReturn={() => setOauthReturn(null)}
+            onDemoDisabled={() => setPhase("explainer")}
+            onBack={() => goToStep(1)}
+            onContinue={() => goToStep(3)}
+          />
+        )}
 
-      {step === 3 && (
-        <StepDownload
-          scenarios={scenarios}
-          config={config}
-          onDemoDisabled={() => setPhase("explainer")}
-          onBack={() => goToStep(2)}
-        />
-      )}
+        {step === 3 && (
+          <StepDownload
+            scenarios={scenarios}
+            config={config}
+            onDemoDisabled={() => setPhase("explainer")}
+            onBack={() => goToStep(2)}
+          />
+        )}
       </div>
-    </main>
+    </Shell>
   );
 }
 
 /** The framework's own site, which links back here. */
 const AUTHKESTRA_SITE = "https://authkestra.com";
 
+/**
+ * The page shell every phase renders into: a header bar with the product
+ * name and a link back to the framework's site, and a max-width content
+ * column below it with consistent vertical rhythm. `wide` widens the column
+ * for the ready phase, which carries the session bar, step nav and a step's
+ * own panels; the loading/unavailable/explainer phases stay narrower since
+ * they hold a single message.
+ */
+function Shell({
+  children,
+  wide = false,
+  busy = false,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+      <main
+        aria-busy={busy || undefined}
+        aria-label={busy ? "Loading playground" : undefined}
+        className={cn(
+          "mx-auto flex w-full flex-1 flex-col gap-8 px-6 py-10 sm:py-14",
+          wide ? "max-w-5xl" : "max-w-3xl",
+        )}
+      >
+        {children}
+      </main>
+    </div>
+  );
+}
+
 function Header() {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-100">Authkestra Playground</h1>
-        <p className="text-sm text-slate-400">
-          Choose your sign-in methods, see the config diff, and try the flows live.
-        </p>
+    <header className="border-b border-border">
+      <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start justify-between gap-3 px-6 py-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Authkestra Playground
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Choose your sign-in methods, see the config diff, and try the flows live.
+          </p>
+        </div>
+        {/*
+          A visitor who likes what they see should not have to go hunting for the
+          framework — the playground exists to send people there.
+        */}
+        <Button asChild variant="outline" size="sm" className="shrink-0">
+          <a href={AUTHKESTRA_SITE} target="_blank" rel="noreferrer">
+            authkestra docs
+            <span aria-hidden="true">→</span>
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        </Button>
       </div>
-      {/*
-        A visitor who likes what they see should not have to go hunting for the
-        framework — the playground exists to send people there.
-      */}
-      <a
-        href={AUTHKESTRA_SITE}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-      >
-        authkestra docs
-        <span aria-hidden="true">→</span>
-        <span className="sr-only">(opens in a new tab)</span>
-      </a>
     </header>
   );
 }

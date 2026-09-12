@@ -1,9 +1,23 @@
 "use client";
 
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-types";
 import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
+import { cn } from "@/lib/cn";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 interface ActionPanelProps {
   scenarioId: string;
@@ -61,81 +75,117 @@ export default function ScenarioPanel({
   showActionPanels = true,
 }: Props) {
   if (scenarios.length === 0) {
-    return <p className="text-sm text-slate-400">No scenarios published yet.</p>;
+    return <p className="text-sm text-muted-foreground">No scenarios published yet.</p>;
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {disabled && disabledReason && (
-        <p className="text-xs text-slate-400">{disabledReason}</p>
-      )}
-      {scenarios.map((scenario) => {
-        const value = config?.scenarios[scenario.id];
-        const unmetDeps = scenario.depends_on.filter(
-          (dep) => !isSatisfied(config, dep),
-        );
-        const isPending = pendingIds.has(scenario.id);
-        const controlDisabled =
-          disabled || !scenario.available || unmetDeps.length > 0 || isPending;
-        const actions = scenario.actions ?? [];
-        const ActionPanel =
-          showActionPanels && actions.length > 0 ? ACTION_PANELS[scenario.id] : undefined;
-        const showActionPanel =
-          ActionPanel &&
-          !disabled &&
-          scenario.available &&
-          unmetDeps.length === 0 &&
-          isSatisfied(config, scenario.id);
+        {disabled && disabledReason && (
+          <p className="text-xs text-muted-foreground">{disabledReason}</p>
+        )}
+        {scenarios.map((scenario) => {
+          const value = config?.scenarios[scenario.id];
+          const active = isControlValueActive(value);
+          const unmetDeps = scenario.depends_on.filter(
+            (dep) => !isSatisfied(config, dep),
+          );
+          const isPending = pendingIds.has(scenario.id);
+          const controlDisabled =
+            disabled || !scenario.available || unmetDeps.length > 0 || isPending;
+          const actions = scenario.actions ?? [];
+          const ActionPanel =
+            showActionPanels && actions.length > 0 ? ACTION_PANELS[scenario.id] : undefined;
+          const showActionPanel =
+            ActionPanel &&
+            !disabled &&
+            scenario.available &&
+            unmetDeps.length === 0 &&
+            isSatisfied(config, scenario.id);
 
-        return (
-          <div
-            key={scenario.id}
-            className="rounded-lg border border-slate-800 bg-slate-900 p-4"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="font-medium text-slate-100">{scenario.name}</h3>
-                <p className="text-sm text-slate-400">{scenario.summary}</p>
-                {/*
-                  Not gated on `!available`: the two states are independent.
-                  The kill switch clears `available`, but a scenario can also be
-                  unusable while still "available" — OAuth with no provider
-                  credentials is exactly that, and it is the live case today.
-                  Gating on `available` would leave that one silently unexplained,
-                  which is the dead end this field exists to prevent.
-                */}
-                {scenario.unavailable_reason && (
-                  <p className="mt-1 text-xs text-amber-400">
-                    {scenario.unavailable_reason}
-                  </p>
-                )}
-                {scenario.available && unmetDeps.length > 0 && (
-                  <p className="mt-1 text-xs text-amber-400">
-                    Requires: {unmetDeps.map((id) => scenarios.find((s) => s.id === id)?.name ?? id).join(", ")}
-                  </p>
-                )}
-              </div>
-              <div className="shrink-0">
-                <ScenarioControl
-                  scenario={scenario}
-                  value={value}
-                  disabled={controlDisabled}
-                  onChange={(next) => onChange(scenario.id, next)}
-                />
-              </div>
-            </div>
+          const disabledExplanation = !controlDisabled
+            ? undefined
+            : isPending
+              ? "Applying your last change…"
+              : disabled && disabledReason
+                ? disabledReason
+                : !scenario.available && scenario.unavailable_reason
+                  ? scenario.unavailable_reason
+                  : unmetDeps.length > 0
+                    ? `Requires ${unmetDeps
+                        .map((id) => scenarios.find((s) => s.id === id)?.name ?? id)
+                        .join(", ")}`
+                    : undefined;
 
-            {showActionPanel && ActionPanel && (
-              <div className="mt-4 border-t border-slate-800 pt-4">
-                <ActionPanel
-                  scenarioId={scenario.id}
-                  onDemoDisabled={onDemoDisabled ?? (() => {})}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
+          return (
+            <Card
+              key={scenario.id}
+              className={cn(
+                "transition-colors",
+                active && !controlDisabled && "border-primary/40 bg-primary/[0.03]",
+                controlDisabled && "opacity-75",
+              )}
+            >
+              <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+                <div className="space-y-1.5">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    {scenario.name}
+                    {active && (
+                      <Badge variant="secondary" className="font-normal">
+                        Active
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription>{scenario.summary}</CardDescription>
+                  {/*
+                    Why a disabled control explains itself in visible text rather
+                    than a tooltip: a tooltip on a disabled control is unreachable.
+                    A `disabled` element takes neither focus nor pointer events, so
+                    the trigger never fires for a keyboard user and fires only
+                    inconsistently for a mouse — which is why the version this
+                    replaced had to wrap the control in a bare div to catch hovers,
+                    and still left the keyboard with nothing.
+
+                    Not gated on `!available`: the two states are independent.
+                    The kill switch clears `available`, but a scenario can also be
+                    unusable while still "available" — OAuth with no provider
+                    credentials is exactly that, and it is the live case today.
+                    Gating on `available` would leave that one silently unexplained,
+                    which is the dead end this field exists to prevent.
+                  */}
+                  {disabledExplanation && (
+                    <p
+                      id={`${scenario.id}-disabled-reason`}
+                      className="text-xs text-warning-foreground"
+                    >
+                      {disabledExplanation}
+                    </p>
+                  )}
+                </div>
+                <div className="shrink-0">
+                  <ScenarioControl
+                    scenario={scenario}
+                    value={value}
+                    disabled={controlDisabled}
+                    describedBy={
+                      disabledExplanation ? `${scenario.id}-disabled-reason` : undefined
+                    }
+                    onChange={(next) => onChange(scenario.id, next)}
+                  />
+                </div>
+              </CardHeader>
+
+              {showActionPanel && ActionPanel && (
+                <CardContent className="pt-0">
+                  <Separator className="mb-4" />
+                  <ActionPanel
+                    scenarioId={scenario.id}
+                    onDemoDisabled={onDemoDisabled ?? (() => {})}
+                  />
+                </CardContent>
+              )}
+            </Card>
+          );
+        })}
     </div>
   );
 }
@@ -144,11 +194,14 @@ function ScenarioControl({
   scenario,
   value,
   disabled,
+  describedBy,
   onChange,
 }: {
   scenario: ScenarioSpec;
   value: ControlValue | undefined;
   disabled: boolean;
+  /** Id of the visible text saying why this is disabled, when it is. */
+  describedBy?: string;
   onChange: (value: ControlValue) => void;
 }) {
   const control = scenario.control;
@@ -156,30 +209,13 @@ function ScenarioControl({
   if (control.kind === "toggle") {
     const enabled = value?.kind === "toggle" ? value.enabled : false;
     return (
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={scenario.name}
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => onChange({ kind: "toggle", enabled: checked })}
         disabled={disabled}
-        onClick={() => onChange({ kind: "toggle", enabled: !enabled })}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-          enabled ? "bg-slate-200" : "bg-slate-700"
-        }`}
-      >
-        {/*
-          Track is 44x24 and the knob 20, so the knob needs a 2px inset on both
-          sides: 2px off, and 44-20-2 = 22px on. `translate-x-5` (20px) left a
-          4px gap on the right against 2px on the left, which read as a
-          slightly crooked switch. The ring gives the white knob definition
-          against the light off-state track.
-        */}
-        <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-slate-900 shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out ${
-            enabled ? "translate-x-[22px]" : "translate-x-0.5"
-          }`}
-        />
-      </button>
+        aria-label={scenario.name}
+        aria-describedby={describedBy}
+      />
     );
   }
 
@@ -189,23 +225,23 @@ function ScenarioControl({
       return <EmptyControlNote scenario={scenario} />;
     }
     return (
-      <div className="flex flex-col gap-1">
-        {control.options.map((option) => (
-          <label
-            key={option.id}
-            className="flex items-center gap-2 text-sm text-slate-300"
-          >
-            <input
-              type="radio"
-              name={`${scenario.id}-select-one`}
-              checked={selected === option.id}
-              disabled={disabled}
-              onChange={() => onChange({ kind: "select_one", selected: option.id })}
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
+      <RadioGroup
+        value={selected ?? undefined}
+        onValueChange={(next) => onChange({ kind: "select_one", selected: next })}
+        disabled={disabled}
+      >
+        {control.options.map((option) => {
+          const id = `${scenario.id}-${option.id}`;
+          return (
+            <div key={option.id} className="flex items-center gap-2">
+              <RadioGroupItem value={option.id} id={id} />
+              <Label htmlFor={id} className="font-normal text-foreground">
+                {option.label}
+              </Label>
+            </div>
+          );
+        })}
+      </RadioGroup>
     );
   }
 
@@ -215,27 +251,28 @@ function ScenarioControl({
     return <EmptyControlNote scenario={scenario} />;
   }
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       {control.options.map((option) => {
         const checked = selected.includes(option.id);
+        const id = `${scenario.id}-${option.id}`;
         return (
-          <label
-            key={option.id}
-            className="flex items-center gap-2 text-sm text-slate-300"
-          >
-            <input
-              type="checkbox"
+          <div key={option.id} className="flex items-center gap-2">
+            <Checkbox
+              id={id}
               checked={checked}
               disabled={disabled}
-              onChange={() => {
-                const next = checked
-                  ? selected.filter((id) => id !== option.id)
-                  : [...selected, option.id];
-                onChange({ kind: "select_many", selected: next });
+              onCheckedChange={(next) => {
+                const nextSelected =
+                  next === true
+                    ? [...selected, option.id]
+                    : selected.filter((optionId) => optionId !== option.id);
+                onChange({ kind: "select_many", selected: nextSelected });
               }}
             />
-            {option.label}
-          </label>
+            <Label htmlFor={id} className="font-normal text-foreground">
+              {option.label}
+            </Label>
+          </div>
         );
       })}
     </div>
@@ -253,7 +290,7 @@ function ScenarioControl({
  */
 function EmptyControlNote({ scenario }: { scenario: ScenarioSpec }) {
   return (
-    <p className="text-xs text-slate-400">
+    <p className="text-xs text-muted-foreground">
       {scenario.unavailable_reason
         ? "Nothing to choose from here."
         : "Nothing to choose from on this deployment."}
