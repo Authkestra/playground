@@ -397,7 +397,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
         </CardHeader>
         <CardContent>
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.5} aria-hidden="true" />
             Checking passkey support in this browser…
           </p>
         </CardContent>
@@ -453,7 +453,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
           </p>
           <div>
             <Button type="button" size="sm" onClick={() => void handleRegister()} disabled={registering}>
-              {registering && <Loader2 className="animate-spin" aria-hidden="true" />}
+              {registering && <Loader2 className="animate-spin" strokeWidth={1.5} aria-hidden="true" />}
               {registering ? "Registering…" : "Register a passkey"}
             </Button>
           </div>
@@ -472,7 +472,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
                 className="border-success/40 bg-success/10 py-2 text-success-foreground"
               >
                 <AlertDescription className="flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
                   Passkey registered. This browser now has {registerResult.count}{" "}
                   passkey{registerResult.count === 1 ? "" : "s"} enrolled.
                 </AlertDescription>
@@ -495,7 +495,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
               onClick={() => void handleAuthenticate()}
               disabled={authenticating}
             >
-              {authenticating && <Loader2 className="animate-spin" aria-hidden="true" />}
+              {authenticating && <Loader2 className="animate-spin" strokeWidth={1.5} aria-hidden="true" />}
               {authenticating ? "Authenticating…" : "Authenticate with a passkey"}
             </Button>
           </div>
@@ -507,7 +507,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
           <div aria-live="polite" role="status">
             {authenticating && (
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.5} aria-hidden="true" />
                 Waiting for your authenticator…
               </p>
             )}
@@ -532,9 +532,9 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
                 <AlertDescription className="flex flex-col gap-1">
                   <span className="flex items-center gap-1.5">
                     {authResult.verified ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
                     ) : (
-                      <Circle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <Circle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
                     )}
                     {authResult.detail}
                   </span>

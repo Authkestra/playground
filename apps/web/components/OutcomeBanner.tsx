@@ -62,7 +62,7 @@ export function OutcomeBanner({
 
   return (
     <Alert ref={ref} tabIndex={-1} role="status" variant={variant} className={className}>
-      <Icon className="h-4 w-4" aria-hidden />
+      <Icon className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       <AlertDescription className="flex items-start justify-between gap-3">
         <p>{message}</p>
         <Button

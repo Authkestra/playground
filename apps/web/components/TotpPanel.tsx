@@ -143,8 +143,23 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
             </AlertDescription>
           </Alert>
           <div>
-            <Button type="button" size="sm" onClick={() => void handleProvision()} disabled={provisioning}>
-              {provisioning && <Loader2 className="animate-spin" aria-hidden="true" />}
+            {/*
+              `secondary` once a secret already exists: the card's "Verify"
+              button below becomes the actual next step at that point, and two
+              filled rust buttons in the same card would leave nothing to
+              distinguish which one matters (DESIGN.md §2, "one orange element
+              per screen region"). With nothing provisioned yet there is no
+              Verify button to compete with, so this is still the one primary
+              action in the card.
+            */}
+            <Button
+              type="button"
+              size="sm"
+              variant={provision ? "secondary" : "default"}
+              onClick={() => void handleProvision()}
+              disabled={provisioning}
+            >
+              {provisioning && <Loader2 className="animate-spin" strokeWidth={1.5} aria-hidden="true" />}
               {provisioning ? "Setting up…" : provision ? "Regenerate secret" : "Set up authenticator"}
             </Button>
           </div>
@@ -222,7 +237,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
                 )}
               />
               <Button type="submit" size="sm" disabled={verifying || code.length !== 6}>
-                {verifying && <Loader2 className="animate-spin" aria-hidden="true" />}
+                {verifying && <Loader2 className="animate-spin" strokeWidth={1.5} aria-hidden="true" />}
                 {verifying ? "Verifying…" : "Verify"}
               </Button>
             </div>
@@ -240,9 +255,9 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
                 >
                   <AlertDescription className="flex items-center gap-1.5">
                     {verifyResult.verified ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
                     ) : (
-                      <Circle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <Circle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
                     )}
                     {verifyResult.detail}
                   </AlertDescription>

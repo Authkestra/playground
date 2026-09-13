@@ -337,12 +337,12 @@ export default function StepDownload({
             >
               {working ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
                   Preparing…
                 </>
               ) : (
                 <>
-                  <Download className="h-4 w-4" aria-hidden />
+                  <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                   Download the project
                 </>
               )}
@@ -394,7 +394,7 @@ export default function StepDownload({
                   className="gap-2"
                   onClick={handleConnectGithub}
                 >
-                  <GitBranch className="h-4 w-4" aria-hidden />
+                  <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                   Connect GitHub
                 </Button>
               </>
@@ -413,21 +413,31 @@ export default function StepDownload({
                     Letters, digits, periods, hyphens and underscores only.
                   </p>
                 </div>
+                {/*
+                  `secondary`, not the default fill: "Download the project" in
+                  the card beside this one is the step's primary action — the
+                  zip needs no account, which is why its own copy calls this
+                  path "optional" — and both this button and that one render
+                  on screen at once. Two filled rust buttons in the same view
+                  would leave neither reading as the one that matters
+                  (DESIGN.md §2).
+                */}
                 <Button
                   type="button"
                   size="sm"
+                  variant="secondary"
                   className="gap-2"
                   disabled={pushing || !isValidRepoName(repoNameTrimmed)}
                   onClick={() => void handlePush()}
                 >
                   {pushing ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                      <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
                       Pushing…
                     </>
                   ) : (
                     <>
-                      <GitBranch className="h-4 w-4" aria-hidden />
+                      <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                       Push to GitHub
                     </>
                   )}
@@ -460,7 +470,7 @@ export default function StepDownload({
 
       <Card className="bg-card/50">
         <CardContent className="flex items-start gap-2.5 p-4">
-          <Star className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          <Star className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.5} aria-hidden />
           <p className="text-sm text-muted-foreground">
             If this saved you time, a star on{" "}
             <a

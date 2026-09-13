@@ -65,6 +65,7 @@ export default function StepChooseMethods({
           <summary className="flex cursor-pointer list-none items-center gap-2 p-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight
               aria-hidden
+              strokeWidth={1.5}
               className="size-4 shrink-0 transition-transform duration-200 group-open:rotate-90"
             />
             Config diff{diffScenarioName ? ` — ${diffScenarioName}` : ""}
