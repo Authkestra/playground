@@ -13,6 +13,7 @@
 //! can see.
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
@@ -35,6 +36,13 @@ const STATE_COOKIE: &str = "ak_state";
 /// than in the framework's encrypted `state`, which the callback helper
 /// consumes before we could read anything out of it.
 const MODE_COOKIE: &str = "ak_oauth_mode";
+
+/// How long a stateless sign-in's JWT is valid for.
+///
+/// Matches the framework's own default for this same helper (see
+/// `authkestra_axum::helpers::axum_callback_handler_stateless`) rather than
+/// inventing a different lifetime for this one demo.
+const JWT_EXPIRES_IN_SECS: u64 = 3600;
 
 /// The wire spelling of a mode: what the login route stores and the callback
 /// hands back to the frontend on the redirect query string.
@@ -164,6 +172,54 @@ async fn login(
     Ok(redirect.into_response())
 }
 
+/// Complete the round trip for the mode the login step recorded.
+///
+/// Both helpers verify the same encrypted state cookie and exchange the same
+/// code; they only diverge in what happens to the identity afterwards, which
+/// is the whole reason the toggle is offered. The session helper writes a
+/// server-side session and puts its id in a cookie; the JWT helper never
+/// touches the session store or the cookie jar at all — it signs the
+/// identity with this deployment's own key (`signing`) and that signature is
+/// the only thing handed back.
+///
+/// Split out from [`callback`] and kept `pub` so a test can drive it against
+/// a fake `ErasedOAuthFlow`: every shipped provider talks to a live token
+/// endpoint, which is not something a test can complete successfully, and
+/// proving the two modes actually diverge needs a *successful* callback in
+/// both of them.
+pub async fn complete_callback(
+    flow: &dyn authkestra_engine::ErasedOAuthFlow,
+    identity_mode: OAuthMode,
+    cookies: Cookies,
+    params: authkestra_axum::helpers::OAuthCallbackParams,
+    session_store: std::sync::Arc<dyn authkestra_axum::helpers::SessionStore>,
+    signing: &crate::signing::SigningKeys,
+    config: authkestra_axum::helpers::SessionConfig,
+) -> Result<Response, (StatusCode, String)> {
+    match identity_mode {
+        OAuthMode::Session => authkestra_axum::helpers::handle_oauth_callback_erased(
+            flow,
+            cookies,
+            params,
+            session_store,
+            config,
+            "/",
+        )
+        .await
+        .map(IntoResponse::into_response),
+        OAuthMode::Jwt => authkestra_axum::helpers::handle_oauth_callback_jwt_erased(
+            flow,
+            cookies,
+            params,
+            signing.manager().clone(),
+            JWT_EXPIRES_IN_SECS,
+            config,
+        )
+        .await
+        .map(IntoResponse::into_response),
+    }
+}
+
 /// The provider's callback.
 #[tracing::instrument(skip_all, fields(provider = %provider))]
 async fn callback(
@@ -290,17 +346,14 @@ async fn callback(
     }
 
     let config = state.engines.session_config();
-
-    // Which completion path depends on the mode the login step recorded. The
-    // stateless one verifies entirely from the encrypted cookie and issues a
-    // JWT; the session one writes a server-side session.
-    let outcome = authkestra_axum::helpers::handle_oauth_callback_erased(
+    let outcome = complete_callback(
         flow.as_ref(),
+        identity_mode,
         cookies,
         params,
         engine.session_store(),
+        &state.signing,
         config,
-        "/",
     )
     .await;
 
@@ -316,9 +369,10 @@ async fn callback(
                 OAuthMode::Jwt => {
                     "The state cookie verified, the authorization code was exchanged \
                      for a token, and the provider returned an identity. That identity \
-                     was signed into a JWT and handed back — nothing about this sign-in \
-                     was written server-side, so no store has to be consulted to trust \
-                     it later."
+                     was signed into a JWT with this deployment's own key and handed \
+                     back — no session was created and no session cookie was set, so \
+                     nothing about this sign-in was written server-side and no store \
+                     has to be consulted to trust it later."
                 }
                 OAuthMode::Session => {
                     "The state cookie verified, the authorization code was exchanged \
@@ -329,17 +383,20 @@ async fn callback(
                 }
             };
 
-            state
-                .events
-                .record(
-                    session_id,
-                    Step::success("oauth", "provider round trip completed")
-                        .detail(detail)
-                        .fact("provider", provider.clone())
-                        .fact("identity mode", mode_str(identity_mode))
-                        .build(),
-                )
-                .await;
+            let mut step = Step::success("oauth", "provider round trip completed")
+                .detail(detail)
+                .fact("provider", provider.clone())
+                .fact("identity mode", mode_str(identity_mode));
+
+            // Names the actual key that signed this token, so the claim above
+            // is checkable rather than asserted — a visitor can compare it
+            // against the `kid` in the JWT they received and the JWKS at
+            // `/.well-known/jwks.json`.
+            if let OAuthMode::Jwt = identity_mode {
+                step = step.fact("signing key", state.signing.kid().unwrap_or("unknown"));
+            }
+
+            state.events.record(session_id, step.build()).await;
             result_redirect(
                 &state,
                 &format!(

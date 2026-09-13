@@ -6,12 +6,19 @@
 //! declined path, the gating, and the diff. The provider round trip itself is
 //! noted on the issue as browser-verified work.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use api::killswitch::KillSwitch;
 use api::routes::AppState;
+use api::scenario::oauth::OAuthMode;
+use api::signing::SigningKeys;
+use authkestra_engine::error::AuthError;
+use authkestra_engine::state::{Identity, OAuth2State, OAuthToken};
+use authkestra_engine::{ErasedOAuthFlow, SessionStore};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
+use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -604,4 +611,175 @@ async fn the_state_cookie_keeps_its_csrf_state_and_pkce_verifier() {
 
     assert!(!decoded.state.is_empty(), "CSRF state must remain");
     assert!(decoded.code_verifier.is_some(), "PKCE verifier must remain");
+}
+
+/// A stand-in for a real `ErasedOAuthFlow`.
+///
+/// Every shipped provider (`GithubProvider` and friends) exchanges the code
+/// with a live network endpoint, which nothing in this suite can complete
+/// successfully — see the module doc. Proving `mode=jwt` is genuinely
+/// stateless needs a *successful* callback to compare against a successful
+/// session-mode one, so this fakes only the network half; the state cookie is
+/// still the real encrypted one, checked by the real framework code in
+/// `api::oauth_routes::complete_callback`.
+struct FakeFlow;
+
+#[async_trait::async_trait]
+impl ErasedOAuthFlow for FakeFlow {
+    fn provider_id(&self) -> String {
+        "fake".to_string()
+    }
+
+    fn initiate_login(
+        &self,
+        _scopes: &[&str],
+        _pkce_challenge: Option<&str>,
+    ) -> (String, OAuth2State) {
+        let state = uuid::Uuid::new_v4().to_string();
+        (
+            format!("http://fake-provider.test/authorize?state={state}"),
+            OAuth2State {
+                state,
+                nonce: None,
+                code_verifier: None,
+                success_url: None,
+                provider_id: "fake".to_string(),
+                expires_at: chrono::Utc::now().timestamp() + 600,
+            },
+        )
+    }
+
+    async fn finalize_login(
+        &self,
+        _code: &str,
+        received_state: &str,
+        expected_state: &OAuth2State,
+    ) -> Result<(Identity, OAuthToken), AuthError> {
+        assert_eq!(
+            received_state, expected_state.state,
+            "test bug: the fake callback didn't echo the state it was started with"
+        );
+        Ok((
+            Identity {
+                provider_id: "fake".to_string(),
+                external_id: "visitor-1".to_string(),
+                email: None,
+                username: None,
+                attributes: HashMap::new(),
+            },
+            OAuthToken {
+                access_token: "fake-access-token".to_string(),
+                token_type: "Bearer".to_string(),
+                expires_in: Some(3600),
+                refresh_token: None,
+                scope: None,
+                id_token: None,
+            },
+        ))
+    }
+}
+
+/// Drives one full round trip through the real framework helpers — the same
+/// ones `api::oauth_routes::callback` calls — against `FakeFlow`, and returns
+/// the response together with the jar it was completed against (so a test can
+/// still inspect cookies afterwards) and the session store it was completed
+/// against (so a test can check what, if anything, was written to it).
+async fn run_callback(
+    mode: OAuthMode,
+) -> (
+    axum::response::Response,
+    tower_cookies::Cookies,
+    Arc<dyn SessionStore>,
+) {
+    use authkestra_axum::helpers::{initiate_oauth_login, OAuthCallbackParams, SessionConfig};
+    use authkestra_engine::store::memory::MemoryStore;
+
+    let cookies = tower_cookies::Cookies::default();
+    let config = SessionConfig::default();
+
+    // Same helper `login()` calls: builds the encrypted `ak_state` cookie and
+    // an authorization URL carrying the CSRF state.
+    let redirect = initiate_oauth_login(&FakeFlow, &cookies, &[], &config, None);
+    let location = redirect
+        .into_response()
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap()
+        .to_string();
+    let provider_state = location
+        .split("state=")
+        .nth(1)
+        .expect("the fake authorization URL carries the state it was given")
+        .to_string();
+
+    let params: OAuthCallbackParams = serde_json::from_value(serde_json::json!({
+        "code": "fake-code",
+        "state": provider_state,
+    }))
+    .unwrap();
+
+    let signing = SigningKeys::for_test("https://issuer.test");
+    let session_store: Arc<dyn SessionStore> = Arc::new(MemoryStore::default());
+
+    let resp = api::oauth_routes::complete_callback(
+        &FakeFlow,
+        mode,
+        cookies.clone(),
+        params,
+        session_store.clone(),
+        &signing,
+        config,
+    )
+    .await
+    .expect("the fake flow always succeeds")
+    .into_response();
+
+    (resp, cookies, session_store)
+}
+
+/// The whole point of the toggle: a successful `mode=jwt` callback must
+/// create no server-side session at all, while the default keeps doing so.
+#[tokio::test]
+async fn a_successful_session_callback_creates_a_session_and_its_cookie() {
+    use authkestra_axum::helpers::SessionConfig;
+
+    let (_, cookies, session_store) = run_callback(OAuthMode::Session).await;
+
+    let session_cookie = cookies
+        .get(&SessionConfig::default().cookie_name)
+        .expect("the session helper must set the framework's session cookie");
+    let session = session_store
+        .load_session(session_cookie.value())
+        .await
+        .unwrap();
+    assert!(
+        session.is_some(),
+        "the id in the session cookie must resolve to a real, stored session"
+    );
+}
+
+#[tokio::test]
+async fn a_successful_jwt_callback_creates_no_session_and_sets_no_session_cookie() {
+    use authkestra_axum::helpers::SessionConfig;
+
+    let (_, cookies, _session_store) = run_callback(OAuthMode::Jwt).await;
+
+    assert!(
+        cookies.get(&SessionConfig::default().cookie_name).is_none(),
+        "a stateless sign-in must never set the framework's session cookie"
+    );
+}
+
+/// The two modes must actually diverge — not just report different labels
+/// while doing the same thing underneath.
+#[tokio::test]
+async fn session_and_jwt_modes_disagree_on_whether_a_session_cookie_is_set() {
+    let (_, session_cookies, _) = run_callback(OAuthMode::Session).await;
+    let (_, jwt_cookies, _) = run_callback(OAuthMode::Jwt).await;
+
+    use authkestra_axum::helpers::SessionConfig;
+    let name = SessionConfig::default().cookie_name;
+    assert!(session_cookies.get(&name).is_some());
+    assert!(jwt_cookies.get(&name).is_none());
 }
