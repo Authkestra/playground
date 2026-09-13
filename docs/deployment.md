@@ -144,7 +144,7 @@ own origin.
 | `CLIENT_IP_XFF_POSITION` | `rightmost` (default, safe) or `leftmost`. See below — do not set this from guesswork. |
 | `<PROVIDER>_CLIENT_ID` / `_SECRET` | `GITHUB_`, `GOOGLE_`, `DISCORD_`. Absent credentials are not an error; the affected scenarios report themselves as not configured. |
 | `GITHUB_KIT_CLIENT_ID` / `_SECRET` | A **second GitHub OAuth app**, separate from `GITHUB_CLIENT_ID` above, used only to push a generated project to a visitor's repo. Register it with the callback `<PUBLIC_BASE_URL>/api/github/callback` and no scope configured at the app level — the flow requests `public_repo` per authorisation. Keep it separate: the sign-in app should ask for the narrowest scope that proves identity, and merging the two would have every visitor trying the sign-in demo grant repo-write on the same click. Absent is not an error — the push reports itself unavailable and the zip download, which needs no GitHub account, is unaffected. |
-| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. Both halves are required or the provider is not offered at all, because a site key without a secret renders a widget whose token nothing can spend — a failure at the last step with no clue as to why. Register the deployment's hostnames with each provider; a widget served from an unregistered host produces a token that fails verification and looks exactly like a bot. **`RECAPTCHA_SECRET_KEY` must be a legacy secret key** — see below. |
+| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. Both halves are required or the provider is not offered at all, because a site key without a secret renders a widget whose token nothing can spend — a failure at the last step with no clue as to why. Register the deployment's hostnames with each provider; a widget served from an unregistered host produces a token that fails verification and looks exactly like a bot. **`RECAPTCHA_SECRET_KEY` must be a legacy secret key** — see below. Note that both-halves-present is a presence check only: an Enterprise key pair passes it and then fails verification, so reCAPTCHA is the one provider where configured does not imply working. |
 
 ### reCAPTCHA and Enterprise
 
@@ -169,6 +169,23 @@ So there are two workable answers and one that is not:
 * **Not this:** an Enterprise API key in `RECAPTCHA_SECRET_KEY`. `siteverify`
   will reject it, and the error reads like an invalid secret rather than like
   the wrong product.
+
+**Both halves present is necessary, not sufficient — and the difference is
+visitor-facing.** The control offers a provider when the deployment holds a site
+key *and* a secret, which is a presence check: it is what stops a site key with
+no secret rendering a widget whose token nothing can spend. An Enterprise key
+pair passes that check, because both halves genuinely exist. Nothing in the
+environment distinguishes a legacy secret from an Enterprise one, so the
+provider is offered, the widget renders, the visitor solves the challenge, and
+verification fails at the last step with no explanation.
+
+That is a worse outcome than an unconfigured provider, which is simply invisible.
+An offered provider is a promise the deployment can complete the flow, and
+presence of credentials is the only evidence available to back it. So if
+reCAPTCHA verification fails with keys that look valid, unset
+`RECAPTCHA_SECRET_KEY` rather than leaving it configured: withdrawing the
+promise is a one-variable change, and it reverses the moment a legacy key
+exists. See #51.
 
 Supporting Enterprise needs a new `CaptchaProvider` variant upstream in
 `authkestra-engine`. Reimplementing the assessment call here instead would mean
