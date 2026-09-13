@@ -9,9 +9,16 @@
 // a hand-kept list of pairs, so it cannot quietly drift out of date.
 //
 // Since the shadcn pass, components address colour only through the semantic
-// tokens in `app/globals.css` (`text-muted-foreground`, `bg-card`), so this
-// resolves those tokens from that file — one source of truth for the palette,
-// read by both the browser and this audit. Three consequences worth stating:
+// tokens (`text-muted-foreground`, `bg-card`), so this resolves those tokens
+// from the same files the browser reads — one source of truth for the palette.
+//
+// Those files are now two, and in two layers. `app/tokens.css` is a verbatim
+// copy of the shared design system (authkestra/design/tokens.css) and holds
+// the primitives as literal `H S% L%` triples plus the semantic roles, which
+// are *aliases* onto those primitives — `--background: var(--ak-neutral-950)`.
+// `app/globals.css` imports it and may override a role locally. So a role no
+// longer carries a value directly and this has to follow the indirection to
+// reach one; see resolveTokens below. Three consequences worth stating:
 //
 //   1. A raw palette class (`text-slate-400`) is now a *failure*, not something
 //      to measure. The convention in docs/ui-conventions.md is that colour comes
@@ -34,7 +41,14 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const CSS = "apps/web/app/globals.css";
+/*
+  Both files, in cascade order: tokens.css first, then globals.css, whose
+  later declarations win exactly as they do in the browser.
+*/
+const CSS_FILES = ["apps/web/app/tokens.css", "apps/web/app/globals.css"];
+
+/** Named in failure messages, where the reader wants somewhere to start. */
+const CSS = CSS_FILES.join(" and ");
 
 /** Minimum ratio for normal-size text. */
 const AA_NORMAL = 4.5;
@@ -80,22 +94,67 @@ function hslToHex(h, s, l) {
 }
 
 /**
- * Pull `--name: H S% L%` out of globals.css. The values are stored bare rather
- * than wrapped in `hsl()` so Tailwind can compose them with an opacity
- * modifier, which is also what makes them straightforward to parse here.
+ * Pull the palette out of the token files.
+ *
+ * Two shapes to collect. A primitive carries its value as a bare `H S% L%`
+ * triple — bare rather than wrapped in `hsl()` so Tailwind can compose it with
+ * an opacity modifier, which is also what makes it straightforward to parse
+ * here. A role instead points at another custom property:
+ * `--background: var(--ak-neutral-950)`.
+ *
+ * Collecting them in file order and letting a later declaration overwrite an
+ * earlier one reproduces the cascade, which is what lets globals.css override
+ * a role that tokens.css already defined.
  */
-function readTokens(path) {
-  const css = readFileSync(path, "utf8");
-  const tokens = {};
-  for (const [, name, h, s, l] of css.matchAll(
-    /--([a-z-]+):\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*;/g,
-  )) {
-    tokens[name] = hslToHex(Number(h), Number(s), Number(l));
+function readDeclarations(paths) {
+  const literals = {};
+  const aliases = {};
+  for (const path of paths) {
+    const css = readFileSync(path, "utf8");
+    for (const [, name, h, s, l] of css.matchAll(
+      /--([a-z0-9-]+):\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*;/g,
+    )) {
+      literals[name] = hslToHex(Number(h), Number(s), Number(l));
+      delete aliases[name];
+    }
+    for (const [, name, target] of css.matchAll(
+      /--([a-z-]+):\s*var\(\s*--([a-z0-9-]+)\s*\)\s*;/g,
+    )) {
+      aliases[name] = target;
+      delete literals[name];
+    }
+  }
+  return { literals, aliases };
+}
+
+/**
+ * Flatten the aliases onto the primitives they point at.
+ *
+ * The chain is one hop deep today (role → primitive), but resolving it as a
+ * loop rather than a single lookup costs nothing and means a role pointing at
+ * another role keeps working. A chain that never lands on a literal — a typo,
+ * or a cycle — leaves the name unresolved, which the audit then reports as an
+ * unknown token rather than silently skipping the pairs that use it.
+ */
+function resolveTokens(paths) {
+  const { literals, aliases } = readDeclarations(paths);
+  const tokens = { ...literals };
+  for (const name of Object.keys(aliases)) {
+    let target = aliases[name];
+    const seen = new Set([name]);
+    while (target !== undefined && !(target in literals)) {
+      if (seen.has(target)) break;
+      seen.add(target);
+      target = aliases[target];
+    }
+    if (target !== undefined && target in literals) {
+      tokens[name] = literals[target];
+    }
   }
   return tokens;
 }
 
-const TOKENS = readTokens(CSS);
+const TOKENS = resolveTokens(CSS_FILES);
 
 function srgbToLinear(c) {
   const v = c / 255;
