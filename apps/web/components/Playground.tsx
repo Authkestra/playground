@@ -438,7 +438,35 @@ function Header() {
     <header className="border-b border-border">
       <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start justify-between gap-3 px-6 py-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-foreground">
+            {/*
+              The mark, per the design system's §8. `aria-hidden` because the
+              heading already says the name — announcing it twice is worse
+              than not labelling it at all. The crossbar carries the rust; the
+              strokes take the heading's own ink via `currentColor`.
+            */}
+            <svg
+              viewBox="0 0 32 32"
+              fill="none"
+              aria-hidden="true"
+              className="h-[1.15em] w-[1.15em] shrink-0"
+            >
+              <path
+                d="M5.5 27.5 16 5l10.5 22.5"
+                stroke="currentColor"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <rect
+                x="10"
+                y="17.6"
+                width="12"
+                height="2.8"
+                rx="1.4"
+                fill="hsl(var(--brand))"
+              />
+            </svg>
             Authkestra Playground
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
