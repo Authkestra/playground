@@ -4,8 +4,11 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/cn"
 
+// Focus is not styled here: the global `:focus-visible` rule in
+// `app/globals.css` (DESIGN.md §7) covers every interactive element, and a
+// component that styled its own would eventually drift from it.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {

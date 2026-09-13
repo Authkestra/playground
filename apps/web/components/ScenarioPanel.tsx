@@ -123,7 +123,15 @@ export default function ScenarioPanel({
               key={scenario.id}
               className={cn(
                 "transition-colors",
-                active && !controlDisabled && "border-primary/40 bg-primary/[0.03]",
+                // State is carried by the "Active" badge and a lift in surface
+                // step, not by hue (DESIGN.md §2 rule 4). This used to tint the
+                // card itself with `bg-primary/[0.03]` — harmless with one
+                // scenario switched on, but with several active at once (the
+                // common case once a visitor has picked more than one
+                // sign-in method) that painted several cards warm
+                // simultaneously, which is exactly the "tinted surface" the
+                // system exists to rule out.
+                active && !controlDisabled && "border-accent bg-accent/20",
                 controlDisabled && "opacity-75",
               )}
             >

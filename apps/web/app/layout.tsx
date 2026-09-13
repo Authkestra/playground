@@ -1,10 +1,20 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Inter } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { cn } from "@/lib/cn";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+// Exposed as CSS variables rather than applied via `.className` directly:
+// `--ak-font-sans`/`--ak-font-mono` in globals.css reference these variable
+// names, which is what lets the token copy's own font stack — shared with
+// the Astro sites, which load the same two faces a different way — prefer
+// next/font's self-hosted, hashed files without ever needing to know this
+// app exists.
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+});
 
 export const metadata: Metadata = {
   title: "Authkestra Playground",
@@ -14,10 +24,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body className={cn(inter.className, "min-h-screen antialiased")}>
-        {children}
-      </body>
+    <html lang="en" className={cn(inter.variable, jetbrainsMono.variable)}>
+      <body className="min-h-screen font-sans antialiased">{children}</body>
     </html>
   );
 }

@@ -132,7 +132,7 @@ export default function StepSignIn({
                   window.location.href = loginUrl(option.id, oauthMode);
                 }}
               >
-                <LogIn className="h-4 w-4" aria-hidden />
+                <LogIn className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                 Continue with {option.label}
               </Button>
             ))}
@@ -247,7 +247,7 @@ function MethodPanel({ id, children }: { id: string; children: ReactNode }) {
   return (
     <Card>
       <CardHeader className="flex-row items-center gap-2 space-y-0 p-4 pb-2">
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />}
+        {Icon && <Icon className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} aria-hidden />}
         <CardTitle className="text-sm font-medium">{PANEL_TITLE[id]}</CardTitle>
       </CardHeader>
       <CardContent className="p-4 pt-0">{children}</CardContent>

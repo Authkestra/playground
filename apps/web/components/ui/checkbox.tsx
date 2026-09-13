@@ -19,7 +19,8 @@ const Checkbox = React.forwardRef<
       // from the single-select radio directly beneath it in the scenario panel.
       // The shape is the only thing telling you whether you may pick more than
       // one, so it has to survive the radius scale rather than follow it.
-      "grid place-content-center peer h-4 w-4 shrink-0 rounded-[4px] border border-primary shadow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+      // Focus is the global rule in app/globals.css, not a ring here.
+      "grid place-content-center peer h-4 w-4 shrink-0 rounded-[4px] border border-primary shadow disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
       className
     )}
     {...props}
@@ -27,7 +28,7 @@ const Checkbox = React.forwardRef<
     <CheckboxPrimitive.Indicator
       className={cn("grid place-content-center text-current")}
     >
-      <Check className="h-4 w-4" />
+      <Check className="h-4 w-4" strokeWidth={1.5} />
     </CheckboxPrimitive.Indicator>
   </CheckboxPrimitive.Root>
 ))

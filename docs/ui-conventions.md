@@ -11,7 +11,20 @@ component, so some panels had no focus ring at all.
 
 Never write a palette class. No `bg-slate-900`, no `text-emerald-400`, no
 `border-slate-700`. Address colour only through the semantic tokens declared in
-`app/globals.css`:
+`app/tokens.css`:
+
+`app/tokens.css` is a **verbatim copy** of the shared design system at
+`authkestra/design/tokens.css`, which the docs site and the landing page also
+carry. Change a colour there and re-copy; a copy edited in place is how the
+three surfaces drift back apart. `app/globals.css` imports it and adds only
+what is genuinely local to this app — the `next/font` variables and the
+base-layer rules. The reasoning behind the palette, including the measured
+contrast ratios, is in that design system's `DESIGN.md`.
+
+The rule those tokens exist to enforce: **the ground is neutral zinc, and rust
+orange is the accent.** Rust marks the one thing per region that matters — the
+primary action, the active step, a link. At most one orange element per region;
+if you want two, one of them is wrong. Never tint a surface warm.
 
 | Token | Use for |
 |---|---|
@@ -36,8 +49,11 @@ the tokens are bare `H S% L%` triples. That is the sanctioned way to get a tint.
 
 ## Why this is enforced, not just asked
 
-`scripts/contrast-audit.mjs` resolves these tokens out of `globals.css` and
-checks every `text-*` against the surface it actually sits on. It also asserts a
+`scripts/contrast-audit.mjs` resolves these tokens out of `tokens.css` and
+`globals.css` — following the roles through to the primitives they alias, since
+a role like `--background` now points at `var(--ak-neutral-950)` rather than
+carrying a triple itself — and checks every `text-*` against the surface it
+actually sits on. It also asserts a
 floor on the number of pairs it checked: an audit that silently stops
 recognising the classes in use is worse than no audit, because it reports green.
 A palette class slipped into a component is therefore either caught as a
@@ -68,7 +84,10 @@ override a component default.
 ## Focus and motion
 
 Do not style `focus-visible` per component. `globals.css` gives every
-interactive element the same ring. Auth flows are keyboard-heavy and a
+interactive element the same ring, as an `outline` rather than a `box-shadow`:
+a shadow-based ring is declared in the `base` layer, and any component carrying
+`shadow-sm` overrides it from the *utilities* layer, which silently removes
+focus from exactly the controls that have elevation. Auth flows are keyboard-heavy and a
 per-component ring is how the old UI ended up with panels that had none.
 
 Transitions are `transition-colors` on hover/active states. Anything that moves
