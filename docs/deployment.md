@@ -220,6 +220,10 @@ fronts traffic with Cloudflare, so `cf-connecting-ip` may be present and is the
 better source because Cloudflare strips client-supplied copies of it. The
 endpoint settles which.
 
+This step is recorded as an accepted trade-off (not yet done collapses every
+visitor into one rate-limit bucket, never a bypass) in
+`docs/security-review-2026-09.md`, finding F3.
+
 ## Verifying a deployment
 
 ```sh

@@ -25,10 +25,35 @@ use crate::demo_config::DemoConfig;
 /// Absent credentials are not an error: the playground runs fine without them,
 /// and the affected scenarios report themselves as not configured rather than
 /// failing at boot. Registering the real apps is roadmap P0 and needs a human.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ProviderCredentials {
     creds: HashMap<String, (String, String)>,
     redirect_base: String,
+}
+
+impl std::fmt::Debug for ProviderCredentials {
+    /// Written by hand rather than derived, for the same reason
+    /// `GithubKitCredentials` writes its own: a derived `Debug` prints the
+    /// client secret in full, and it only takes one future `{:?}` — a debug
+    /// log, a panic message, a failing assertion — to put three providers'
+    /// OAuth secrets into whatever collects this process's output.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut providers: Vec<_> = self
+            .creds
+            .iter()
+            .map(|(provider, (client_id, _))| (provider.as_str(), client_id.as_str()))
+            .collect();
+        // A `HashMap` iterates in whatever order it likes, and a debug line
+        // that reorders itself between runs is harder to diff than it needs
+        // to be.
+        providers.sort_unstable();
+
+        let mut s = f.debug_struct("ProviderCredentials");
+        for (provider, client_id) in providers {
+            s.field(provider, &format_args!("{client_id} / <redacted>"));
+        }
+        s.field("redirect_base", &self.redirect_base).finish()
+    }
 }
 
 impl ProviderCredentials {
@@ -312,6 +337,30 @@ mod tests {
 
     fn factory() -> EngineFactory {
         EngineFactory::new(ProviderCredentials::default(), false)
+    }
+
+    /// A derived `Debug` here would print every configured provider's client
+    /// secret. The playground logs `Settings` and its neighbours freely, so
+    /// the redaction is asserted rather than trusted.
+    #[test]
+    fn debug_output_never_carries_a_client_secret() {
+        let mut creds = ProviderCredentials::default();
+        creds.insert_for_test("github", "public-client-id", "s3cret-do-not-print");
+
+        let rendered = format!("{creds:?}");
+
+        assert!(
+            !rendered.contains("s3cret-do-not-print"),
+            "the client secret must never reach a debug line: {rendered}"
+        );
+        assert!(
+            rendered.contains("public-client-id"),
+            "the client id is public and is what makes the line useful: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "a redacted secret should say so rather than vanish: {rendered}"
+        );
     }
 
     #[test]
