@@ -467,12 +467,11 @@ export default function StepDownload({
               href={STAR_URL}
               target="_blank"
               rel="noreferrer noopener"
-              className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
+              className="font-medium text-foreground underline underline-offset-2 hover:text-primary-accent"
             >
               marcjazz/authkestra
             </a>{" "}
-            helps other people find it. Entirely optional, and never a condition
-            of the download.
+            helps other people find it.
           </p>
         </CardContent>
       </Card>
