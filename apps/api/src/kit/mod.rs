@@ -909,6 +909,20 @@ async fn me(session: Result<AuthSession, AxumError>) -> impl IntoResponse {{
     )
 }
 
+/// A pointer to the upstream ORM examples, shown only when the generated
+/// project actually has a credential store to point away from.
+fn store_note(plan: &Plan) -> String {
+    if !(plan.is_active("passkeys") || plan.is_active("totp")) {
+        return String::new();
+    }
+    "\n\nThe credential store here is `sqlx`/SQLite. A reader who wants a \
+     different data layer can look at `authkestra-example-seaorm` and \
+     `authkestra-example-diesel` upstream — conformance-tested example \
+     crates, not published store libraries. SeaORM is SQLite-only without \
+     foreign keys, and Diesel is sync, run via `spawn_blocking`."
+        .to_string()
+}
+
 fn readme(plan: &Plan) -> String {
     let selected = if plan.is_empty() {
         "Nothing was selected, so this is the smallest useful engine: sessions \
@@ -992,7 +1006,7 @@ cargo tree -i aws-lc-rs -e features
 The framework deliberately owns no user or account table — there is no
 `UserStore` trait. Your application owns that data, so this project stores no
 users and invents no schema. Wire the identity you get from a session into
-whatever persistence you already have.
+whatever persistence you already have.{store_note}
 
 ## Licence
 
@@ -1004,6 +1018,7 @@ MIT OR Apache-2.0, matching the framework.
         run = run_section(plan),
         deploy_section = deploy::readme_section(plan),
         links = link_list(&plan.links()),
+        store_note = store_note(plan),
     )
 }
 
@@ -1306,6 +1321,24 @@ mod tests {
         assert!(
             readme.contains("no user or account table"),
             "the reader should not have to discover this"
+        );
+    }
+
+    /// The upstream ORM pointer sits next to the "no user table" note, but
+    /// only when there is a credential store to point away from at all.
+    #[test]
+    fn the_readme_points_at_upstream_orms_only_when_a_store_is_active() {
+        let readme = contents(&kit_with(&[("passkeys", on())]), "README.md");
+        assert!(
+            readme.contains("authkestra-example-seaorm")
+                && readme.contains("authkestra-example-diesel"),
+            "a store-using kit should point at both upstream examples"
+        );
+
+        let base_readme = contents(&base(), "README.md");
+        assert!(
+            !base_readme.contains("authkestra-example-seaorm"),
+            "a store-free kit has nothing to point away from"
         );
     }
 
