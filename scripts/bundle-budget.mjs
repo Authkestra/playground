@@ -40,7 +40,23 @@ const NEXT = join(APP, ".next");
  * `/` is the playground itself: a client-rendered island with three steps and
  * every ceremony panel. `/_not-found` is the floor — what Next.js costs before
  * any of our code — and is budgeted so a framework upgrade that doubles the
- * baseline is visible rather than absorbed.
+ * baseline is visible rather than absorbed. `/how-it-works` is the explainer
+ * route from issue #21: a pure server component, no `"use client"` anywhere
+ * in its tree, so its budget exists to defend one specific thing — that the
+ * playground's client island (the ~50 kB of the switches, steps and ceremony
+ * panels that make up `/page`) cannot leak into it. It measures a few
+ * kilobytes above the `/_not-found` floor rather than sitting on it exactly,
+ * because the shared header's navigation and the page's own link back into
+ * the playground both go through `next/link`, which costs a little over the
+ * bare 404 page. If this number ever climbs anywhere near `/page`'s, that is
+ * the client bundle leaking and is a bug, not a budget to raise.
+ *
+ * ## Why `/how-it-works/page` is 93
+ *
+ * Measured at 92.1 kB gzipped against a 86.2 kB `/_not-found` floor — the
+ * `next/link` cost above, nothing else. 93 leaves headroom of less than a
+ * kilobyte on purpose: generous headroom here is exactly what would let a
+ * stray client import go unnoticed.
  *
  * ## Why `/page` went from 115 to 136
  *
@@ -88,6 +104,7 @@ const NEXT = join(APP, ".next");
 const BUDGETS_KB = {
   "/page": 138,
   "/_not-found/page": 92,
+  "/how-it-works/page": 93,
 };
 
 const report = process.argv.includes("--report");

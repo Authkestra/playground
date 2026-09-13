@@ -396,16 +396,15 @@ export default function Playground() {
   );
 }
 
-/** The framework's own site, which links back here. */
-const AUTHKESTRA_SITE = "https://authkestra.com";
-
 /**
- * The page shell every phase renders into: a header bar with the product
- * name and a link back to the framework's site, and a max-width content
- * column below it with consistent vertical rhythm. `wide` widens the column
- * for the ready phase, which carries the session bar, step nav and a step's
- * own panels; the loading/unavailable/explainer phases stay narrower since
- * they hold a single message.
+ * The page shell every phase renders into: a max-width content column with
+ * consistent vertical rhythm, plus the one-line description of what the
+ * playground does — page content, not site chrome, which is why it lives
+ * here rather than in the shared header every route now gets from
+ * `app/layout.tsx`. `wide` widens the column for the ready phase, which
+ * carries the session bar, step nav and a step's own panels; the
+ * loading/unavailable/explainer phases stay narrower since they hold a
+ * single message.
  */
 function Shell({
   children,
@@ -417,74 +416,25 @@ function Shell({
   busy?: boolean;
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-      <main
-        aria-busy={busy || undefined}
-        aria-label={busy ? "Loading playground" : undefined}
-        className={cn(
-          "mx-auto flex w-full flex-1 flex-col gap-8 px-6 py-10 sm:py-14",
-          wide ? "max-w-5xl" : "max-w-3xl",
-        )}
-      >
-        {children}
-      </main>
-    </div>
-  );
-}
-
-function Header() {
-  return (
-    <header className="border-b border-border">
-      <div className="mx-auto flex w-full max-w-5xl flex-wrap items-start justify-between gap-3 px-6 py-6">
-        <div>
-          <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-foreground">
-            {/*
-              The mark, per the design system's §8. `aria-hidden` because the
-              heading already says the name — announcing it twice is worse
-              than not labelling it at all. The crossbar carries the rust; the
-              strokes take the heading's own ink via `currentColor`.
-            */}
-            <svg
-              viewBox="0 0 32 32"
-              fill="none"
-              aria-hidden="true"
-              className="h-[1.15em] w-[1.15em] shrink-0"
-            >
-              <path
-                d="M5.5 27.5 16 5l10.5 22.5"
-                stroke="currentColor"
-                strokeWidth="2.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <rect
-                x="10"
-                y="17.6"
-                width="12"
-                height="2.8"
-                rx="1.4"
-                fill="hsl(var(--brand))"
-              />
-            </svg>
-            Authkestra Playground
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Choose your sign-in methods, see the config diff, and try the flows live.
-          </p>
-        </div>
-        {/*
-          A visitor who likes what they see should not have to go hunting for the
-          framework — the playground exists to send people there.
-        */}
-        <Button asChild variant="outline" size="sm" className="shrink-0">
-          <a href={AUTHKESTRA_SITE} target="_blank" rel="noreferrer">
-            authkestra docs
-            <span aria-hidden="true">→</span>
-            <span className="sr-only">(opens in a new tab)</span>
-          </a>
-        </Button>
-      </div>
-    </header>
+    <main
+      aria-busy={busy || undefined}
+      aria-label={busy ? "Loading playground" : undefined}
+      className={cn(
+        "mx-auto flex w-full flex-1 flex-col gap-8 px-6 py-10 sm:py-14",
+        wide ? "max-w-5xl" : "max-w-3xl",
+      )}
+    >
+      {/*
+        The page's heading, present for the document outline rather than for
+        the eye: the wordmark in the shared header already says this, and
+        saying it twice in the same viewport would be noise. The explainer
+        route shows its own heading instead.
+      */}
+      <h1 className="sr-only">Authkestra Playground</h1>
+      <p className="text-sm text-muted-foreground">
+        Choose your sign-in methods, see the config diff, and try the flows live.
+      </p>
+      {children}
+    </main>
   );
 }
