@@ -404,6 +404,151 @@ async fn admin_requires_the_bearer_token() {
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// The weekly view is our own operational data, not the visitor's, and a
+/// public one would be a free competitive-intelligence feed. It lives behind
+/// the same gate as the kill switch, which means no gate at all when no token
+/// is configured — the router is simply not mounted.
+#[tokio::test]
+async fn the_metrics_view_is_absent_when_no_admin_token_is_configured() {
+    let resp = app(KillSwitch::default(), None)
+        .await
+        .oneshot(req("GET", "/admin/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_metrics_view_requires_the_bearer_token() {
+    let resp = app(KillSwitch::default(), Some("s3cret"))
+        .await
+        .oneshot(req("GET", "/admin/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The acceptance criterion of #36, driven the way a visitor drives it: a
+/// session, a toggle, a download, and then the weekly view showing all three.
+///
+/// Through the real router rather than by calling `Metrics` directly, because
+/// what is actually worth asserting is the wiring — a counter nothing
+/// increments is the failure this catches.
+#[tokio::test]
+async fn a_visitors_journey_shows_up_in_the_weekly_view() {
+    let app = app(KillSwitch::default(), Some("s3cret")).await;
+
+    let configured = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/scenarios/dummy_toggle/configure")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"value":{"kind":"toggle","enabled":true}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(configured.status(), StatusCode::OK);
+    let cookie = session_cookie(&configured).expect("cookie");
+
+    let downloaded = app
+        .clone()
+        .oneshot(
+            req("GET", "/api/starter-kit")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(downloaded.status(), StatusCode::OK);
+
+    let resp = app
+        .oneshot(
+            req("GET", "/admin/metrics")
+                .header(header::AUTHORIZATION, "Bearer s3cret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let weeks = body_json(resp).await;
+    let this_week = &weeks[0];
+
+    assert_eq!(this_week["sessions"], 1, "one visitor, one session");
+    assert_eq!(this_week["scenarios"]["dummy_toggle"]["enabled"], 1);
+    assert_eq!(this_week["funnel"]["configured"], 1);
+    assert_eq!(this_week["funnel"]["downloaded"], 1);
+    assert_eq!(
+        this_week["funnel"]["acted"], 0,
+        "this visitor never ran a ceremony"
+    );
+    assert_eq!(
+        this_week["downloads"]["dummy_toggle"], 1,
+        "a download is counted against the configuration that produced it"
+    );
+}
+
+/// The funnel counts sessions, not requests. A visitor who changes their mind
+/// six times is still one visitor who reached the configure step, and a view
+/// that said otherwise would make every rate in it meaningless.
+#[tokio::test]
+async fn one_busy_visitor_is_still_one_visitor_in_the_funnel() {
+    let app = app(KillSwitch::default(), Some("s3cret")).await;
+
+    let first = app
+        .clone()
+        .oneshot(
+            req("POST", "/api/scenarios/dummy_toggle/configure")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"value":{"kind":"toggle","enabled":true}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let cookie = session_cookie(&first).expect("cookie");
+
+    for enabled in ["false", "true", "false"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                req("POST", "/api/scenarios/dummy_toggle/configure")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::from(format!(
+                        r#"{{"value":{{"kind":"toggle","enabled":{enabled}}}}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    let weeks = body_json(
+        app.oneshot(
+            req("GET", "/admin/metrics")
+                .header(header::AUTHORIZATION, "Bearer s3cret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    assert_eq!(weeks[0]["sessions"], 1);
+    assert_eq!(weeks[0]["funnel"]["configured"], 1);
+    assert_eq!(
+        weeks[0]["scenarios"]["dummy_toggle"]["enabled"], 2,
+        "switching it on twice is two attempts to try it; switching it off is not"
+    );
+}
+
 #[tokio::test]
 async fn admin_can_flip_the_switch_at_runtime() {
     let state = state_with(KillSwitch::default(), Some("s3cret")).await;
