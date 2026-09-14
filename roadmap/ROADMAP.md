@@ -8,13 +8,13 @@
 |---|---|---|---|
 | `P0` | Foundations | 7 | Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet. |
 | `P1` | Playground core | 7 | The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows. |
-| `P2` | Scenarios | 8 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
+| `P2` | Scenarios | 9 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
 | `P4` | Downloadable starter kit | 12 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
 | `P6` | Post-launch / wizard path | 6 | Backlog: what turns the playground into the broader 'v0 for Rust' scaffolder, plus cratestack integration. |
 
-**53 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
+**54 issues across 7 phases.** P0–P5 is v0; P6 is backlog.
 
 ## P0 — Foundations
 
@@ -465,6 +465,32 @@ Not in scope here: DPoP and certificate binding. Both are supported by the crate
 
 ### Acceptance
 A visitor issues a token, sees the `kid` in its header, fetches `/.well-known/jwks.json` and finds that same `kid`, and watches the protected route accept it. Then they see a token signed by a key absent from that JWKS rejected for that reason by name, and an untrusted issuer rejected for its own.
+
+#### Show a stale JWKS cache: rotate the issuer's key and watch the resource server catch up
+
+`area:api` `area:scenario` `type:feature`
+
+Split out of #52, which shipped the JWKS-validating resource server and three of its four new failure modes — unknown `kid`, untrusted issuer, missing `kid`. The fourth, **stale cache**, is not implemented: no `Forgery` variant, no verdict, no test, no UI. Only prose describes it (`apps/api/src/scenario/resource.rs:672-675` and the comment at `:172`).
+
+It was held back rather than rushed because the obvious implementation is wrong for this deployment. The signing key is **per-deployment** (`apps/api/src/signing.rs`, `TOKEN_SIGNING_KEY_PEM`), and the demo is shared: actually rotating it to show a stale cache would invalidate every other visitor's in-flight token at the same moment. The failure mode is real and worth showing; the mechanism has to be one visitor's rotation, not the deployment's.
+
+### The shape that would work
+
+A per-session key, published alongside the deployment key, with the visitor controlling when the resource server is allowed to see it:
+
+- [ ] Mint a session-scoped Ed25519 key on demand, and sign a token with it
+- [ ] Publish it into `/.well-known/jwks.json` on a delay, or behind an explicit "publish it now" step, so the window where the cache is behind the issuer is a thing the visitor opens and closes
+- [ ] A `stale_cache` verdict distinct from `unknown_kid` — the two are the same HTTP outcome and a completely different diagnosis, which is the whole lesson
+- [ ] Show the cache's refresh interval and the time since its last fetch, so "wait for it" is a visible countdown rather than a mystery
+- [ ] A test that the same token is rejected before the refresh and accepted after it
+
+### Worth deciding first
+
+Whether a per-session key belongs in the published JWKS at all. The set is public and cacheable (`apps/api/tests/jwks.rs`), and filling it with one key per visitor makes it grow with traffic and leaks a crude session count. The alternatives are a second key-set endpoint scoped to the session, or a `JwksCache` pointed at a per-session URL — which is closer to what a real multi-tenant issuer does anyway, and may be the better demo for that reason.
+
+### Why it matters
+
+Of the four failure modes #52 named, this is the one that actually costs people afternoons: the key rotated, the token is genuinely valid, and the resource server says no for a reason that looks identical to a forgery. Everything else in the scenario is checkable by hand against the published key set. This one is only visible if the playground shows the clock.
 
 ---
 
