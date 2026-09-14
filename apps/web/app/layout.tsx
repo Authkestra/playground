@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { cn } from "@/lib/cn";
+import SiteHeader from "@/components/SiteHeader";
+import SiteFooter from "@/components/SiteFooter";
 import "./globals.css";
 
 // Exposed as CSS variables rather than applied via `.className` directly:
@@ -25,7 +27,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={cn(inter.variable, jetbrainsMono.variable)}>
-      <body className="min-h-screen font-sans antialiased">{children}</body>
+      <body className="min-h-screen font-sans antialiased">
+        <div className="flex min-h-screen flex-col">
+          <SiteHeader />
+          {children}
+          <SiteFooter />
+        </div>
+      </body>
     </html>
   );
 }
