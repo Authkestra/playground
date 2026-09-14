@@ -315,6 +315,7 @@ fn build_state_with_github(
         credentials: Arc::new(creds),
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
         events: Arc::new(crate::events::EventLog::new(kv.clone(), ttl)),
+        metrics: Arc::new(crate::metrics::Metrics::new(kv.clone(), ttl)),
         signing,
         github_push: Arc::new(GithubPushState::new(
             github_api,
@@ -382,10 +383,75 @@ pub fn test_state_with_shared_store_and_admin(
         credentials: Arc::new(creds),
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(store.clone())),
         events: Arc::new(crate::events::EventLog::new(store.clone(), ttl)),
+        metrics: Arc::new(crate::metrics::Metrics::new(store.clone(), ttl)),
         signing,
         github_push: Arc::new(GithubPushState::new(
             Arc::new(FakeGitHubApi::default()),
             GithubTokenStore::new(store, crate::github_token_store::TOKEN_TTL),
         )),
     }
+}
+
+/// A store where every operation fails.
+///
+/// Anything that writes for our benefit rather than the visitor's — the flow
+/// log, the usage counters — has to survive the store being unreachable
+/// without the visitor's request failing with it. That is a property worth
+/// asserting rather than assuming, and asserting it needs a store that is
+/// reliably down.
+pub struct BrokenKv;
+
+#[async_trait::async_trait]
+impl crate::store::KeyValue for BrokenKv {
+    async fn get(&self, _: &str) -> Result<Option<String>, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn set(&self, _: &str, _: &str, _: Duration) -> Result<(), crate::store::StoreError> {
+        Err(down())
+    }
+    async fn delete(&self, _: &str) -> Result<bool, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn take(&self, _: &str) -> Result<Option<String>, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn values_with_prefix(&self, _: &str) -> Result<Vec<String>, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn delete_with_prefix(&self, _: &str) -> Result<u64, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn append_capped(
+        &self,
+        _: &str,
+        _: &str,
+        _: usize,
+        _: Duration,
+    ) -> Result<(), crate::store::StoreError> {
+        Err(down())
+    }
+    async fn list(&self, _: &str) -> Result<Vec<String>, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn increment(&self, _: &str, _: Duration) -> Result<i64, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn set_if_absent(
+        &self,
+        _: &str,
+        _: &str,
+        _: Duration,
+    ) -> Result<bool, crate::store::StoreError> {
+        Err(down())
+    }
+    async fn entries_with_prefix(
+        &self,
+        _: &str,
+    ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
+        Err(down())
+    }
+}
+
+fn down() -> crate::store::StoreError {
+    crate::store::StoreError::Backend("down".into())
 }

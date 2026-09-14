@@ -36,6 +36,9 @@ pub struct AppState {
     pub ceremonies: Arc<crate::ceremony::CeremonyStore>,
     /// The visitor-facing flow log.
     pub events: Arc<crate::events::EventLog>,
+    /// Aggregate usage counters. Nothing here is per-visitor — see
+    /// `metrics`'s module docs and `docs/decisions/0009-usage-metrics.md`.
+    pub metrics: Arc<crate::metrics::Metrics>,
     /// This deployment's token-signing identity, and the JWKS it publishes.
     pub signing: Arc<crate::signing::SigningKeys>,
     /// The GitHub client and short-lived token store behind "push to GitHub"
@@ -110,6 +113,11 @@ pub(crate) async fn resolve_session(
             state.settings.session_ttl_hours,
         ));
         cookies.add(cookie);
+
+        // `existing != session.id` is exactly "this visitor was given a new
+        // session", which is the only definition of a visitor this service
+        // has — and the denominator every rate in the weekly view divides by.
+        state.metrics.session_created().await;
     }
 
     Ok(session)
@@ -243,6 +251,15 @@ async fn configure_scenario(
     let d = diff::diff(&before, &after, registry);
     tracing::info!(entries = d.entries.len(), "configuration changed");
 
+    state
+        .metrics
+        .configured(
+            session.id,
+            &id,
+            updated.config.active_ids().contains(&id.as_str()),
+        )
+        .await;
+
     // Warm the engine for the new config so the first `try` isn't the one
     // paying for construction.
     let _ = state.engines.engine_for(&updated.config);
@@ -295,7 +312,15 @@ async fn scenario_action(
     };
 
     let payload = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
-    Ok(Json(scenario.action(&action, payload, &ctx).await?))
+
+    // Counted either side of the call rather than only on success: a scenario
+    // people reach for and cannot finish is the single most useful thing this
+    // view can show, and it is invisible if only completions are recorded.
+    state.metrics.action_attempted(session.id, &id).await;
+    let outcome = scenario.action(&action, payload, &ctx).await?;
+    state.metrics.action_completed(&id).await;
+
+    Ok(Json(outcome))
 }
 
 #[tracing::instrument(skip_all)]
@@ -481,6 +506,14 @@ async fn download_starter_kit(
 
     tracing::info!(archive = %name, bytes = bytes.len(), "starter kit downloaded");
 
+    state
+        .metrics
+        .downloaded(
+            session.id,
+            &crate::metrics::configuration_name(&session.config.active_ids()),
+        )
+        .await;
+
     Ok((
         [
             (header::CONTENT_TYPE, "application/zip".to_string()),
@@ -493,6 +526,43 @@ async fn download_starter_kit(
         ],
         bytes,
     ))
+}
+
+/// How many weeks the metrics view returns when the caller does not say.
+///
+/// Two months: enough to see whether a change moved anything, without making
+/// the default response a wall.
+const DEFAULT_METRICS_WEEKS: u64 = 8;
+
+#[derive(Debug, Deserialize)]
+pub struct MetricsQuery {
+    /// How many weeks back to read, newest first.
+    pub weeks: Option<u64>,
+}
+
+/// The weekly usage view.
+///
+/// Behind the same admin gate as everything else under `/admin`, and therefore
+/// unreachable at all when `ADMIN_TOKEN` is unset — the whole router is not
+/// mounted. That matters more here than for the other two: a public endpoint
+/// reporting how many people downloaded what would be a free competitive
+/// intelligence feed, and it is our own operational data, not the visitor's.
+#[tracing::instrument(skip_all)]
+async fn admin_metrics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<MetricsQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    authorize_admin(&state, &headers)?;
+
+    // Clamped rather than trusted: a caller asking for ten thousand weeks
+    // would otherwise be asking the store for ten thousand prefix reads.
+    let weeks = query
+        .weeks
+        .unwrap_or(DEFAULT_METRICS_WEEKS)
+        .clamp(1, crate::metrics::RETENTION_WEEKS);
+
+    Ok(Json(state.metrics.snapshot(weeks).await))
 }
 
 // -------------------------------------------------------------------- router
@@ -525,6 +595,7 @@ pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/admin/kill-switch", post(admin_kill_switch))
         .route("/admin/client-ip", get(admin_client_ip))
+        .route("/admin/metrics", get(admin_metrics))
 }
 
 #[cfg(test)]

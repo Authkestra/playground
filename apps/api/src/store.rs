@@ -30,8 +30,8 @@ pub enum StoreError {
 
 /// A string-keyed store with per-key expiry.
 ///
-/// Deliberately small — five operations — so that swapping the backend, or
-/// adding another, stays a contained change.
+/// Deliberately small, so that swapping the backend, or adding another, stays
+/// a contained change.
 #[async_trait::async_trait]
 pub trait KeyValue: Send + Sync {
     async fn get(&self, key: &str) -> Result<Option<String>, StoreError>;
@@ -56,6 +56,40 @@ pub trait KeyValue: Send + Sync {
 
     /// Delete every key under `prefix`. Returns how many were removed.
     async fn delete_with_prefix(&self, prefix: &str) -> Result<u64, StoreError>;
+
+    /// Add one to a counter, (re)setting its TTL, and return the new value.
+    ///
+    /// Atomic, because the alternative is read-add-write and the counters this
+    /// exists for are incremented from concurrent requests by definition — two
+    /// visitors downloading at the same moment would read the same number and
+    /// one would overwrite the other, which loses exactly the traffic worth
+    /// counting.
+    ///
+    /// The TTL is reset on every increment, so a bucket expires that long after
+    /// the *last* thing that touched it rather than after the first.
+    async fn increment(&self, key: &str, ttl: Duration) -> Result<i64, StoreError>;
+
+    /// Write a value only if the key is absent. Returns whether it was written.
+    ///
+    /// The check and the write are one operation for the same reason `take` is:
+    /// two concurrent requests doing get-then-set would both see the key
+    /// absent. Used to make a counter increment once per session rather than
+    /// once per request.
+    async fn set_if_absent(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Duration,
+    ) -> Result<bool, StoreError>;
+
+    /// Keys and their values under `prefix`, the key given as the caller wrote
+    /// it rather than with any backend namespace still attached.
+    ///
+    /// `values_with_prefix` is enough for credentials, where the value carries
+    /// its own identity. A counter's identity is its key — `download:totp` and
+    /// `download:passkeys` are both just a number — so reading a set of
+    /// counters needs the keys back too.
+    async fn entries_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError>;
 
     /// Append to a capped list, oldest entries dropped past `cap`.
     ///
@@ -249,6 +283,70 @@ impl KeyValue for RedisKv {
         Ok(values.into_iter().flatten().collect())
     }
 
+    async fn increment(&self, key: &str, ttl: Duration) -> Result<i64, StoreError> {
+        let mut conn = self.conn().await?;
+        let full = self.full(key);
+        let secs = ttl.as_secs().max(1) as i64;
+        // One atomic pipeline rather than INCR then EXPIRE as separate round
+        // trips: a failure between the two would leave a counter with no TTL,
+        // which on a shared Redis is a leak that never announces itself.
+        let (value,): (i64,) = redis::pipe()
+            .atomic()
+            .incr(&full, 1)
+            .expire(&full, secs)
+            .ignore()
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(value)
+    }
+
+    async fn set_if_absent(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Duration,
+    ) -> Result<bool, StoreError> {
+        let mut conn = self.conn().await?;
+        let secs = ttl.as_secs().max(1);
+        // SET ... NX EX: the test, the write and the expiry are one command.
+        // A nil reply means the key was already there.
+        let reply: Option<String> = redis::cmd("SET")
+            .arg(self.full(key))
+            .arg(value)
+            .arg("NX")
+            .arg("EX")
+            .arg(secs)
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(reply.is_some())
+    }
+
+    async fn entries_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError> {
+        use redis::AsyncCommands;
+        let keys = self.scan(prefix).await?;
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.conn().await?;
+        let values: Vec<Option<String>> = conn
+            .mget(&keys)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        // SCAN hands back the namespaced key; the caller only ever knew the
+        // logical one, so give that back or nothing downstream can match it.
+        let namespace = format!("{}:", self.prefix);
+        Ok(keys
+            .into_iter()
+            .zip(values)
+            .filter_map(|(k, v)| {
+                let logical = k.strip_prefix(&namespace)?.to_string();
+                Some((logical, v?))
+            })
+            .collect())
+    }
+
     async fn delete_with_prefix(&self, prefix: &str) -> Result<u64, StoreError> {
         use redis::AsyncCommands;
         let keys = self.scan(prefix).await?;
@@ -395,6 +493,66 @@ impl KeyValue for MemoryKv {
             .collect())
     }
 
+    async fn increment(&self, key: &str, ttl: Duration) -> Result<i64, StoreError> {
+        let expires_at = self.now()
+            + chrono::Duration::from_std(ttl)
+                .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
+        let now = self.now();
+        // One write lock covers read, add and write, so this is atomic with
+        // respect to other callers exactly as the Redis pipeline is.
+        let mut guard = self.entries.write().expect("memory store poisoned");
+        let next = guard
+            .get(key)
+            .filter(|e| now < e.expires_at)
+            .and_then(|e| e.value.parse::<i64>().ok())
+            .unwrap_or(0)
+            + 1;
+        guard.insert(
+            key.to_string(),
+            Entry {
+                value: next.to_string(),
+                expires_at,
+            },
+        );
+        Ok(next)
+    }
+
+    async fn set_if_absent(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Duration,
+    ) -> Result<bool, StoreError> {
+        let expires_at = self.now()
+            + chrono::Duration::from_std(ttl)
+                .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
+        let now = self.now();
+        let mut guard = self.entries.write().expect("memory store poisoned");
+        // An expired key counts as absent, which is what Redis does — the key
+        // is simply not there any more.
+        if guard.get(key).is_some_and(|e| now < e.expires_at) {
+            return Ok(false);
+        }
+        guard.insert(
+            key.to_string(),
+            Entry {
+                value: value.to_string(),
+                expires_at,
+            },
+        );
+        Ok(true)
+    }
+
+    async fn entries_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError> {
+        let now = self.now();
+        let guard = self.entries.read().expect("memory store poisoned");
+        Ok(guard
+            .iter()
+            .filter(|(k, e)| k.starts_with(prefix) && now < e.expires_at)
+            .map(|(k, e)| (k.clone(), e.value.clone()))
+            .collect())
+    }
+
     async fn delete_with_prefix(&self, prefix: &str) -> Result<u64, StoreError> {
         let mut guard = self.entries.write().expect("memory store poisoned");
         let before = guard.len();
@@ -464,6 +622,44 @@ mod tests {
             kv.values_with_prefix("cred:s2:").await.unwrap(),
             vec!["3".to_string()],
             "deleting one session's credentials must not touch another's"
+        );
+
+        // counters
+        assert_eq!(kv.increment("hits", ttl).await.unwrap(), 1);
+        assert_eq!(kv.increment("hits", ttl).await.unwrap(), 2);
+        assert_eq!(
+            kv.get("hits").await.unwrap().as_deref(),
+            Some("2"),
+            "a counter is readable as the number it holds"
+        );
+
+        // write-once markers
+        assert!(kv.set_if_absent("once", "yes", ttl).await.unwrap());
+        assert!(
+            !kv.set_if_absent("once", "no", ttl).await.unwrap(),
+            "a marker must not be written twice"
+        );
+        assert_eq!(
+            kv.get("once").await.unwrap().as_deref(),
+            Some("yes"),
+            "a refused write must leave the first value alone"
+        );
+
+        // entries carry the key the caller wrote, not a namespaced one
+        kv.increment("m:w1:a", ttl).await.unwrap();
+        kv.increment("m:w1:b", ttl).await.unwrap();
+        kv.increment("m:w1:b", ttl).await.unwrap();
+        kv.increment("m:w2:a", ttl).await.unwrap();
+
+        let mut week = kv.entries_with_prefix("m:w1:").await.unwrap();
+        week.sort();
+        assert_eq!(
+            week,
+            vec![
+                ("m:w1:a".to_string(), "1".to_string()),
+                ("m:w1:b".to_string(), "2".to_string()),
+            ],
+            "reading one bucket must name its counters and leave the next alone"
         );
     }
 

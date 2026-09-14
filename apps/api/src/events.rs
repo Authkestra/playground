@@ -277,42 +277,7 @@ mod tests {
     /// A flow must not fail because its narration could not be written.
     #[tokio::test]
     async fn recording_is_infallible_for_the_caller() {
-        struct Broken;
-        #[async_trait::async_trait]
-        impl KeyValue for Broken {
-            async fn get(&self, _: &str) -> Result<Option<String>, StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn set(&self, _: &str, _: &str, _: Duration) -> Result<(), StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn delete(&self, _: &str) -> Result<bool, StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn take(&self, _: &str) -> Result<Option<String>, StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn values_with_prefix(&self, _: &str) -> Result<Vec<String>, StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn delete_with_prefix(&self, _: &str) -> Result<u64, StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn append_capped(
-                &self,
-                _: &str,
-                _: &str,
-                _: usize,
-                _: Duration,
-            ) -> Result<(), StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-            async fn list(&self, _: &str) -> Result<Vec<String>, StoreError> {
-                Err(StoreError::Backend("down".into()))
-            }
-        }
-
-        let l = EventLog::new(Arc::new(Broken), Duration::from_secs(60));
+        let l = EventLog::new(Arc::new(crate::testing::BrokenKv), Duration::from_secs(60));
         // Must not panic or propagate.
         l.record(Uuid::new_v4(), Step::info("totp", "x").build())
             .await;

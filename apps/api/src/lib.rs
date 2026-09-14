@@ -20,6 +20,7 @@ pub mod github_routes;
 pub mod github_token_store;
 pub mod killswitch;
 pub mod kit;
+pub mod metrics;
 pub mod oauth_routes;
 pub mod routes;
 pub mod scenario;
@@ -400,7 +401,8 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
         settings,
         credentials: Arc::new(credentials),
         ceremonies: Arc::new(crate::ceremony::CeremonyStore::new(kv.clone())),
-        events: Arc::new(crate::events::EventLog::new(kv, session_ttl)),
+        events: Arc::new(crate::events::EventLog::new(kv.clone(), session_ttl)),
+        metrics: Arc::new(crate::metrics::Metrics::new(kv, session_ttl)),
         signing,
         github_push,
     })
