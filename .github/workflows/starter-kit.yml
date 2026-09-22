@@ -138,8 +138,16 @@ jobs:
 
       # By name, not by spec: a combination carries its own download opt-ins,
       # and repeating those as flags here would let the two disagree.
+      #
+      # `--exhaustive` has to be forwarded, not just passed to `plan`. The flag
+      # selects which set `--name` is looked up in, so a nightly leg named from
+      # the exhaustive list cannot be found in the representative one, and the
+      # step fails before it generates anything.
       - name: Generate
-        run: ./generate-kit --name "${{ matrix.combination.name }}" --out generated
+        run: |
+          ./generate-kit --name "${{ matrix.combination.name }}" \
+            ${{ needs.plan.outputs.exhaustive == 'true' && '--exhaustive' || '' }} \
+            --out generated
 
       - name: Show what was generated
         run: |
