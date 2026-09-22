@@ -224,6 +224,24 @@ describe("verifyTokenSignature", () => {
     expect(describeVerdict(verdict)).toContain("Ed25519");
   });
 
+  // "The check failed" and "the token is forged" are different statements.
+  it("decides nothing when the engine refuses to run the check", async () => {
+    const pair = await keypair();
+    const token = await sign(pair, { alg: "EdDSA", kid: "live" });
+    const throwsOnVerify = {
+      importKey: (...args: Parameters<SubtleCrypto["importKey"]>) =>
+        crypto.subtle.importKey(...args),
+      verify: () => Promise.reject(new DOMException("nope", "OperationError")),
+    } as unknown as SubtleCrypto;
+
+    const verdict = await verifyTokenSignature(
+      token,
+      [await jwkFor(pair, "live")],
+      throwsOnVerify,
+    );
+    expect(verdict.kind).toBe("unsupported");
+  });
+
   it("reports missing WebCrypto instead of throwing on an insecure page", async () => {
     const pair = await keypair();
     const token = await sign(pair, { alg: "EdDSA", kid: "live" });

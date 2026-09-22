@@ -355,8 +355,21 @@ export async function verifyTokenSignature(
   // the bytes and fail a perfectly good token.
   const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
 
-  const ok = await subtle.verify({ name: "Ed25519" }, publicKey, signature, signed);
-  return ok ? { kind: "verified", kid } : { kind: "bad_signature", kid };
+  // Every engine tried returns `false` for a signature of the wrong length
+  // rather than throwing, but "returns false" and "did not sign this token"
+  // are different statements and only one of them is safe to guess. If an
+  // engine throws instead, say the check could not be made — calling it a
+  // forgery would be the page inventing a verdict, which is the one thing
+  // this module must never do.
+  try {
+    const ok = await subtle.verify({ name: "Ed25519" }, publicKey, signature, signed);
+    return ok ? { kind: "verified", kid } : { kind: "bad_signature", kid };
+  } catch {
+    return {
+      kind: "unsupported",
+      reason: "This browser refused to check the signature, so nothing here has been decided.",
+    };
+  }
 }
 
 /** One line per verdict, in the visitor's terms rather than the algorithm's. */
