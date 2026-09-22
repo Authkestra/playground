@@ -59,10 +59,33 @@ impl std::fmt::Debug for ProviderCredentials {
 impl ProviderCredentials {
     /// Read `<PROVIDER>_CLIENT_ID` / `<PROVIDER>_CLIENT_SECRET` for each known
     /// provider.
-    pub fn from_env() -> Self {
+    pub fn from_env(settings: &crate::settings::Settings) -> Self {
         const PROVIDERS: [&str; 3] = ["github", "google", "discord"];
-        let redirect_base = std::env::var("OAUTH_REDIRECT_BASE")
-            .unwrap_or_else(|_| "http://localhost:8000".to_string());
+
+        // Trailing slash trimmed because `redirect_uri` appends `/auth/...`;
+        // without it a configured value ending in `/` produced a double
+        // slash and a redirect_uri the provider rejects.
+        let configured = std::env::var("OAUTH_REDIRECT_BASE")
+            .ok()
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty());
+        let defaulted = configured.is_none();
+        // Was hardcoded to 8000, which is wrong on any deployment that
+        // listens elsewhere — so the fallback was doubly wrong there.
+        let redirect_base =
+            configured.unwrap_or_else(|| format!("http://localhost:{}", settings.port));
+
+        if defaulted && settings.looks_like_a_deployment() {
+            tracing::error!(
+                redirect_base = %redirect_base,
+                "OAUTH_REDIRECT_BASE is unset, so it fell back to localhost — but the rest \
+                 of this configuration is not a local run. Every provider will reject the \
+                 callback as a redirect_uri mismatch. Note this is a separate variable \
+                 from PUBLIC_BASE_URL: setting one does not set the other."
+            );
+        } else {
+            tracing::info!(redirect_base = %redirect_base, "OAuth callback base");
+        }
 
         let mut creds = HashMap::new();
         for p in PROVIDERS {

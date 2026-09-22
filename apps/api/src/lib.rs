@@ -341,7 +341,7 @@ pub async fn state_from_env() -> Result<AppState, StateError> {
     // can actually complete, so credentials are read before the registry is
     // built. Neither is required: a scenario with no credentials reports itself
     // unavailable rather than failing at boot.
-    let provider_credentials = ProviderCredentials::from_env();
+    let provider_credentials = ProviderCredentials::from_env(&settings);
     let captcha_keys = crate::scenario::captcha::CaptchaKeys::from_env();
 
     // Signing comes first: the resource scenario issues with this key and
