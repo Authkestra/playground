@@ -164,6 +164,27 @@ pub fn exhaustive() -> Vec<Combination> {
     out
 }
 
+/// Resolve a combination by name, across both sets.
+///
+/// Deliberately not parameterised by which set the caller is printing. The
+/// two sets exist to control *how many* projects CI builds, not to scope what
+/// a name means — and a name that resolves only when an unrelated flag is
+/// present is a trap. It caught one: the nightly listed its matrix from the
+/// exhaustive set and then generated each leg without `--exhaustive`, so every
+/// composite name missed the representative set and the run failed at the
+/// first step for fifteen nights.
+///
+/// Representative first, so a name carried by both keeps the meaning it has
+/// on a pull request. Today the shared names agree on spec either way — the
+/// test below pins that, because the day they disagree is the day this order
+/// starts mattering silently.
+pub fn find_by_name(name: &str) -> Option<Combination> {
+    representative()
+        .into_iter()
+        .chain(exhaustive())
+        .find(|c| c.name == name)
+}
+
 /// Turn a spec into a configuration.
 ///
 /// Returns the unrecognised scenario or option rather than ignoring it: a
@@ -336,6 +357,50 @@ mod tests {
             let expected = c.spec.split(',').filter(|p| !p.trim().is_empty()).count();
             assert_eq!(active, expected, "{} activated the wrong count", c.name);
         }
+    }
+
+    /// The regression test for the nightly outage of 2026-09-07..21.
+    ///
+    /// CI names a leg from one set and generates it by name. If a name in
+    /// either set does not resolve, that leg cannot be built at all — which is
+    /// exactly how the nightly failed for fifteen nights while every pull
+    /// request stayed green.
+    #[test]
+    fn every_name_in_either_set_resolves() {
+        for set in [representative(), exhaustive()] {
+            for c in set {
+                let found = find_by_name(&c.name)
+                    .unwrap_or_else(|| panic!("`{}` does not resolve by name", c.name));
+                assert_eq!(found.name, c.name);
+            }
+        }
+    }
+
+    /// `find_by_name` searches the representative set first. That order is
+    /// only invisible while the names both sets share agree on what they mean,
+    /// so pin it: a shared name that drifted would otherwise change which
+    /// project CI builds without changing any test.
+    #[test]
+    fn a_name_in_both_sets_means_the_same_thing_in_each() {
+        let exhaustive = exhaustive();
+        for c in representative() {
+            let Some(twin) = exhaustive.iter().find(|e| e.name == c.name) else {
+                continue;
+            };
+            assert_eq!(
+                twin.spec, c.spec,
+                "`{}` is a different project depending on which set you ask",
+                c.name
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_name_resolves_to_nothing_rather_than_something_close() {
+        assert!(find_by_name("passkyes").is_none());
+        assert!(find_by_name("").is_none());
+        // A spec is not a name, even a valid one.
+        assert!(find_by_name("oauth=github").is_none());
     }
 
     #[test]
