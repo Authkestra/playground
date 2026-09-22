@@ -100,9 +100,26 @@ const NEXT = join(APP, ".next");
  *
  * The number stays deliberately close to actual (136.8 kB at the time of
  * writing). If a future change needs more, it needs a paragraph here too.
+ *
+ * ## And why it then went 138 -> 140
+ *
+ * Verifying the resource scenario's tokens in the visitor's own browser
+ * (#76). Measured at 139.7 kB against 136.7 kB before it, so three
+ * kilobytes, and no dependency: the signature check is `crypto.subtle` with
+ * Ed25519, which every supported browser already ships. What the three
+ * kilobytes buy is the decoder for the token's claims, a two-step
+ * fetch-then-verify flow, and the prose that tells a visitor how to catch us
+ * out — watch the network panel stay silent, or go offline and verify anyway.
+ *
+ * Most of it is that prose, and that is the right trade rather than an
+ * embarrassing one. A verdict computed locally is worth no more than a verdict
+ * computed on our server unless the visitor is told how to tell the two apart,
+ * so the explanation is not decoration on the feature — it is the feature. The
+ * cheap way to buy the kilobytes back would be to cut it, which would leave a
+ * badge nobody has reason to believe.
  */
 const BUDGETS_KB = {
-  "/page": 138,
+  "/page": 140,
   "/_not-found/page": 92,
   "/how-it-works/page": 93,
 };

@@ -113,6 +113,14 @@ distinguishes twelve outcomes rather than a flat 401 — including
 `unknown_kid` (a key nobody published), `untrusted_issuer` (no key set is
 trusted for that `iss`, with no fallback), and `missing_kid`.
 
+`GET /.well-known/jwks.json` is **fetched by the browser**, not only by the
+server: the resource panel verifies the token's Ed25519 signature client-side
+against a key set the visitor fetches themselves (#76), so the API's verdict is
+something they can check rather than something they must accept. That makes the
+CORS headers on this route load-bearing — it has to stay readable from the
+frontend's origin, or the panel loses the only part of this scenario that does
+not rest on our word.
+
 `keys_unreachable` answers **503, not 401**. Nothing was decided about the
 credential, so calling it invalid would be a lie — and a client that retries on
 503 and gives up on 401 would otherwise give up on a token that was fine.
