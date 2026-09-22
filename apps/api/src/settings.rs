@@ -296,7 +296,73 @@ pub struct Settings {
     pub github_kit: GithubKitCredentials,
 }
 
+/// Whether an origin points at the machine the process is running on.
+///
+/// Compared against the host only, so a port never changes the answer.
+fn is_loopback_origin(origin: &str) -> bool {
+    let host = origin
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(origin)
+        .split('/')
+        .next()
+        .unwrap_or("");
+    // Strip the port without cutting an IPv6 literal in half. A bracketed
+    // literal delimits itself; a bare one has several colons and no port,
+    // which is why "exactly one colon" is the test rather than "ends in
+    // digits" alone.
+    let host = if let Some(rest) = host.strip_prefix('[') {
+        rest.split_once(']').map(|(inner, _)| inner).unwrap_or(rest)
+    } else {
+        match host.rsplit_once(':') {
+            Some((before, after))
+                if !before.contains(':')
+                    && !after.is_empty()
+                    && after.chars().all(|c| c.is_ascii_digit()) =>
+            {
+                before
+            }
+            _ => host,
+        }
+    };
+    matches!(
+        host.trim().to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "0.0.0.0" | "::1"
+    )
+}
+
+/// Whether the configuration around a base URL says this is plainly not a
+/// developer's laptop.
+///
+/// Used to decide how loudly to complain about a localhost fallback. Two
+/// signals, either of which is sufficient:
+///
+/// - `COOKIE_SECURE=true`, which pins the session cookie to HTTPS. A plain
+///   `http://localhost` run cannot use such a cookie at all, so setting it
+///   means someone was configuring a deployment.
+/// - a non-loopback entry in `ALLOWED_ORIGINS`, which means the browser
+///   talking to this API is served from a real hostname.
+///
+/// Deliberately not "is there a PORT set" or "is this Linux": both are true on
+/// a laptop. The point is to catch a *contradiction*, not to guess at an
+/// environment.
+fn looks_like_a_deployment(cookie_secure: bool, allowed_origins: &[String]) -> bool {
+    cookie_secure
+        || allowed_origins
+            .iter()
+            .any(|o| !o.trim().is_empty() && !is_loopback_origin(o))
+}
+
 impl Settings {
+    /// Whether this configuration plainly is not a developer's laptop.
+    ///
+    /// See [`looks_like_a_deployment`]. Exposed so the OAuth redirect base,
+    /// which is read elsewhere and from a different variable, can be judged
+    /// against the same signals rather than growing its own opinion.
+    pub fn looks_like_a_deployment(&self) -> bool {
+        looks_like_a_deployment(self.cookie_secure, &self.allowed_origins)
+    }
+
     pub fn from_env() -> Self {
         let port = std::env::var("PORT")
             .ok()
@@ -317,12 +383,13 @@ impl Settings {
         // Defaults to the local address so `cargo run` needs no configuration.
         // A deployment must set it: a JWKS published at a URL nothing can reach
         // is a resource server that rejects every token.
-        let public_base_url = std::env::var("PUBLIC_BASE_URL")
+        let configured_base_url = std::env::var("PUBLIC_BASE_URL")
             .map(|v| v.trim().trim_end_matches('/').to_string())
             .ok()
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| format!("http://localhost:{port}"));
-        tracing::info!(base_url = %public_base_url, "public base URL (token issuer)");
+            .filter(|v| !v.is_empty());
+        let public_base_url_defaulted = configured_base_url.is_none();
+        let public_base_url =
+            configured_base_url.unwrap_or_else(|| format!("http://localhost:{port}"));
 
         // A malformed entry here disables CORS silently: the browser simply
         // blocks every request and the frontend looks like the API is down. So
@@ -344,6 +411,27 @@ impl Settings {
             );
         } else {
             tracing::info!(origins = ?allowed_origins, "CORS allow-list");
+        }
+
+        // `info!` is the wrong level for a value that silently makes a
+        // deployment issue tokens under a hostname nothing can reach. Every
+        // comparable misconfiguration in this file is an `error!`; this one
+        // used to be the quietest line here.
+        //
+        // But shouting on every `cargo run` trains people to ignore it, so
+        // the level is decided by whether the fallback *contradicts* the rest
+        // of the configuration rather than by the fallback alone.
+        if public_base_url_defaulted && looks_like_a_deployment(cookie_secure, &allowed_origins) {
+            tracing::error!(
+                base_url = %public_base_url,
+                "PUBLIC_BASE_URL is unset, so it fell back to localhost — but the rest of \
+                 this configuration is not a local run. Tokens will be issued with a \
+                 localhost `iss` and a JWKS URL no validator can reach, and the GitHub push \
+                 callback will not match what is registered with the OAuth App. Set \
+                 PUBLIC_BASE_URL to this deployment's externally reachable origin."
+            );
+        } else {
+            tracing::info!(base_url = %public_base_url, "public base URL (token issuer)");
         }
 
         let trusted_client_ip_header =
@@ -376,5 +464,70 @@ impl Settings {
             public_base_url,
             github_kit: GithubKitCredentials::from_env(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_local_run_is_not_mistaken_for_a_deployment() {
+        // The default `cargo run` shape: insecure cookie, localhost frontend.
+        assert!(!looks_like_a_deployment(
+            false,
+            &["http://localhost:3000".to_string()]
+        ));
+        assert!(!looks_like_a_deployment(false, &[]));
+        // Ports and loopback spellings must not change the answer, or the
+        // warning fires on laptops and stops being read.
+        for origin in [
+            "http://127.0.0.1:3000",
+            "http://localhost",
+            "http://[::1]:8080",
+            "http://0.0.0.0:3000",
+            "HTTP://LocalHost:3000",
+        ] {
+            assert!(
+                !looks_like_a_deployment(false, &[origin.to_string()]),
+                "{origin} was read as a deployment"
+            );
+        }
+    }
+
+    #[test]
+    fn either_signal_alone_is_enough() {
+        // A Secure cookie cannot work over plain-HTTP localhost, so its
+        // presence means someone was configuring a deployment.
+        assert!(looks_like_a_deployment(true, &[]));
+        assert!(looks_like_a_deployment(
+            true,
+            &["http://localhost:3000".to_string()]
+        ));
+        // A real frontend hostname, on its own.
+        assert!(looks_like_a_deployment(
+            false,
+            &["https://play.authkestra.com".to_string()]
+        ));
+    }
+
+    #[test]
+    fn one_real_origin_among_local_ones_still_counts() {
+        // The mixed list a staging deployment tends to accumulate.
+        assert!(looks_like_a_deployment(
+            false,
+            &[
+                "http://localhost:3000".to_string(),
+                "https://playground-web.vercel.app".to_string(),
+            ]
+        ));
+    }
+
+    #[test]
+    fn a_host_that_merely_contains_localhost_is_not_loopback() {
+        // `notlocalhost.com` and friends must not get the quiet treatment.
+        assert!(!is_loopback_origin("https://notlocalhost.com"));
+        assert!(!is_loopback_origin("https://localhost.evil.example"));
+        assert!(!is_loopback_origin("https://127.0.0.1.example.com"));
     }
 }
