@@ -98,33 +98,47 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
-    let name = value_of(&args, "--name");
-    let named_lookup = name.clone();
+    let named_lookup = value_of(&args, "--name");
     let spec = value_of(&args, "--spec");
     let out = value_of(&args, "--out").ok_or("--out is required")?;
 
-    let spec = match (name, spec) {
+    // Resolved across both sets, not against whichever one `--exhaustive`
+    // selected for printing: see `matrix::find_by_name`. A name is a name.
+    let found = match &named_lookup {
+        Some(name) => match matrix::find_by_name(name) {
+            Some(c) => Some(c),
+            None => {
+                // The representative names are the ones worth suggesting; the
+                // exhaustive set is 128 machine-generated strings and printing
+                // them would bury the answer.
+                let known: Vec<String> = matrix::representative()
+                    .into_iter()
+                    .map(|c| c.name)
+                    .collect();
+                return Err(format!(
+                    "no combination named `{name}`. Known: {} \
+                     (and every name from `--list --exhaustive`)",
+                    known.join(", ")
+                ));
+            }
+        },
+        None => None,
+    };
+
+    let spec = match (found.as_ref(), spec) {
         (Some(_), Some(_)) => return Err("pass --name or --spec, not both".to_string()),
-        (Some(name), None) => set
-            .iter()
-            .find(|c| c.name == name)
-            .ok_or_else(|| {
-                let known: Vec<&str> = set.iter().map(|c| c.name.as_str()).collect();
-                format!("no combination named `{name}`. Known: {}", known.join(", "))
-            })?
-            .spec
-            .clone(),
+        (Some(c), None) => c.spec.clone(),
         (None, Some(spec)) => spec,
         (None, None) => return Err("pass --name or --spec".to_string()),
     };
 
     // A named combination carries its own opt-ins, so CI can name one leg
     // rather than repeating flags in YAML. Explicit flags still win.
-    let named = named_lookup
-        .as_ref()
-        .and_then(|n| set.iter().find(|c| &c.name == n))
-        .map(|c| c.options)
-        .unwrap_or_default();
+    //
+    // Read from the same lookup as the spec above. Two lookups that could
+    // disagree would mean a leg building the right scenarios with the wrong
+    // opt-ins, which compiles and therefore passes.
+    let named = found.map(|c| c.options).unwrap_or_default();
 
     let options = api::scenario::KitOptions {
         openapi: named.openapi || args.iter().any(|a| a == "--openapi"),
