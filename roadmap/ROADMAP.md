@@ -8,7 +8,7 @@
 |---|---|---|---|
 | `P0` | Foundations | 7 | Repo, hosting, CI, and provider credentials exist and a hello-world Rust service is reachable at play.authkestra.com. No auth logic yet. |
 | `P1` | Playground core | 7 | The session/state/diff/safety machinery that every scenario depends on. Still no user-visible auth flows. |
-| `P2` | Scenarios | 9 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA). |
+| `P2` | Scenarios | 9 | Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha). |
 | `P3` | Playground UI | 9 | The surface a visitor actually touches: zero-JS explainer pages plus an interactive playground island for toggling, diffing, and testing. |
 | `P4` | Downloadable starter kit | 12 | The playground's configuration becomes a real, compiling Cargo project the visitor can download and run — the bridge from demo to the v0-for-Rust wizard idea. |
 | `P5` | Launch hardening | 4 | Make the public surface safe, affordable, and measurable, then announce it. |
@@ -153,7 +153,7 @@ CI fails on formatting, clippy warnings, test failures, and advisory/license vio
 
 `area:infra` `blocked:external` `type:chore`
 
-Six credential sets are needed before the scenarios can work end-to-end.
+Five credential sets are needed before the scenarios can work end-to-end.
 
 ### Tasks
 - [ ] GitHub OAuth app + redirect URI
@@ -161,7 +161,6 @@ Six credential sets are needed before the scenarios can work end-to-end.
 - [ ] Discord OAuth app + redirect URI
 - [ ] Cloudflare Turnstile site key + secret
 - [ ] hCaptcha site key + secret
-- [ ] Google reCAPTCHA site key + secret
 - [ ] All secrets stored in Fly secrets / Vercel env vars; site keys (public) can live in frontend config
 - [ ] Redirect URIs registered for both production and preview domains, or a documented single-callback strategy
 
@@ -286,7 +285,7 @@ Changing a Rust response shape without regenerating types fails CI.
 
 ## P2 — Scenarios
 
-**Goal.** Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha/reCAPTCHA).
+**Goal.** Every v0 auth capability works end-to-end against the real framework: passkeys, TOTP, OAuth (GitHub/Google/Discord), bot protection (Turnstile/hCaptcha).
 
 **Exit criteria.** Each scenario can be enabled, produces a meaningful diff, and completes a real flow — verified by integration tests covering happy path and the main failure paths.
 
@@ -355,14 +354,14 @@ Shipped as `authkestra-providers` with `github` / `google` / `discord` features.
 ### Acceptance
 All three providers complete a real round trip and land the visitor in an authenticated demo session.
 
-#### Bot-protection scenario (Turnstile, hCaptcha, reCAPTCHA)
+#### Bot-protection scenario (Turnstile, hCaptcha)
 
 `area:scenario` `area:api` `type:feature`
 
-Shipped as a single `CaptchaVerifier` with a `CaptchaProvider` enum (`Turnstile`, `HCaptcha`, `ReCaptcha`) in `authkestra-engine::captcha` behind the `captcha` feature; each hits its real `siteverify` endpoint. The Axum adapter's `captcha` feature just forwards to the engine — there is no middleware and no extractor, so the check stays visible in the handler that makes it.
+Shipped as a single `CaptchaVerifier` taking a `CaptchaProvider` from `authkestra-engine::captcha`, behind the `captcha` feature; the playground offers `Turnstile` and `HCaptcha`, and each hits its real `siteverify` endpoint. The Axum adapter's `captcha` feature just forwards to the engine — there is no middleware and no extractor, so the check stays visible in the handler that makes it.
 
 ### Tasks
-- [ ] Provider-select control across the three
+- [ ] Provider-select control across both
 - [ ] Render the correct widget per provider on the frontend (each has its own script and site-key handling)
 - [ ] Mount the widget per provider in the sign-in flow tester — moved here from **Flow tester components for each scenario** (P3), where it sat as one bullet among five and the dependency below was invisible
 - [ ] Show the verification result, including a deliberate failure path so the difference is visible
@@ -370,12 +369,15 @@ Shipped as a single `CaptchaVerifier` with a `CaptchaProvider` enum (`Turnstile`
 - [ ] Starter-kit fragment putting the check at the top of a handler rather than on a route of its own
 
 ### Depends on
-The captcha half of **Register OAuth apps and captcha site keys for play.authkestra.com** (P0) — Turnstile, hCaptcha and reCAPTCHA site keys and secrets registered against `play.authkestra.com`. That is the one piece nobody but the maintainer can do.
+The captcha half of **Register OAuth apps and captcha site keys for play.authkestra.com** (P0) — Turnstile and hCaptcha site keys and secrets registered against `play.authkestra.com`. That is the one piece nobody but the maintainer can do.
 
 It gates the *acceptance criterion*, not the work. Everything else ships without the keys: the scenario, both actions, the diff, the starter-kit fragment and the widget panel all exist, and the control renders itself unavailable with a reason until keys are present — the same shape the OAuth scenario uses. Putting the keys in the deployment's environment is the whole of what remains, with no code change.
 
+### Dropped: reCAPTCHA
+Offered here until #79 and never able to verify. Google's console issues Enterprise credentials, which are spent through an assessment call to `recaptchaenterprise.googleapis.com`; `CaptchaVerifier` speaks only the classic `siteverify` form post. Neither fix belonged to this repository — a legacy secret key is Google's to issue, an Enterprise provider variant is the framework's to ship — so #51 was closed as not planned and the provider was removed instead. That is what retired the third leg of the acceptance criterion below; `docs/deployment.md` carries the long version.
+
 ### Acceptance
-Each of the three providers verifies a real token against its live siteverify endpoint, and a failed verification is demonstrable.
+Both providers verify a real token against their live siteverify endpoints, and a failed verification is demonstrable.
 
 #### Resource-server scenario (validate a token on a protected route)
 
@@ -561,7 +563,7 @@ The "then test it" half of the promise. Each scenario needs its own interaction 
 - [ ] Uniform result panel (what was sent, what came back, what it proves)
 
 ### Not in scope
-Mounting the captcha widget, which moved to **Bot-protection scenario (Turnstile, hCaptcha, reCAPTCHA)** (P2). It is the only one of these surfaces that cannot be finished from this repository alone, and listing it here as a peer of the other four hid that. It now sits beside the dependency that gates it.
+Mounting the captcha widget, which moved to **Bot-protection scenario (Turnstile, hCaptcha)** (P2). It is the only one of these surfaces that cannot be finished from this repository alone, and listing it here as a peer of the other four hid that. It now sits beside the dependency that gates it.
 
 ### Acceptance
 Every v0 scenario that can be exercised from this repository is fully exercisable from the browser, with clear success and failure feedback. The result panel is a shared convention rather than a shared component: each panel shows what was sent, what came back and what it proves, in the same shape.
@@ -1018,38 +1020,6 @@ This is where Rust's compile times bite — a generated project is seconds-to-te
 - [ ] Prototype build-time with a warm cargo cache to see whether the UX is viable at all
 - [ ] Decide orchestration, per-session limits, and teardown guarantees
 - [ ] Model the cost per preview before committing
-
-#### Contingency: a reCAPTCHA Enterprise path if the legacy secret key goes away
-
-`area:scenario` `area:api` `type:chore`
-
-Not a problem today. `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET_KEY` are set on the deployment with a legacy secret key, the classic `siteverify` endpoint accepts it, and the bot-protection scenario verifies reCAPTCHA end to end. This issue exists so that if that stops being true, the reasoning is already written down rather than rediscovered.
-
-### The shape of the risk
-`authkestra-engine`'s `CaptchaVerifier` verifies reCAPTCHA by posting `secret` and `response` as a form to `www.google.com/recaptcha/api/siteverify`. That is the only protocol the crate speaks, for all three providers.
-
-Google has moved reCAPTCHA's console into Google Cloud and steers new keys towards **reCAPTCHA Enterprise**, which verifies through an assessment call to `recaptchaenterprise.googleapis.com/v1/projects/{project}/assessments`: a different endpoint, a Cloud project plus an API key rather than a shared secret, a JSON request body, and a response carrying `tokenProperties.valid` and a risk score rather than a bare `success` flag. It is a different protocol, not a different credential — so no amount of configuration bridges it.
-
-Legacy secret keys still work, which is why nothing is broken. The exposure is that the playground's reCAPTCHA leg depends on a path Google describes as legacy, and its withdrawal would be a third party's decision on a third party's timetable.
-
-### What breaking looks like
-`verify` returns `Err`, the scenario reports `verified: false` with the provider's message, and the flow log says the check failed. It fails closed, so nothing becomes insecure — but reCAPTCHA stops being demonstrable, and the failure reads like a bad key rather than like a withdrawn protocol.
-
-### The cheap mitigation, already in place
-Nothing needs to be built to survive this. Unsetting `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET_KEY` removes reCAPTCHA from the control entirely: the credential-gated control only ever offers providers the deployment holds both halves for, and the scenario keeps working with Turnstile and hCaptcha, both of which still verify the classic way. That is a deployment change, not a code change.
-
-The generated starter kit already says this — the reCAPTCHA setup step names the Enterprise split and points a reader at Turnstile or hCaptcha if their Cloud project will only issue Enterprise credentials.
-
-### If it is ever worth building
-A `CaptchaProvider::ReCaptchaEnterprise` variant **upstream in `authkestra-engine`**, carrying a project id and an API key, and reading the assessment response's validity and score.
-
-Explicitly not in scope for this repository: reimplementing the assessment call in the playground. The scenario exists to demonstrate the framework's captcha feature, so hand-rolling the call here would demonstrate the playground instead, and the starter-kit fragment would generate code that does not match what it claims. If Enterprise is worth supporting it belongs in the framework, and this issue should become a pointer to the upstream one.
-
-### Trigger to act
-Any of: Google announcing a withdrawal date for legacy `siteverify`; the console ceasing to issue legacy secret keys for new sites; or the deployment's own reCAPTCHA verification starting to fail with a valid-looking key.
-
-### Not blocked
-Nothing is waiting on anyone. This is a watch item with a known escape hatch, deliberately left unlabelled `blocked:external` so that label keeps meaning work that genuinely cannot proceed.
 
 #### Research: catalog cloud/PaaS provider revenue-share and kickback programs for templates
 

@@ -10,7 +10,7 @@
  */
 export type CaptchaWidget = { 
 /**
- * Provider id — `turnstile`, `hcaptcha` or `recaptcha`.
+ * Provider id — `turnstile` or `hcaptcha`.
  */
 provider: string, 
 /**

@@ -283,20 +283,20 @@ registering provider credentials, which absent-credential handling reports as
 "not configured" rather than erroring. Lead with this rather than waiting for
 someone to notice the greyed-out toggle.
 
-**"reCAPTCHA specifically — I tried it and it silently failed / the widget
-solved and then errored."** — This is the sharpest edge in the repo and worth
-naming unprompted rather than waiting for the bug report, per #51: the
-deployment's reCAPTCHA keys are Enterprise, the engine speaks only the legacy
-`siteverify` protocol, and presence-of-both-halves is all the credential guard
-can check — so the control offers reCAPTCHA, the widget renders, the visitor
-solves it, and verification fails at the last step with nothing explaining
-why. Per #51's own "do this now," the mitigation is to unset
-`RECAPTCHA_SECRET_KEY` in production so the control simply stops offering
-reCAPTCHA (Turnstile and hCaptcha still verify the classic way) — **confirm
-this has actually been done before launch**, since #51 describes it as the
-fix but this document has not verified the environment variable is unset
-today. If it hasn't been unset, this is a live, reproducible bug a launch
-audience will find within the first hour, not a hypothetical.
+**"Where's reCAPTCHA? Every other captcha demo has it."** — It was here, it
+could never verify, and it was removed rather than left as a control that
+leads nowhere (#79). Google's console issues reCAPTCHA **Enterprise**
+credentials, which are spent through an assessment call to
+`recaptchaenterprise.googleapis.com`; `authkestra-engine`'s `CaptchaVerifier`
+speaks the classic `siteverify` form post and nothing else. Both halves of an
+Enterprise key pair are present, so the credential gate offered the provider
+and the failure landed on the visitor at the last step. Neither fix belonged
+to this repository — a legacy secret key is Google's to issue, an Enterprise
+provider variant is the framework's to ship — which is why #51 was closed as
+not planned. Turnstile and hCaptcha both verify the way the engine expects, so
+the scenario itself is unaffected; `docs/deployment.md` carries the long
+version. This is worth saying plainly and unprompted: a missing provider a
+reader expected reads as an oversight unless the reason is on the page.
 
 **"You're a wrapper — what does this framework actually save me, versus
 writing the axum/webauthn-rs/oauth2 plumbing myself?"** — This is a real
@@ -337,10 +337,6 @@ prefer `good-first-issue`, the one actually used on recent issues per
 - A report that the kill switch, rate limiting, or the admin endpoints are
   not behaving as documented — these are the load-bearing safety mechanisms
   the whole launch depends on (§1).
-- A reCAPTCHA failure report, if `RECAPTCHA_SECRET_KEY` still holds an
-  Enterprise key at launch time (see §2) — this is a known, named, expected
-  failure mode, so triage is instant: confirm it matches #51's description,
-  apply #51's fix (unset the key), close or point at #51.
 
 **Not same-day, and saying so is fine:** `good-first-issue`-shaped requests,
 `area:starter-kit` feature asks for combinations outside v0's scope (Actix,
@@ -383,8 +379,10 @@ speculate about behaviour they cannot reproduce. Two categories are common
 enough to name directly:
 - **"OAuth/bot-protection doesn't work"** where the honest first check is
   whether it's simply not configured yet (reports itself as unavailable, not
-  broken) versus configured-and-failing (the reCAPTCHA case above is the one
-  known instance of the latter).
+  broken) versus configured-and-failing. Configured-and-failing is the one
+  that needs the maintainer, because only they can see whether the credential
+  is the kind the code can actually spend — that distinction is what dropping
+  reCAPTCHA was about.
 - **A provider-side registration problem** (wrong callback URI, wrong scope,
   a console-side key type mismatch) — these need the provider's own
   dashboard, which only the maintainer can open. `blocked:external` fits if

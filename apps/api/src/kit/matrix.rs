@@ -18,12 +18,12 @@ pub const PROVIDERS: &[&str] = &["github", "google", "discord"];
 
 /// The captcha provider the exhaustive run crosses everything else with.
 ///
-/// One rather than all three, deliberately. The three fragments differ by an
-/// enum variant, an environment-variable name and some prose — the *composition*
-/// with every other fragment is identical, which is what a cross-product is for.
-/// All three are compiled in the representative set below, so none goes
-/// unbuilt; crossing all three would put the nightly matrix at GitHub's 256-job
-/// ceiling to prove the same thing three times.
+/// One rather than both, deliberately. The fragments differ by an enum
+/// variant, an environment-variable name and some prose — the *composition*
+/// with every other fragment is identical, which is what a cross-product is
+/// for. Both are compiled in the representative set below, so neither goes
+/// unbuilt; crossing both would double the nightly matrix against GitHub's
+/// 256-job ceiling to prove the same thing twice.
 const EXHAUSTIVE_CAPTCHA: &str = "turnstile";
 
 /// One generated project.
@@ -282,8 +282,8 @@ mod tests {
             );
         }
         // Every captcha provider is compiled somewhere. The exhaustive run
-        // crosses only one of them, so if these legs go the other two stop
-        // being built at all.
+        // crosses only one of them, so if these legs go the other stops being
+        // built at all.
         for (p, _) in CAPTCHA_PROVIDERS {
             assert!(
                 names.iter().any(|n| n == &format!("captcha-{p}")),

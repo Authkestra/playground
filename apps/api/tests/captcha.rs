@@ -25,7 +25,6 @@ use tower::ServiceExt;
 const KEYS: &[(&str, &str, &str)] = &[
     ("turnstile", "ts-site", "ts-secret"),
     ("hcaptcha", "hc-site", "hc-secret"),
-    ("recaptcha", "rc-site", "rc-secret"),
 ];
 
 async fn state() -> AppState {
@@ -119,7 +118,7 @@ async fn a_deployment_with_keys_offers_every_configured_provider() {
         .iter()
         .map(|o| o["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["turnstile", "hcaptcha", "recaptcha"]);
+    assert_eq!(ids, vec!["turnstile", "hcaptcha"]);
     assert!(
         captcha["unavailable_reason"].is_null(),
         "a configured deployment has nothing to apologise for"
@@ -182,7 +181,7 @@ async fn the_widget_step_returns_site_keys_for_the_selected_providers_only() {
 #[tokio::test]
 async fn the_widget_step_never_returns_a_secret() {
     let app = api::build_router(state().await);
-    let cookie = select(&app, &["turnstile", "hcaptcha", "recaptcha"]).await;
+    let cookie = select(&app, &["turnstile", "hcaptcha"]).await;
 
     let (_, body) = action(&app, &cookie, "widget", "{}").await;
     let serialised = body.to_string();
@@ -224,7 +223,7 @@ async fn a_provider_the_visitor_did_not_select_is_refused_before_any_secret_is_s
         &app,
         &cookie,
         "verify",
-        r#"{"provider":"recaptcha","token":"anything"}"#,
+        r#"{"provider":"hcaptcha","token":"anything"}"#,
     )
     .await;
 

@@ -4,7 +4,7 @@ import { PROVIDER_SCRIPTS, verdictLabel, verdictStyle } from "./CaptchaPanel";
 // Every provider id the backend's KNOWN_PROVIDERS can hand back
 // (apps/api/src/scenario/captcha.rs). A missing entry here would silently
 // render nothing for that provider's widget.
-const BACKEND_PROVIDER_IDS = ["turnstile", "hcaptcha", "recaptcha"];
+const BACKEND_PROVIDER_IDS = ["turnstile", "hcaptcha"];
 
 describe("PROVIDER_SCRIPTS", () => {
   it("has a script entry for every provider id the backend can return", () => {
@@ -21,6 +21,14 @@ describe("PROVIDER_SCRIPTS", () => {
       globals.add(entry.global);
     }
     expect(globals.size).toBe(BACKEND_PROVIDER_IDS.length);
+  });
+
+  // reCAPTCHA was dropped (#51, #79) because it could never verify here: the
+  // keys the console issues are Enterprise and the engine speaks only classic
+  // `siteverify`. The backend no longer offers it, so an entry here would be a
+  // script loaded for a widget whose token nothing can spend.
+  it("carries no provider the backend cannot return", () => {
+    expect(Object.keys(PROVIDER_SCRIPTS).sort()).toEqual([...BACKEND_PROVIDER_IDS].sort());
   });
 });
 

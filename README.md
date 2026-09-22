@@ -29,7 +29,7 @@ frontend on [Vercel](https://playground-web-opal.vercel.app).
 | **Passkeys** (WebAuthn) | Working — registration and authentication, with signature-counter tracking |
 | **Resource server** (protected route) | Working — validates by fetching the issuer's published keys and matching on `kid`, so the route holds no secret |
 | OAuth (GitHub / Google / Discord) | Built; waits on provider credentials |
-| Bot protection (Turnstile / hCaptcha / reCAPTCHA) | Built; waits on captcha site keys |
+| Bot protection (Turnstile / hCaptcha) | Built; waits on captcha site keys |
 
 "Built; waits on" means exactly that: the scenario, its actions, its diff and its
 starter-kit fragment are all shipped and tested, and the control renders itself
@@ -99,7 +99,7 @@ scenarios simply report themselves as not configured.
 | `GITHUB_KIT_CLIENT_ID` / `_SECRET` | — | A **second, separate** GitHub OAuth app, used only to push a generated project to a visitor's repo (`public_repo` scope). Separate from `GITHUB_CLIENT_ID` on purpose: folding repo-write into the sign-in app would mean every visitor who wanted to try "sign in with GitHub" authorised write access on the same click. **Unset means the push is offered as unavailable** and the zip download — which needs no account at all — carries on unaffected. See `docs/decisions/0006-github-push.md`. |
 | `PUBLIC_BASE_URL` | `http://localhost:{PORT}` | This API's own externally reachable base URL. It is the `iss` of every token signed here and the prefix of the published key set, so pointing it somewhere a validator cannot reach means tokens issue fine and then fail to validate. |
 | `TOKEN_SIGNING_KEY_PEM` | generated per process | Ed25519 private key, PKCS#8 PEM (`openssl genpkey -algorithm ed25519`). Literal `\n` is unescaped, for dashboards that only take one line. **Unset means a key is generated at boot**: fine for `cargo run`, but restarts invalidate outstanding tokens and two instances publish different keys. A supplied key that will not parse is fatal rather than silently replaced. |
-| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | — | `TURNSTILE_`, `HCAPTCHA_`, `RECAPTCHA_`. **Both halves or the provider is not offered** — a site key alone renders a widget whose token nothing can spend. The site key is public and reaches the browser; the secret never does. reCAPTCHA needs a **legacy** secret key — the engine speaks classic `siteverify`, not Enterprise assessments; see `docs/deployment.md`. |
+| `<PROVIDER>_SITE_KEY` / `_SECRET_KEY` | — | `TURNSTILE_`, `HCAPTCHA_`. **Both halves or the provider is not offered** — a site key alone renders a widget whose token nothing can spend. The site key is public and reaches the browser; the secret never does. Google reCAPTCHA is not a provider here; `docs/deployment.md` says why. |
 | `REDIS_URL` | — | State store. **Unset means an in-process store**: fine for `cargo run`, unsafe for more than one instance. `rediss://` for TLS. |
 | `REDIS_PREFIX` | `ak_playground` | Key namespace, so deployments can share one Redis |
 | `WEBAUTHN_ORIGIN` | `http://localhost:3000` | The frontend's origin, exactly as the browser sends it |

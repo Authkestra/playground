@@ -48,7 +48,6 @@ async fn state() -> AppState {
 const CAPTCHA_KEYS: &[(&str, &str, &str)] = &[
     ("turnstile", "ts-site", "ts-secret"),
     ("hcaptcha", "hc-site", "hc-secret"),
-    ("recaptcha", "rc-site", "rc-secret"),
 ];
 
 fn req(method: &str, uri: &str) -> axum::http::request::Builder {

@@ -1,10 +1,10 @@
-//! Bot-protection scenario: Turnstile, hCaptcha and reCAPTCHA (roadmap P2).
+//! Bot-protection scenario: Turnstile and hCaptcha (roadmap P2).
 //!
-//! One implementation, three configurations — the same shape as the OAuth
+//! One implementation, two configurations — the same shape as the OAuth
 //! scenario, and for the same reason. `authkestra_engine::CaptchaVerifier`
 //! takes a `CaptchaProvider` and a secret, and the only thing that varies
-//! between the three is which `siteverify` endpoint it posts to. Adding a
-//! provider is a match arm, not an integration.
+//! between them is which `siteverify` endpoint it posts to. Adding a provider
+//! is a match arm, not an integration.
 //!
 //! ## Where the check actually sits
 //!
@@ -36,6 +36,24 @@
 //! exist the scenario reports itself unavailable through
 //! [`Scenario::unavailable_reason`] rather than offering a control that leads
 //! nowhere, exactly as OAuth does.
+//!
+//! ## Why reCAPTCHA is not one of them
+//!
+//! It used to be, and it could never verify. Google's console now issues
+//! reCAPTCHA **Enterprise** credentials, which are spent through an assessment
+//! call to `recaptchaenterprise.googleapis.com`; `CaptchaVerifier` speaks the
+//! classic `siteverify` form post and nothing else. Both halves of an
+//! Enterprise key pair are present, so the credential gate above offered the
+//! provider, the widget rendered, the visitor solved it, and verification
+//! failed at the last step with nothing explaining why — the one shape of dead
+//! end this scenario exists to avoid.
+//!
+//! Neither fix belongs to this repository: a legacy secret key is Google's to
+//! issue, and an Enterprise `CaptchaProvider` variant is `authkestra-engine`'s
+//! to ship. So the provider was dropped rather than fixed (#51, #79). The
+//! engine keeps its `CaptchaProvider::ReCaptcha` variant — nothing here needs
+//! it. If Enterprise ever lands upstream, this is a match arm and an entry in
+//! [`KNOWN_PROVIDERS`] again.
 
 use std::collections::BTreeMap;
 
@@ -56,10 +74,9 @@ use crate::events::Step;
 /// The id is the option id, the environment-variable prefix and the key into
 /// [`CaptchaKeys`], so a visitor's selection flows straight through to a
 /// verifier without a translation table in the middle.
-pub const KNOWN_PROVIDERS: [(&str, &str); 3] = [
+pub const KNOWN_PROVIDERS: [(&str, &str); 2] = [
     ("turnstile", "Cloudflare Turnstile"),
     ("hcaptcha", "hCaptcha"),
-    ("recaptcha", "Google reCAPTCHA"),
 ];
 
 /// The engine's provider for one of our ids.
@@ -70,7 +87,6 @@ fn engine_provider(id: &str) -> Option<CaptchaProvider> {
     match id {
         "turnstile" => Some(CaptchaProvider::Turnstile),
         "hcaptcha" => Some(CaptchaProvider::HCaptcha),
-        "recaptcha" => Some(CaptchaProvider::ReCaptcha),
         _ => None,
     }
 }
@@ -177,7 +193,7 @@ impl CaptchaKeys {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CaptchaWidget {
-    /// Provider id — `turnstile`, `hcaptcha` or `recaptcha`.
+    /// Provider id — `turnstile` or `hcaptcha`.
     pub provider: String,
     /// What a visitor sees.
     pub label: String,
@@ -321,16 +337,12 @@ impl CaptchaScenario {
                 "https://dashboard.hcaptcha.com/sites",
                 "**New site**, then add your hostnames",
             ),
-            "recaptcha" => (
-                "https://www.google.com/recaptcha/admin",
-                "**+** to register a site, choosing the **checkbox** (v2) type",
-            ),
             // Only configured providers can be selected, so unreachable in
             // practice.
             _ => return None,
         };
 
-        let mut steps = vec![
+        let steps = vec![
             format!("Open <{console}> and choose {create}."),
             format!(
                 "You get two values. The **site key** is public — it belongs in the \
@@ -348,31 +360,6 @@ impl CaptchaScenario {
                  and make sure they are gone before you deploy."
             ),
         ];
-
-        // Google has moved reCAPTCHA's console into Google Cloud, where the
-        // path it steers you down is reCAPTCHA Enterprise: an assessment call
-        // to `recaptchaenterprise.googleapis.com` authenticated with a project
-        // and an API key. That is a different protocol, not a different
-        // credential — `CaptchaVerifier` speaks only the classic `siteverify`
-        // form post, so an Enterprise API key in `RECAPTCHA_SECRET_KEY` fails
-        // verification and the error reads like a bad key rather than like the
-        // wrong product. Say so here: a generated README that sends a reader to
-        // a console for a value it cannot use is exactly the dead end this
-        // project keeps refusing to ship.
-        if provider == "recaptcha" {
-            steps.push(
-                "**Take the legacy secret key, not an Enterprise one.** Google's console \
-                 now presents reCAPTCHA Enterprise, which verifies through an assessment \
-                 call to `recaptchaenterprise.googleapis.com` using a Cloud project and \
-                 an API key. `CaptchaVerifier` speaks the classic \
-                 `www.google.com/recaptcha/api/siteverify` form post and nothing else, so \
-                 an Enterprise API key here will fail with what looks like an invalid \
-                 secret. If your project will only issue Enterprise credentials, use \
-                 Turnstile or hCaptcha instead — both still verify the way this code \
-                 expects."
-                    .to_string(),
-            );
-        }
 
         Some(KitSetup::new(&format!("Register a {label} site"), &steps))
     }
@@ -395,7 +382,7 @@ impl Scenario for CaptchaScenario {
 
     fn control(&self) -> ControlShape {
         // SelectMany, matching OAuth: a visitor comparing Turnstile against
-        // reCAPTCHA wants both widgets on the page at once. A real application
+        // hCaptcha wants both widgets on the page at once. A real application
         // picks one, which the diff and the README both say.
         ControlShape::SelectMany {
             options: self.options(),
@@ -578,7 +565,6 @@ impl Scenario for CaptchaScenario {
         let variant = match provider.as_str() {
             "turnstile" => "Turnstile",
             "hcaptcha" => "HCaptcha",
-            "recaptcha" => "ReCaptcha",
             _ => return None,
         };
 
@@ -746,7 +732,6 @@ mod tests {
         let mut k = CaptchaKeys::default();
         k.insert_for_test("turnstile", "ts-site", "ts-secret");
         k.insert_for_test("hcaptcha", "hc-site", "hc-secret");
-        k.insert_for_test("recaptcha", "rc-site", "rc-secret");
         k
     }
 
@@ -813,12 +798,12 @@ mod tests {
     #[test]
     fn selection_is_normalised_to_a_stable_order() {
         assert_eq!(
-            selected_providers(&select(&["recaptcha", "turnstile"])),
-            selected_providers(&select(&["turnstile", "recaptcha"])),
+            selected_providers(&select(&["hcaptcha", "turnstile"])),
+            selected_providers(&select(&["turnstile", "hcaptcha"])),
         );
         assert_eq!(
-            selected_providers(&select(&["recaptcha", "turnstile"])),
-            vec!["turnstile".to_string(), "recaptcha".to_string()],
+            selected_providers(&select(&["hcaptcha", "turnstile"])),
+            vec!["turnstile".to_string(), "hcaptcha".to_string()],
             "KNOWN_PROVIDERS order, not click order"
         );
     }
@@ -902,17 +887,17 @@ mod tests {
         // The provider's own words survive; only the verdict is ours.
         assert!(rejected.detail.contains("invalid-input-response"));
 
-        assert!(!verdict("recaptcha", Ok(false)).verified);
+        assert!(!verdict("hcaptcha", Ok(false)).verified);
         assert!(verdict("turnstile", Ok(true)).verified);
     }
 
     /// Every verdict names the provider it came from, since a page can be
-    /// showing three widgets at once.
+    /// showing both widgets at once.
     #[test]
     fn a_verdict_names_its_provider() {
-        let v = verdict("recaptcha", Ok(true));
-        assert_eq!(v.provider, "recaptcha");
-        assert_eq!(v.label, "Google reCAPTCHA");
+        let v = verdict("hcaptcha", Ok(true));
+        assert_eq!(v.provider, "hcaptcha");
+        assert_eq!(v.label, "hCaptcha");
     }
 
     #[test]
@@ -922,23 +907,23 @@ mod tests {
             options: Default::default(),
         };
         let f = scenario()
-            .kit_fragment(&select(&["hcaptcha", "recaptcha"]), &ctx)
+            .kit_fragment(&select(&["turnstile", "hcaptcha"]), &ctx)
             .expect("a selection produces a fragment");
 
         let prelude = f.prelude.join("\n");
-        assert!(prelude.contains("CaptchaProvider::HCaptcha"), "{prelude}");
+        assert!(prelude.contains("CaptchaProvider::Turnstile"), "{prelude}");
         assert!(
-            !prelude.contains("ReCaptcha"),
+            !prelude.contains("HCaptcha"),
             "only one verifier should be constructed: {prelude}"
         );
         assert_eq!(f.env.len(), 1);
-        assert_eq!(f.env[0].name, "HCAPTCHA_SECRET_KEY");
+        assert_eq!(f.env[0].name, "TURNSTILE_SECRET_KEY");
         assert!(
             f.env[0].default.is_none(),
             "a secret has no default, so a project without it fails loudly"
         );
         assert!(
-            f.notes.iter().any(|n| n.contains("Google reCAPTCHA")),
+            f.notes.iter().any(|n| n.contains("hCaptcha")),
             "the unused selection should be accounted for: {:?}",
             f.notes
         );
@@ -1014,30 +999,17 @@ mod tests {
         }
     }
 
-    /// The reCAPTCHA step has to name the protocol split, or the generated
-    /// README sends a reader to a console for a credential this code cannot
-    /// spend. `CaptchaVerifier` posts to `siteverify` and nothing else.
+    /// reCAPTCHA was dropped because it could never verify here — Enterprise
+    /// credentials against an engine that speaks only classic `siteverify`
+    /// (#51, #79). Nothing may quietly put it back: an id with no engine
+    /// provider would be offered by the control and then rejected at the last
+    /// step, which is the dead end the removal was for.
     #[test]
-    fn the_recaptcha_steps_warn_that_an_enterprise_key_will_not_work() {
-        let setup = CaptchaScenario::kit_setup_for("recaptcha").expect("setup steps");
-        let joined = setup.steps.join(" ");
-        assert!(joined.contains("Enterprise"), "{joined}");
-        assert!(joined.contains("legacy secret key"), "{joined}");
-        // And it must offer a way forward rather than only a warning.
-        assert!(
-            joined.contains("Turnstile") || joined.contains("hCaptcha"),
-            "a caveat with no alternative is a dead end: {joined}"
-        );
-
-        // The other two verify the way the engine expects, so the caveat would
-        // only be noise there.
-        for id in ["turnstile", "hcaptcha"] {
-            let other = CaptchaScenario::kit_setup_for(id).expect("setup steps");
-            assert!(
-                !other.steps.join(" ").contains("Enterprise"),
-                "{id} carries a caveat that is not its problem"
-            );
-        }
+    fn recaptcha_is_not_a_provider_this_scenario_knows() {
+        assert!(!KNOWN_PROVIDERS.iter().any(|(id, _)| *id == "recaptcha"));
+        assert!(engine_provider("recaptcha").is_none());
+        assert!(CaptchaScenario::kit_setup_for("recaptcha").is_none());
+        assert!(selected_providers(&select(&["recaptcha"])).is_empty());
     }
 
     #[test]
