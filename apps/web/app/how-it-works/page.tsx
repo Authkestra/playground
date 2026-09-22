@@ -109,7 +109,7 @@ export default function HowItWorksPage() {
         <p className="text-base leading-relaxed text-foreground">
           OAuth and bot protection are built and tested to the same standard,
           but wait on provider credentials — a GitHub, Google or Discord OAuth
-          app; a Turnstile, hCaptcha or reCAPTCHA site key. Without those, the
+          app; a Turnstile or hCaptcha site key. Without those, the
           control renders itself unavailable with a reason rather than
           pretending to work. Registering the credentials is configuration, not
           a code change.

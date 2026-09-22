@@ -16,7 +16,7 @@ interface Props {
   onDemoDisabled: () => void;
 }
 
-type ProviderGlobal = "turnstile" | "hcaptcha" | "grecaptcha";
+type ProviderGlobal = "turnstile" | "hcaptcha";
 
 /**
  * Script URL + the global it installs, per provider.
@@ -34,10 +34,6 @@ export const PROVIDER_SCRIPTS: Record<string, { src: string; global: ProviderGlo
   hcaptcha: {
     src: "https://js.hcaptcha.com/1/api.js?render=explicit",
     global: "hcaptcha",
-  },
-  recaptcha: {
-    src: "https://www.google.com/recaptcha/api.js?render=explicit",
-    global: "grecaptcha",
   },
 };
 
@@ -62,7 +58,7 @@ export function verdictLabel(verified: boolean): string {
   return verified ? "Verified" : "Not verified";
 }
 
-/** Narrow view of what all three widget scripts install on `window`. Same shape, different global. */
+/** Narrow view of what both widget scripts install on `window`. Same shape, different global. */
 interface CaptchaWidgetApi {
   render(
     container: HTMLElement,
@@ -84,12 +80,13 @@ function providerApi(global: ProviderGlobal): CaptchaWidgetApi | undefined {
 /**
  * Wait until the provider's global can actually render.
  *
- * A loaded script is not a ready one. reCAPTCHA installs `grecaptcha` before
- * `grecaptcha.render` exists, so calling render on script load produced a
- * permanently blank widget — the failure this replaces. Waiting on `render`
- * itself works for all three and needs no per-provider special case, which the
- * previous `grecaptcha.ready()` branch did (and which the other two never
- * expose, so it silently only covered one of them).
+ * A loaded script is not a ready one: a provider can install its global before
+ * the function we need exists on it, and calling `render` in that window gives
+ * a permanently blank widget with no error anywhere. Polling for `render`
+ * itself is the check that cannot get this wrong, because it waits on the exact
+ * capability about to be used. A provider's own readiness hook would work too,
+ * but each names it differently and not all of them have one — so a branch on
+ * any single hook silently covers only the provider that exposes it.
  */
 const READY_TIMEOUT_MS = 10_000;
 
@@ -160,7 +157,7 @@ export default function CaptchaPanel({ scenarioId, onDemoDisabled }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        One implementation, three providers — solve each widget below, then verify its
+        One implementation, two providers — solve each widget below, then verify its
         token against the server. The failure button sends a token no provider issued,
         so you can see what a forged or replayed token looks like to the check.
       </p>

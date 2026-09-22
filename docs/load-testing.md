@@ -189,7 +189,7 @@ against the live deployment):
   installation.
 - **Google, Discord** (OAuth) — their respective developer consoles show
   request volume per app.
-- **Turnstile / hCaptcha / reCAPTCHA** — each vendor's dashboard shows
+- **Turnstile / hCaptcha** — each vendor's dashboard shows
   `siteverify` call volume for the configured site key.
 
 If any of these is near a limit, the fix is upstream of this script — reduce

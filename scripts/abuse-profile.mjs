@@ -72,7 +72,7 @@
 //    `/api/github/*` route are excluded outright, in both profiles, even
 //    though `oauth` and `captcha` share the same sensitive bucket this script
 //    is trying to trip. Those endpoints call a real third party — GitHub,
-//    Google, Turnstile/hCaptcha/reCAPTCHA — and every request this script
+//    Google, Turnstile/hCaptcha — and every request this script
 //    sends would come out of *their* rate limit, not just ours. Enough of
 //    that from an automated abuse run is how a provider suspends the
 //    deployment's OAuth app. Configuring those scenarios (`POST
