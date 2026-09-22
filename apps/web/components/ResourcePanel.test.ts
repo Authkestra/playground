@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { FORGERIES, VERDICT_LABELS, decodeHeader, verdictStyle } from "./ResourcePanel";
+import {
+  FORGERIES,
+  LOCAL_VERDICT_LABELS,
+  VERDICT_LABELS,
+  localVerdictStyle,
+  verdictStyle,
+} from "./ResourcePanel";
+import type { LocalVerdict } from "@/lib/jwt";
 
 /**
  * Every verdict the API can return, from `TokenVerdict` in
@@ -77,22 +84,61 @@ describe("verdictStyle", () => {
   });
 });
 
-describe("decodeHeader", () => {
-  // The point is that the `kid` shown next to the token is read out of the
-  // token, not taken from a field the server also sent.
-  it("reads the kid out of a real token header", () => {
-    const header = Buffer.from(JSON.stringify({ alg: "EdDSA", kid: "key-1" })).toString(
-      "base64url",
-    );
-    const decoded = decodeHeader(`${header}.payload.signature`);
-    expect(decoded).toContain("key-1");
-    expect(decoded).toContain("EdDSA");
+/**
+ * Every verdict the browser can reach on its own, from `LocalVerdict` in
+ * apps/web/lib/jwt.ts. Decoding and verification are tested there, against
+ * real signatures; what is tested here is that none of their outcomes can
+ * reach the panel without a name and a colour.
+ */
+const LOCAL_VERDICTS: LocalVerdict["kind"][] = [
+  "verified",
+  "bad_signature",
+  "unknown_kid",
+  "missing_kid",
+  "malformed",
+  "unsupported_alg",
+  "unsupported",
+];
+
+describe("LOCAL_VERDICT_LABELS", () => {
+  it("labels every verdict the browser can reach", () => {
+    for (const kind of LOCAL_VERDICTS) {
+      expect(LOCAL_VERDICT_LABELS[kind], `no label for ${kind}`).toBeDefined();
+    }
   });
 
-  it("returns null for anything it cannot read, rather than throwing", () => {
-    for (const junk of ["", "not-base64!!", "....", "hello"]) {
-      expect(() => decodeHeader(junk)).not.toThrow();
+  // The local and remote answers are meant to be compared, which only works
+  // if the same outcome is called the same thing on both sides.
+  it("uses the API's own words where both sides answer the same question", () => {
+    expect(LOCAL_VERDICT_LABELS.unknown_kid).toBe(VERDICT_LABELS.unknown_kid);
+    expect(LOCAL_VERDICT_LABELS.bad_signature).toBe(VERDICT_LABELS.bad_signature);
+    expect(LOCAL_VERDICT_LABELS.missing_kid).toBe(VERDICT_LABELS.missing_kid);
+    expect(LOCAL_VERDICT_LABELS.malformed).toBe(VERDICT_LABELS.malformed);
+  });
+});
+
+describe("localVerdictStyle", () => {
+  it("reserves destructive for a signature that did not verify", () => {
+    expect(localVerdictStyle("bad_signature")).toContain("destructive");
+    for (const kind of LOCAL_VERDICTS.filter((k) => k !== "bad_signature")) {
+      expect(localVerdictStyle(kind), kind).not.toContain("destructive");
     }
-    expect(decodeHeader("hello")).toBeNull();
+  });
+
+  it("styles a local verification as success", () => {
+    expect(localVerdictStyle("verified")).toContain("success");
+  });
+
+  // "This browser cannot check it" is a fact about the browser, not a finding
+  // about the token, and colouring it as a failure would say otherwise.
+  it("keeps an uncheckable token neutral rather than alarming", () => {
+    expect(localVerdictStyle("unsupported")).toContain("muted");
+    expect(localVerdictStyle("unsupported_alg")).toContain("muted");
+  });
+
+  it("gives every verdict some colour rather than none", () => {
+    for (const kind of LOCAL_VERDICTS) {
+      expect(localVerdictStyle(kind), kind).toContain("border-");
+    }
   });
 });

@@ -108,3 +108,13 @@ sibling `.test.ts` (`isControlValueActive`, `visiblePanels`, `verdictStyle`,
 `normalizeCode`, `PANEL_ORDER`, the base64url helpers, and friends). The tests
 run in a `node` environment and never render JSX. Rewriting markup is free;
 renaming or changing the signature of one of those exports breaks the suite.
+
+`lib/jwt.ts` is the exception that proves the rule: it is the resource panel's
+logic, but it lives in `lib/` because a visitor is meant to call it from the
+console (`window.authkestra`) and because its guarantee is not about rendering.
+`verifyTokenSignature` must make **no network request** — `lib/jwt.test.ts`
+fails if `fetch` is so much as touched during verification. That is not a
+performance nicety: the whole point of verifying in the browser is that a
+visitor can watch their network panel stay silent, or pull the plug and get an
+answer anyway. A refactor that quietly fetches a key set inside verification
+would leave every pixel unchanged and take the meaning out of the feature.
