@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  FIXED_CHOICE_LABELS,
   FORGERIES,
   LOCAL_VERDICT_LABELS,
+  RUN_STEP_LABELS,
   VERDICT_LABELS,
   localVerdictStyle,
+  shouldRefetchKeys,
   verdictStyle,
 } from "./ResourcePanel";
 import type { LocalVerdict } from "@/lib/jwt";
@@ -51,9 +54,59 @@ describe("FORGERIES", () => {
     expect(FORGERIES.map((f) => f.kind).sort()).toEqual([...BACKEND_FORGERIES].sort());
   });
 
-  it("gives each one a distinct button label", () => {
+  // These are now the six "intentionally broken" `<option>`s in one native
+  // `<select>` rather than six buttons, but a label still has to be distinct
+  // or two forgeries would be indistinguishable in the dropdown.
+  it("gives each one a distinct label", () => {
     const labels = FORGERIES.map((f) => f.label);
     expect(new Set(labels).size).toBe(labels.length);
+  });
+});
+
+describe("FIXED_CHOICE_LABELS", () => {
+  // The "Try:" select offers these two alongside the six forgeries; they
+  // must read as distinct from every forgery label too, or "No token" could
+  // be confused for one of the broken-on-purpose options.
+  it("is distinct from every forgery label", () => {
+    const forgeryLabels = new Set(FORGERIES.map((f) => f.label));
+    expect(forgeryLabels.has(FIXED_CHOICE_LABELS.valid)).toBe(false);
+    expect(forgeryLabels.has(FIXED_CHOICE_LABELS.none)).toBe(false);
+  });
+
+  it("gives the two fixed choices distinct labels", () => {
+    expect(FIXED_CHOICE_LABELS.valid).not.toBe(FIXED_CHOICE_LABELS.none);
+  });
+});
+
+describe("RUN_STEP_LABELS", () => {
+  // The one-click run still does these three things in this order; the
+  // checklist is what keeps the fetch-then-verify separation from #76
+  // visible now that nothing gates it behind a second click.
+  it("names exactly the three steps a run performs, in order", () => {
+    expect(Object.keys(RUN_STEP_LABELS)).toEqual(["call", "fetchKeys", "verify"]);
+  });
+
+  it("gives each step a distinct, non-empty label", () => {
+    const labels = Object.values(RUN_STEP_LABELS);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (const label of labels) expect(label.length).toBeGreaterThan(0);
+  });
+});
+
+describe("shouldRefetchKeys", () => {
+  it("refetches when nothing is cached yet", () => {
+    expect(shouldRefetchKeys(null, "https://issuer.example/jwks.json")).toBe(true);
+  });
+
+  it("reuses the cache when the target URL matches what's cached", () => {
+    const url = "https://issuer.example/jwks.json";
+    expect(shouldRefetchKeys(url, url)).toBe(false);
+  });
+
+  it("refetches when the run's issuer differs from what's cached", () => {
+    expect(shouldRefetchKeys("https://a.example/jwks.json", "https://b.example/jwks.json")).toBe(
+      true,
+    );
   });
 });
 

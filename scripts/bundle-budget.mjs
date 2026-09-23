@@ -117,9 +117,35 @@ const NEXT = join(APP, ".next");
  * so the explanation is not decoration on the feature — it is the feature. The
  * cheap way to buy the kilobytes back would be to cut it, which would leave a
  * badge nobody has reason to believe.
+ *
+ * ## And why it then went 140 -> 141, net, despite deleting most of the panel
+ *
+ * Collapsing the resource panel's eleven buttons into one `Select` and one
+ * "Run it" (the "thousand of buttons" feedback after #82/#83). Measured at
+ * 140.7 kB against 139.7 kB before it — essentially flat, which is the
+ * interesting result given how much moved. The panel deleted three top
+ * buttons, six forgery buttons, two verify-step buttons, and three-plus
+ * standing paragraphs of prose, and added a live three-item checklist, a
+ * two-card result layout, and a collapsible disclosure for everything that
+ * used to sit in the open. Those roughly cancel out in bytes because none of
+ * it is a new dependency — same `crypto.subtle` verification, same
+ * `fetchJwks`/`verifyTokenSignature` from `lib/jwt.ts`, just chained behind
+ * one button instead of split across nine.
+ *
+ * The one genuine addition is `components/ui/select.tsx` — and it is a
+ * **native** `<select>` with a `ChevronDown` from `lucide-react` overlaid on
+ * it, not `@radix-ui/react-select`. That was tried first and reverted: Radix's
+ * Select depends on the same popper/portal/dismissable-layer/focus-scope/
+ * scroll-lock stack Tooltip was carrying when it was removed above for ~14 kB
+ * — except Select's is bigger, since it also needs a scrollable, virtualized
+ * listbox. Measured, it alone cost over 20 kB gzipped, which would have made
+ * this "delete most of the panel" change a net *increase* to the budget. A
+ * `<select>` with an `<optgroup>` for "intentionally broken" already does
+ * everything the approved mockup's dropdown needs — grouped options, keyboard
+ * operation, screen-reader semantics — for free, so that is what shipped.
  */
 const BUDGETS_KB = {
-  "/page": 140,
+  "/page": 141,
   "/_not-found/page": 92,
   "/how-it-works/page": 93,
 };
