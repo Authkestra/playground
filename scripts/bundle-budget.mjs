@@ -143,6 +143,17 @@ const NEXT = join(APP, ".next");
  * `<select>` with an `<optgroup>` for "intentionally broken" already does
  * everything the approved mockup's dropdown needs — grouped options, keyboard
  * operation, screen-reader semantics — for free, so that is what shipped.
+ *
+ * ## And then back down a hair, in review
+ *
+ * The collapsed disclosure still read like documentation once someone
+ * actually clicked it open: three paragraphs restating, in prose, a
+ * distinction the panel already states once, inline, exactly when it
+ * applies (the "agreement, not conflict" line beside the result cards). Cut
+ * to one paragraph, plus a "View on jwt.io ↗" link beside the raw header for
+ * whoever wants the familiar debugger view — it decodes client-side off a
+ * URL fragment, which browsers never put on the wire, so nothing is handed
+ * to a third party. Net effect on the number below is noise: 140.6 kB.
  */
 const BUDGETS_KB = {
   "/page": 141,

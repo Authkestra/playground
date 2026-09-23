@@ -730,7 +730,26 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
 
             {header && (
               <div>
-                <p className="text-xs text-muted-foreground">Raw header</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">Raw header</p>
+                  {/*
+                    A secondary affordance, not a replacement: jwt.io can show
+                    the familiar debugger view, but it does not know this
+                    issuer's JWKS, so it cannot tell you whether *this* route
+                    would accept the token, and it cannot re-run the tamper
+                    check below against our actual key set. The token travels
+                    only in the fragment, which browsers never send over the
+                    wire, so nothing here is handed to a third party.
+                  */}
+                  <a
+                    href={`https://jwt.io/#debugger-io?token=${encodeURIComponent(token)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-medium text-foreground underline underline-offset-2"
+                  >
+                    View on jwt.io ↗
+                  </a>
+                </div>
                 <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground">
                   <code>{JSON.stringify(header)}</code>
                 </pre>
@@ -808,43 +827,21 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             </div>
 
             {/*
-              Said before it would otherwise look like a contradiction. A
-              wrong-audience or expired token really does verify: it was
-              signed by the live key. The API refuses it on policy, which is a
-              different question from whether the bytes are authentic — and
-              the claims above are where that question is answered, by the
-              visitor, for themselves.
+              One paragraph, not three. The policy-vs-cryptography distinction
+              already has its own line beside the result cards, shown exactly
+              when it applies — repeating it here in prose was reading
+              material, not new information. What is left is the two things a
+              visitor can check without trusting either the page or us.
             */}
             <p className="text-xs text-muted-foreground">
-              Your browser answers only the cryptographic half — did a published key sign these
-              exact bytes. Whether the issuer is trusted, the audience is this service and the
-              clock has run out is policy, which you read off the claims above. An expired or
-              wrongly-addressed token verifies here and is still refused there; that is agreement,
-              not conflict.
-            </p>
-
-            {/*
-              Two ways to check that for yourself, rather than take it from
-              us: open the network panel and watch it stay silent during
-              verification, or switch the network off entirely and press
-              "Run it" anyway. The answer is the same offline, which is the
-              whole capability this scenario is about — a resource server
-              validates a token without calling the issuer.
-            */}
-            <p className="text-xs text-muted-foreground">
-              Check that for yourself, rather than take it from us: open your browser&apos;s
-              network panel and watch it make exactly one request — the key-set fetch — then stay
-              silent while the signature is checked. Or switch your network off after the first
-              run and press &quot;Run it&quot; again with the same choice; the verdict stays the
-              same, because the keys are already here.
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Or skip our controls altogether —{" "}
+              Check for yourself: the network panel should show exactly one request — the
+              key-set fetch — then stay silent while the signature verifies, and the verdict
+              should not change if you switch the network off and press &quot;Run it&quot;
+              again. Or skip our controls —{" "}
               <code className="break-all font-mono text-foreground">
                 await authkestra.verify(&quot;&lt;paste a token&gt;&quot;)
               </code>{" "}
-              in the console runs the same function, on a token of your own, against the keys
-              already in this tab.
+              in the console runs the same function against the keys already in this tab.
             </p>
           </CardContent>
         </details>
