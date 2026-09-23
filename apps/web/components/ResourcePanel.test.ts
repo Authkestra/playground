@@ -1,6 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { LOCAL_VERDICT_LABELS, localVerdictStyle, shouldRefetchKeys } from "./ResourcePanel";
+import { FORGERIES, LOCAL_VERDICT_LABELS, localVerdictStyle, shouldRefetchKeys } from "./ResourcePanel";
 import type { LocalVerdict } from "@/lib/jwt";
+
+/** Every forgery the API can mint, from `Forgery` in apps/api/src/scenario/resource.rs. */
+const BACKEND_FORGERIES = [
+  "unknown_kid",
+  "bad_signature",
+  "untrusted_issuer",
+  "wrong_audience",
+  "expired",
+  "missing_kid",
+];
+
+describe("FORGERIES", () => {
+  it("offers every forgery the API can mint", () => {
+    expect(FORGERIES.map((f) => f.kind).sort()).toEqual([...BACKEND_FORGERIES].sort());
+  });
+
+  it("gives each one a distinct label", () => {
+    const labels = FORGERIES.map((f) => f.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+});
 
 /**
  * Every verdict the browser can reach on its own, from `LocalVerdict` in

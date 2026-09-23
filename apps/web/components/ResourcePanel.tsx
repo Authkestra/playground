@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import type { IssuedToken } from "@playground/api-types";
+import type { Forgery, IssuedToken } from "@playground/api-types";
 import { API_BASE, scenarioAction } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
@@ -18,6 +18,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 interface Props {
   scenarioId: string;
@@ -88,6 +89,22 @@ export function shouldRefetchKeys(cachedUrl: string | null, targetUrl: string): 
 const DEFAULT_JWKS_URL = `${API_BASE}/.well-known/jwks.json`;
 
 /**
+ * Every named way to mint a token that is meant to fail one specific check,
+ * plus an honest one. What the "Try one of ours:" select offers.
+ */
+export const FORGERIES: { kind: Forgery; label: string }[] = [
+  { kind: "unknown_kid", label: "Unpublished key" },
+  { kind: "bad_signature", label: "Real `kid`, wrong key" },
+  { kind: "untrusted_issuer", label: "Untrusted issuer" },
+  { kind: "wrong_audience", label: "Another service" },
+  { kind: "expired", label: "Expired" },
+  { kind: "missing_kid", label: "No `kid`" },
+];
+
+/** Everything "Try one of ours:" can mint: an honest token, or one of six built to fail. */
+export type Choice = "valid" | Forgery;
+
+/**
  * The same function the button calls, put somewhere a visitor can reach it
  * without our UI in the way.
  *
@@ -114,20 +131,30 @@ declare global {
  * Verify a token's signature against a JWKS — anyone's, not just ours — with
  * nothing sent anywhere but the key-set fetch itself.
  *
- * This used to be a scenario with a "Try:" dropdown, six named ways to mint a
- * broken token, a call to our own protected route, and a collapsed section
- * holding the token's claims and an explanation of why a browser-computed
- * verdict is worth trusting. All of that answered a narrower question than
- * this one does. Two fields and one button answer the actual question a
- * visitor has: does this token check out against this key set. Editing
- * either field, badly or well, is how every one of the old scenario's
- * lessons — an unpublished key, a tampered signature, a malformed token —
- * still happens, just by hand instead of by preset.
+ * Two fields, always editable, answer the actual question a visitor has:
+ * does this token check out against this key set. The six named forgeries
+ * came back as "Try one of ours:" — a mint-and-fill convenience, not a mode —
+ * because typing a broken token by hand is the wrong first ask of a visitor
+ * who has never seen one. Picking a preset resets the JWKS field to this
+ * deployment's own on purpose: every preset is signed by our key under our
+ * `kid`, so verifying it against some other key set a visitor had typed in
+ * would show `unknown_kid` for nearly all of them, regardless of which one
+ * was picked — masking the specific thing each is named for behind a more
+ * basic "wrong key set entirely" answer. Editing the JWKS field back to
+ * something else afterward is still one keystroke away, and answers a
+ * different, equally honest question: what does *this* key set make of a
+ * token that is really ours.
  */
 export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   const [jwksUrl, setJwksUrl] = useState(DEFAULT_JWKS_URL);
   const [token, setToken] = useState("");
   const [banner, setBanner] = useState<string | null>(null);
+
+  // Reset to "" the instant it fires (see the `Select` below), so it is
+  // always ready to trigger again — including picking the same preset twice
+  // in a row, which a `value`-bound select would otherwise ignore as a
+  // no-op change.
+  const [presetChoice, setPresetChoice] = useState<Choice | "">("");
 
   const [keys, setKeys] = useState<Jwk[] | null>(null);
   const [keysUrl, setKeysUrl] = useState<string | null>(null);
@@ -136,11 +163,12 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   const [local, setLocal] = useState<{ verdict: LocalVerdict; at: string } | null>(null);
   const [support, setSupport] = useState<Ed25519Support | null>(null);
 
-  // "fetching" and "verifying" are the only two things a press of the button
-  // ever does, in that order — this is what keeps the fetch-then-verify
-  // separation from #76 visible without a checklist widget to hold it: the
-  // button's own label says which one is happening right now.
-  const [phase, setPhase] = useState<"idle" | "fetching" | "verifying">("idle");
+  // "minting" only happens from the preset select; "fetching" and
+  // "verifying" are the two things Verify itself always does, in that
+  // order — this is what keeps the fetch-then-verify separation from #76
+  // visible without a checklist widget to hold it: the button's own label
+  // says which one is happening right now.
+  const [phase, setPhase] = useState<"idle" | "minting" | "fetching" | "verifying">("idle");
   const busy = phase !== "idle";
 
   // Asked once, up front, so a browser that cannot do Ed25519 is told before
@@ -155,6 +183,24 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     };
   }, []);
 
+  /** Mints a token via the API: an honest one, or one built to fail a check. */
+  async function mintToken(action: "issue" | "forge", kind?: Forgery): Promise<IssuedToken | null> {
+    const res = await scenarioAction<IssuedToken>(scenarioId, action, kind ? { kind } : {});
+    if (!res.ok) {
+      if (res.error.kind === "demo_disabled") {
+        onDemoDisabled();
+        return null;
+      }
+      setBanner(
+        res.error.kind === "rate_limited" || res.error.kind === "http_error"
+          ? res.error.detail
+          : "Could not reach the API to mint a token.",
+      );
+      return null;
+    }
+    return res.data;
+  }
+
   // The token field defaults to a real, working token rather than a
   // hardcoded example — a hardcoded one would already be expired, since
   // these are short-lived, and a default that fails before anything is
@@ -163,10 +209,8 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   // token by hand still works.
   useEffect(() => {
     let cancelled = false;
-    void scenarioAction<IssuedToken>(scenarioId, "issue", {}).then((res) => {
-      if (cancelled) return;
-      if (res.ok) setToken(res.data.token);
-      else if (res.error.kind === "demo_disabled") onDemoDisabled();
+    void mintToken("issue").then((minted) => {
+      if (!cancelled && minted) setToken(minted.token);
     });
     return () => {
       cancelled = true;
@@ -194,32 +238,65 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     }
   }, []);
 
+  /**
+   * The fetch-if-needed-then-verify chain, shared by the button (which
+   * checks whatever is currently in the two fields) and a preset pick (which
+   * checks the token and JWKS URL it just set, before either has actually
+   * landed in state to be read back out again).
+   */
+  const runVerification = useCallback(
+    async (tokenValue: string, jwksUrlValue: string) => {
+      setLocal(null);
+
+      let activeKeys = keys;
+      if (shouldRefetchKeys(keysUrl, jwksUrlValue)) {
+        setPhase("fetching");
+        activeKeys = await loadKeys(jwksUrlValue);
+      }
+      // Reachable if the cache was reused (`activeKeys` is still `keys`) and
+      // nothing has ever been fetched yet, or if the fetch above just failed.
+      if (!activeKeys) {
+        setPhase("idle");
+        return;
+      }
+
+      if (support?.supported === false) {
+        setPhase("idle");
+        return;
+      }
+
+      setPhase("verifying");
+      const verdict = await verifyTokenSignature(tokenValue, activeKeys);
+      setLocal({ verdict, at: new Date().toLocaleTimeString() });
+      setPhase("idle");
+    },
+    [keys, keysUrl, loadKeys, support],
+  );
+
   async function verify() {
     if (busy || !token.trim() || !jwksUrl.trim()) return;
     setBanner(null);
-    setLocal(null);
+    await runVerification(token.trim(), jwksUrl.trim());
+  }
 
-    let activeKeys = keys;
-    if (shouldRefetchKeys(keysUrl, jwksUrl)) {
-      setPhase("fetching");
-      activeKeys = await loadKeys(jwksUrl);
-    }
-    // Reachable if the cache was reused (`activeKeys` is still `keys`) and
-    // nothing has ever been fetched yet, or if the fetch above just failed.
-    if (!activeKeys) {
+  /**
+   * Mints the chosen preset, then points both fields at it — the JWKS field
+   * included, and unconditionally: see the module doc for why a preset that
+   * left the JWKS field alone would mostly just report `unknown_kid` instead
+   * of the thing it is named for.
+   */
+  async function runPreset(choice: Choice) {
+    if (busy) return;
+    setBanner(null);
+    setPhase("minting");
+    const minted = await mintToken(choice === "valid" ? "issue" : "forge", choice === "valid" ? undefined : choice);
+    if (!minted) {
       setPhase("idle");
       return;
     }
-
-    if (support?.supported === false) {
-      setPhase("idle");
-      return;
-    }
-
-    setPhase("verifying");
-    const verdict = await verifyTokenSignature(token, activeKeys);
-    setLocal({ verdict, at: new Date().toLocaleTimeString() });
-    setPhase("idle");
+    setToken(minted.token);
+    setJwksUrl(DEFAULT_JWKS_URL);
+    await runVerification(minted.token, DEFAULT_JWKS_URL);
   }
 
   // The console handle. Installed on mount and removed on unmount, because a
@@ -243,7 +320,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         Verify a token&apos;s signature against a published key set — entirely in this
         browser, against a key set that may not even be ours. Starts pointed at this
         deployment&apos;s own key set and a token it just issued you; change either to check
-        anything else.
+        anything else, or pick a broken one below.
       </p>
 
       {banner && (
@@ -257,6 +334,43 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
           <AlertDescription className="text-xs">{support.reason}</AlertDescription>
         </Alert>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
+          Try one of ours:
+        </Label>
+        <Select
+          id="resource-preset"
+          className="w-[220px]"
+          value={presetChoice}
+          disabled={busy}
+          onChange={(e) => {
+            const value = e.target.value as Choice | "";
+            // Reset immediately, not after the mint resolves — see the state
+            // declaration for why.
+            setPresetChoice("");
+            if (value) void runPreset(value);
+          }}
+        >
+          <option value="" disabled hidden>
+            Pick an example…
+          </option>
+          <option value="valid">A valid token</option>
+          <optgroup label="Intentionally broken">
+            {FORGERIES.map((f) => (
+              <option key={f.kind} value={f.kind}>
+                {f.label}
+              </option>
+            ))}
+          </optgroup>
+        </Select>
+        {phase === "minting" && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden />
+            Minting…
+          </span>
+        )}
+      </div>
 
       <div>
         <Label htmlFor="resource-jwks-url" className="text-xs text-muted-foreground">

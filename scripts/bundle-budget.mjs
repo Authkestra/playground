@@ -200,9 +200,28 @@ const NEXT = join(APP, ".next");
  * entirely rather than shrinking. The budget follows the actual number down
  * rather than keeping the old headroom, for the same reason it has followed
  * every number up: slack nobody is using is slack nobody notices disappear.
+ *
+ * ## And then 138 -> 139, for bringing the forgeries back as a convenience
+ *
+ * The entry above called dropping the six presets a deliberate trade,
+ * "worse... for a visitor who has never seen a broken JWT and would not know
+ * what to type." That half of the trade did not hold up — a "Try one of
+ * ours:" select is back, offering a valid token and the six named forgeries
+ * by name again. It is not the old dropdown: nothing else in the panel is
+ * gated behind it, it only ever fills the two fields that were already there,
+ * and picking one resets the JWKS field to this deployment's own on purpose
+ * — a forgery is signed by our key under our `kid`, so checking it against
+ * whatever a visitor had typed into that field would show `unknown_kid` for
+ * nearly all six regardless of which was picked, burying the specific thing
+ * each is named for under a more basic "wrong key set" answer.
+ *
+ * Measured at 138.0 kB against 137.5 kB before it — half a kilobyte for the
+ * select, the six-entry array behind it, and the mint-then-verify wiring,
+ * all of which already existed in some form two entries back and is being
+ * reused, not rebuilt.
  */
 const BUDGETS_KB = {
-  "/page": 138,
+  "/page": 139,
   "/_not-found/page": 92,
   "/how-it-works/page": 93,
 };
