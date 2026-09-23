@@ -229,11 +229,18 @@ export default function StepSignIn({
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between">
-        <Button type="button" variant="secondary" onClick={onBack}>
+      {/*
+        Both at the right edge, same width and height, rather than opposed
+        ends of the row — neither carries an explicit `size`, so both were
+        already the same height via `Button`'s shared default; only their
+        width (sized to "Back" vs "Continue"'s different lengths) and their
+        position needed fixing.
+      */}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" className="w-28" onClick={onBack}>
           Back
         </Button>
-        <Button type="button" variant="default" onClick={onContinue}>
+        <Button type="button" variant="default" className="w-28" onClick={onContinue}>
           Continue
         </Button>
       </div>

@@ -333,7 +333,7 @@ export default function StepDownload({
               type="button"
               onClick={() => void handleDownload()}
               disabled={working}
-              className="gap-2"
+              className="w-full gap-2"
             >
               {working ? (
                 <>
@@ -391,7 +391,7 @@ export default function StepDownload({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="gap-2"
+                  className="w-full gap-2"
                   onClick={handleConnectGithub}
                 >
                   <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
@@ -426,7 +426,7 @@ export default function StepDownload({
                   type="button"
                   size="sm"
                   variant="secondary"
-                  className="gap-2"
+                  className="w-full gap-2"
                   disabled={pushing || !isValidRepoName(repoNameTrimmed)}
                   onClick={() => void handlePush()}
                 >
@@ -487,7 +487,7 @@ export default function StepDownload({
       </Card>
 
       <div>
-        <Button type="button" variant="secondary" onClick={onBack}>
+        <Button type="button" variant="secondary" className="w-full" onClick={onBack}>
           Back
         </Button>
       </div>

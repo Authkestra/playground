@@ -80,15 +80,22 @@ export default function StepChooseMethods({
           </div>
       </details>
 
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Button onClick={onContinue} disabled={!anyActive}>
-          Continue
-        </Button>
+      {/*
+        Stacked rather than side-by-side: `justify-between` with only the
+        button present (`anyActive` true, hint hidden) collapsed to a single
+        flex child, which sits at the *start* under `space-between` — the
+        button was reading as left-aligned exactly when there was nothing to
+        share the row with. Full width sidesteps that rather than patching it.
+      */}
+      <div className="flex flex-col gap-2">
         {!anyActive && (
           <p className="text-xs text-muted-foreground">
             Turn on at least one sign-in method above to continue.
           </p>
         )}
+        <Button onClick={onContinue} disabled={!anyActive} className="w-full">
+          Continue
+        </Button>
       </div>
     </div>
   );

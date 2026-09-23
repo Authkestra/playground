@@ -288,7 +288,19 @@ export default function Playground() {
               reload this page.
             </p>
             {banner && <p className="font-medium text-warning-foreground">{banner}</p>}
-            <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+            {/*
+              `self-end`, not a container-wide `items-end`: the paragraphs
+              above stay left-aligned prose, and only this one flex child
+              moves to the right — the container's own `items-start` is still
+              what they read against.
+            */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-end"
+              onClick={() => void load()}
+            >
               Retry
             </Button>
           </AlertDescription>

@@ -319,17 +319,27 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
-          Try one of ours:
-        </Label>
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
+            Try one of ours:
+          </Label>
+          {phase === "minting" && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden />
+              Minting…
+            </span>
+          )}
+        </div>
         <Select
           id="resource-preset"
-          // Matches the Verify button below in both dimensions: `h-8` is the
-          // native `<select>`'s own default height (`h-9`), overridden to
-          // line up with `Button`'s `size="sm"`, and the width is the same
-          // literal class as the button's, not just a similar-looking one.
-          className="h-8 w-[200px]"
+          // Full width, label above rather than beside it — the same shape
+          // as the JWKS and token fields below, so this is the third field
+          // in the panel rather than the odd one out. `h-8` still overrides
+          // the native `<select>`'s own `h-9` to match the Verify button's
+          // `size="sm"` height; width no longer needs matching by hand, since
+          // both now fill the same row on their own.
+          className="mt-1 h-8 w-full"
           value={presetChoice}
           disabled={busy}
           onChange={(e) => {
@@ -352,12 +362,6 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             ))}
           </optgroup>
         </Select>
-        {phase === "minting" && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden />
-            Minting…
-          </span>
-        )}
       </div>
 
       <div>
@@ -415,13 +419,11 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         />
       </div>
 
-      <div className="flex justify-end">
+      <div>
         <Button
           type="button"
           size="sm"
-          // Same literal width as the preset `Select` above — `size="sm"`
-          // already matches its overridden `h-8`.
-          className="w-[200px]"
+          className="w-full"
           onClick={() => void verify()}
           disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
         >

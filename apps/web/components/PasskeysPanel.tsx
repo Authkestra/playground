@@ -452,7 +452,13 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
             Registers a passkey with whichever authenticator this browser offers.
           </p>
           <div>
-            <Button type="button" size="sm" onClick={() => void handleRegister()} disabled={registering}>
+            <Button
+              type="button"
+              size="sm"
+              className="w-full"
+              onClick={() => void handleRegister()}
+              disabled={registering}
+            >
               {registering && <Loader2 className="animate-spin" strokeWidth={1.5} aria-hidden="true" />}
               {registering ? "Registering…" : "Register a passkey"}
             </Button>
@@ -492,6 +498,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
               type="button"
               variant="outline"
               size="sm"
+              className="w-full"
               onClick={() => void handleAuthenticate()}
               disabled={authenticating}
             >
