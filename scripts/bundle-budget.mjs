@@ -175,9 +175,34 @@ const NEXT = join(APP, ".next");
  * budget below moves to 142 not because this needed it, but because 141
  * left it none: a change that costs nothing should not be the one blamed for
  * tripping the budget on ordinary output drift.
+ *
+ * ## And then 142 -> 138, for deleting most of the panel a second time
+ *
+ * Every earlier entry above the last two was in the spirit of "keep the
+ * capability, shrink the chrome around it." This one drops a capability: the
+ * six named forgeries, the "Try:" dropdown, the call to this deployment's own
+ * protected route, and the two-card "Our API vs your browser" comparison are
+ * all gone, not collapsed. What is left answers one question — does this
+ * token verify against this key set — with two always-visible fields and one
+ * button, because that turned out to be the actual ask underneath four
+ * rounds of "still too many controls."
+ *
+ * The forgeries are not lost, only no longer curated: typing a wrong `kid`,
+ * pointing the JWKS field at the wrong issuer, or editing a byte of the
+ * signature reaches every one of them by hand instead of by preset — which
+ * is a fair trade for a visitor who came here to check a real token, and a
+ * worse one for a visitor who has never seen a broken JWT and would not know
+ * what to type. That trade was made deliberately, not as a side effect of
+ * cutting bytes.
+ *
+ * Measured at 137.5 kB — 3.4 kB less than the entry above it, most of it the
+ * disclosure, the checklist widget and the second result card leaving
+ * entirely rather than shrinking. The budget follows the actual number down
+ * rather than keeping the old headroom, for the same reason it has followed
+ * every number up: slack nobody is using is slack nobody notices disappear.
  */
 const BUDGETS_KB = {
-  "/page": 142,
+  "/page": 138,
   "/_not-found/page": 92,
   "/how-it-works/page": 93,
 };
