@@ -14,8 +14,8 @@ import {
   type Jwk,
   type LocalVerdict,
 } from "@/lib/jwt";
+import { ActionButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -423,9 +423,8 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
       </div>
 
       <div className="flex justify-end">
-        <Button
+        <ActionButton
           type="button"
-          className="w-fit min-w-28"
           onClick={() => void verify()}
           disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
         >
@@ -436,7 +435,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             <Loader2 className="mr-1.5 size-3.5 animate-spin" strokeWidth={2} aria-hidden />
           )}
           {phase === "fetching" ? "Fetching the key set…" : phase === "verifying" ? "Verifying…" : "Verify"}
-        </Button>
+        </ActionButton>
       </div>
 
       {keysError && (

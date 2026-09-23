@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 
 /** The framework's own site, which links back here. */
 const AUTHKESTRA_SITE = "https://authkestra.com";
@@ -58,13 +58,13 @@ export default function SiteHeader() {
             A visitor who likes what they see should not have to go hunting for the
             framework — the playground exists to send people there.
           */}
-          <Button asChild variant="outline" size="sm" className="w-fit min-w-28 shrink-0">
+          <ActionButton asChild variant="outline" className="shrink-0">
             <a href={AUTHKESTRA_SITE} target="_blank" rel="noreferrer">
               authkestra docs
               <span aria-hidden="true">→</span>
               <span className="sr-only">(opens in a new tab)</span>
             </a>
-          </Button>
+          </ActionButton>
         </div>
         <nav aria-label="Site" className="flex items-center gap-4 text-sm font-medium text-muted-foreground">
           <Link href="/" className="transition-colors hover:text-foreground">

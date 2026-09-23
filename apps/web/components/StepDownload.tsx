@@ -19,7 +19,7 @@ import {
 import { type GithubPushReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
 import { OutcomeBanner } from "@/components/OutcomeBanner";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -330,24 +330,24 @@ export default function StepDownload({
             </fieldset>
 
             <div className="flex justify-end">
-              <Button
+              <ActionButton
                 type="button"
                 onClick={() => void handleDownload()}
                 disabled={working}
-                className="w-fit min-w-28 gap-2"
+                className="gap-2"
               >
-              {working ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
-                  Preparing…
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                  Download the project
-                </>
-              )}
-              </Button>
+                {working ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
+                    Preparing…
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                    Download the project
+                  </>
+                )}
+              </ActionButton>
             </div>
 
             <div aria-live="polite" className="min-h-[1.25rem]">
@@ -390,16 +390,15 @@ export default function StepDownload({
                   this configuration.
                 </p>
                 <div className="flex justify-end">
-                  <Button
+                  <ActionButton
                     type="button"
                     variant="outline"
-                    size="sm"
-                    className="w-fit min-w-28 gap-2"
+                    className="gap-2"
                     onClick={handleConnectGithub}
                   >
                     <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                     Connect GitHub
-                  </Button>
+                  </ActionButton>
                 </div>
               </>
             ) : (
@@ -427,26 +426,25 @@ export default function StepDownload({
                   (DESIGN.md §2).
                 */}
                 <div className="flex justify-end">
-                  <Button
+                  <ActionButton
                     type="button"
-                    size="sm"
                     variant="secondary"
-                    className="w-fit min-w-28 gap-2"
+                    className="gap-2"
                     disabled={pushing || !isValidRepoName(repoNameTrimmed)}
                     onClick={() => void handlePush()}
                   >
-                  {pushing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
-                      Pushing…
-                    </>
-                  ) : (
-                    <>
-                      <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                      Push to GitHub
-                    </>
+                    {pushing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
+                        Pushing…
+                      </>
+                    ) : (
+                      <>
+                        <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                        Push to GitHub
+                      </>
                     )}
-                  </Button>
+                  </ActionButton>
                 </div>
               </>
             )}
@@ -493,9 +491,9 @@ export default function StepDownload({
       </Card>
 
       <div className="flex justify-end">
-        <Button type="button" variant="secondary" className="w-fit min-w-28" onClick={onBack}>
+        <ActionButton type="button" variant="secondary" onClick={onBack}>
           Back
-        </Button>
+        </ActionButton>
       </div>
     </div>
   );

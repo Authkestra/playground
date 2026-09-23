@@ -27,8 +27,8 @@ import {
   type GithubPushReturn,
   type OAuthReturn,
 } from "@/lib/oauth";
+import { ActionButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
@@ -294,15 +294,14 @@ export default function Playground() {
               moves to the right — the container's own `items-start` is still
               what they read against.
             */}
-            <Button
+            <ActionButton
               type="button"
               variant="outline"
-              size="sm"
-              className="w-fit min-w-28 self-end"
+              className="self-end"
               onClick={() => void load()}
             >
               Retry
-            </Button>
+            </ActionButton>
           </AlertDescription>
         </Alert>
       </Shell>

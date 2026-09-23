@@ -3,7 +3,7 @@
 import type { ConfigDiff, ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-types";
 import ScenarioPanel, { isControlValueActive } from "@/components/ScenarioPanel";
 import DiffViewer from "@/components/DiffViewer";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight } from "lucide-react";
 
@@ -92,9 +92,9 @@ export default function StepChooseMethods({
           </p>
         )}
         <div className="flex justify-end">
-          <Button onClick={onContinue} disabled={!anyActive} className="w-fit min-w-28">
+          <ActionButton onClick={onContinue} disabled={!anyActive}>
             Continue
-          </Button>
+          </ActionButton>
         </div>
       </div>
     </div>

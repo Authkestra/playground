@@ -11,6 +11,7 @@ import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 import ResourcePanel from "@/components/ResourcePanel";
 import CaptchaPanel from "@/components/CaptchaPanel";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -248,12 +249,12 @@ export default function StepSignIn({
         position needed fixing.
       */}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" className="w-fit min-w-28" onClick={onBack}>
+        <ActionButton type="button" variant="secondary" onClick={onBack}>
           Back
-        </Button>
-        <Button type="button" variant="default" className="w-fit min-w-28" onClick={onContinue}>
+        </ActionButton>
+        <ActionButton type="button" variant="default" onClick={onContinue}>
           Continue
-        </Button>
+        </ActionButton>
       </div>
     </div>
   );

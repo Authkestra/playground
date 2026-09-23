@@ -219,9 +219,28 @@ const NEXT = join(APP, ".next");
  * select, the six-entry array behind it, and the mint-then-verify wiring,
  * all of which already existed in some form two entries back and is being
  * reused, not rebuilt.
+ *
+ * ## And then 139 -> 140, for a shared button component that grew the bundle
+ *
+ * Around fifteen call sites across the app repeated the same className —
+ * `"w-fit min-w-28"`, this project's one button-sizing convention — as a
+ * literal string. Deduplicating that into `<ActionButton>` (`Button` plus
+ * that class, via `cn`) looks like it should only ever shrink the bundle,
+ * and the *Tailwind* output did: identical literal classes were already
+ * being deduplicated into shared CSS, so no CSS was gained back by this.
+ * What grew is the JS: every one of those call sites now runs a `cn()` call
+ * — `clsx` plus `twMerge` — at render time instead of handing React a
+ * static string, and pulls in one more module (`action-button.tsx`, plus
+ * its own `React.forwardRef` and `displayName`). Maintainability was the
+ * point, not bytes, and this is the honest cost of it.
+ *
+ * Measured at 138.8 kB against 138.0 kB before it — budget follows, with a
+ * little headroom back rather than sitting at the exact measured number,
+ * since this is the kind of shared module future call sites will keep
+ * reusing rather than repeating.
  */
 const BUDGETS_KB = {
-  "/page": 139,
+  "/page": 140,
   "/_not-found/page": 92,
   "/how-it-works/page": 93,
 };
