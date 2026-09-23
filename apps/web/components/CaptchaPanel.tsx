@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CaptchaVerification, CaptchaWidget, CaptchaWidgets } from "@playground/api-types";
 import { scenarioAction } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { ActionButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -378,10 +378,10 @@ function CaptchaWidgetCard({
           className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
         />
 
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button type="button" size="sm" onClick={() => void verify(token)} disabled={verifying}>
+        <div className="mt-2 flex justify-end">
+          <ActionButton type="button" onClick={() => void verify(token)} disabled={verifying}>
             {verifying ? "Verifying…" : "Verify this token"}
-          </Button>
+          </ActionButton>
         </div>
 
         {banner && <p className="mt-2 text-xs text-warning-foreground">{banner}</p>}

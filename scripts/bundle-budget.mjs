@@ -111,12 +111,133 @@ const NEXT = join(APP, ".next");
  * `<details>` explaining how a visitor can catch us out — watch the network
  * panel stay silent, or go offline and verify anyway.
  *
- * That explanation is collapsed rather than left standing open in the panel
- * (an earlier draft did, and read as a wall of text nobody would get through),
- * but it still ships in the bundle and still has to be true: a verdict
- * computed locally is worth no more than one computed on our server unless the
- * visitor is told how to tell the two apart. Collapsing it changed what a
- * visitor sees by default, not what this budget has to account for.
+ * Most of it is that prose, and that is the right trade rather than an
+ * embarrassing one. A verdict computed locally is worth no more than a verdict
+ * computed on our server unless the visitor is told how to tell the two apart,
+ * so the explanation is not decoration on the feature — it is the feature. The
+ * cheap way to buy the kilobytes back would be to cut it, which would leave a
+ * badge nobody has reason to believe.
+ *
+ * ## And why it then went 140 -> 141, net, despite deleting most of the panel
+ *
+ * Collapsing the resource panel's eleven buttons into one `Select` and one
+ * "Run it" (the "thousand of buttons" feedback after #82/#83). Measured at
+ * 140.7 kB against 139.7 kB before it — essentially flat, which is the
+ * interesting result given how much moved. The panel deleted three top
+ * buttons, six forgery buttons, two verify-step buttons, and three-plus
+ * standing paragraphs of prose, and added a live three-item checklist, a
+ * two-card result layout, and a collapsible disclosure for everything that
+ * used to sit in the open. Those roughly cancel out in bytes because none of
+ * it is a new dependency — same `crypto.subtle` verification, same
+ * `fetchJwks`/`verifyTokenSignature` from `lib/jwt.ts`, just chained behind
+ * one button instead of split across nine.
+ *
+ * The one genuine addition is `components/ui/select.tsx` — and it is a
+ * **native** `<select>` with a `ChevronDown` from `lucide-react` overlaid on
+ * it, not `@radix-ui/react-select`. That was tried first and reverted: Radix's
+ * Select depends on the same popper/portal/dismissable-layer/focus-scope/
+ * scroll-lock stack Tooltip was carrying when it was removed above for ~14 kB
+ * — except Select's is bigger, since it also needs a scrollable, virtualized
+ * listbox. Measured, it alone cost over 20 kB gzipped, which would have made
+ * this "delete most of the panel" change a net *increase* to the budget. A
+ * `<select>` with an `<optgroup>` for "intentionally broken" already does
+ * everything the approved mockup's dropdown needs — grouped options, keyboard
+ * operation, screen-reader semantics — for free, so that is what shipped.
+ *
+ * ## And then back down a hair, in review
+ *
+ * The collapsed disclosure still read like documentation once someone
+ * actually clicked it open: three paragraphs restating, in prose, a
+ * distinction the panel already states once, inline, exactly when it
+ * applies (the "agreement, not conflict" line beside the result cards). Cut
+ * to one paragraph, plus a "Decode on jwt.io ↗" link beside the raw header
+ * for whoever wants the familiar debugger view — it decodes client-side off
+ * a URL fragment, which browsers never put on the wire, so nothing is
+ * handed to a third party. Net effect on the number below is noise: 140.6 kB.
+ *
+ * ## And then 141 -> 142, for a fourth "Try:" option
+ *
+ * jwt.io was asked to do double duty — decode a token *and* verify it — and
+ * cannot: its own documented algorithm list for signature verification is
+ * HS384/512, RS384/512, PS256/384 and ES256/384, no EdDSA, so no public key
+ * pasted into it will ever check a token this scenario issues. Verifying an
+ * arbitrary token — one built by hand, or one of ours edited — was only ever
+ * going to happen here, because `lib/jwt.ts` is the only thing on either side
+ * of this feature that speaks Ed25519 at all.
+ *
+ * "Your own token" is a fourth `<option>` in the same `<select>`, wired
+ * through the same mint-call-fetch-verify chain `runIt` already ran for the
+ * other three — the one new dependency-free thing is a fallback for
+ * `jwks_url` (`/.well-known/jwks.json` off this API's own base URL) for the
+ * case a pasted token is the very first thing a visitor tries, before any
+ * mint has ever supplied one. Measured at 140.9 kB against 140.6 kB before it
+ * — three tenths of a kilobyte for a fourth option and one constant. The
+ * budget below moves to 142 not because this needed it, but because 141
+ * left it none: a change that costs nothing should not be the one blamed for
+ * tripping the budget on ordinary output drift.
+ *
+ * ## And then 142 -> 138, for deleting most of the panel a second time
+ *
+ * Every earlier entry above the last two was in the spirit of "keep the
+ * capability, shrink the chrome around it." This one drops a capability: the
+ * six named forgeries, the "Try:" dropdown, the call to this deployment's own
+ * protected route, and the two-card "Our API vs your browser" comparison are
+ * all gone, not collapsed. What is left answers one question — does this
+ * token verify against this key set — with two always-visible fields and one
+ * button, because that turned out to be the actual ask underneath four
+ * rounds of "still too many controls."
+ *
+ * The forgeries are not lost, only no longer curated: typing a wrong `kid`,
+ * pointing the JWKS field at the wrong issuer, or editing a byte of the
+ * signature reaches every one of them by hand instead of by preset — which
+ * is a fair trade for a visitor who came here to check a real token, and a
+ * worse one for a visitor who has never seen a broken JWT and would not know
+ * what to type. That trade was made deliberately, not as a side effect of
+ * cutting bytes.
+ *
+ * Measured at 137.5 kB — 3.4 kB less than the entry above it, most of it the
+ * disclosure, the checklist widget and the second result card leaving
+ * entirely rather than shrinking. The budget follows the actual number down
+ * rather than keeping the old headroom, for the same reason it has followed
+ * every number up: slack nobody is using is slack nobody notices disappear.
+ *
+ * ## And then 138 -> 139, for bringing the forgeries back as a convenience
+ *
+ * The entry above called dropping the six presets a deliberate trade,
+ * "worse... for a visitor who has never seen a broken JWT and would not know
+ * what to type." That half of the trade did not hold up — a "Try one of
+ * ours:" select is back, offering a valid token and the six named forgeries
+ * by name again. It is not the old dropdown: nothing else in the panel is
+ * gated behind it, it only ever fills the two fields that were already there,
+ * and picking one resets the JWKS field to this deployment's own on purpose
+ * — a forgery is signed by our key under our `kid`, so checking it against
+ * whatever a visitor had typed into that field would show `unknown_kid` for
+ * nearly all six regardless of which was picked, burying the specific thing
+ * each is named for under a more basic "wrong key set" answer.
+ *
+ * Measured at 138.0 kB against 137.5 kB before it — half a kilobyte for the
+ * select, the six-entry array behind it, and the mint-then-verify wiring,
+ * all of which already existed in some form two entries back and is being
+ * reused, not rebuilt.
+ *
+ * ## And then 139 -> 140, for a shared button component that grew the bundle
+ *
+ * Around fifteen call sites across the app repeated the same className —
+ * `"w-fit min-w-28"`, this project's one button-sizing convention — as a
+ * literal string. Deduplicating that into `<ActionButton>` (`Button` plus
+ * that class, via `cn`) looks like it should only ever shrink the bundle,
+ * and the *Tailwind* output did: identical literal classes were already
+ * being deduplicated into shared CSS, so no CSS was gained back by this.
+ * What grew is the JS: every one of those call sites now runs a `cn()` call
+ * — `clsx` plus `twMerge` — at render time instead of handing React a
+ * static string, and pulls in one more module (`action-button.tsx`, plus
+ * its own `React.forwardRef` and `displayName`). Maintainability was the
+ * point, not bytes, and this is the honest cost of it.
+ *
+ * Measured at 138.8 kB against 138.0 kB before it — budget follows, with a
+ * little headroom back rather than sitting at the exact measured number,
+ * since this is the kind of shared module future call sites will keep
+ * reusing rather than repeating.
  */
 const BUDGETS_KB = {
   "/page": 140,

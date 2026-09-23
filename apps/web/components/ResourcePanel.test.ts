@@ -1,34 +1,8 @@
 import { describe, it, expect } from "vitest";
-import {
-  FORGERIES,
-  LOCAL_VERDICT_LABELS,
-  VERDICT_LABELS,
-  localVerdictStyle,
-  verdictStyle,
-} from "./ResourcePanel";
+import { FORGERIES, LOCAL_VERDICT_LABELS, localVerdictStyle, shouldRefetchKeys } from "./ResourcePanel";
 import type { LocalVerdict } from "@/lib/jwt";
 
-/**
- * Every verdict the API can return, from `TokenVerdict` in
- * apps/api/src/scenario/resource.rs. A verdict with no label renders as its
- * raw wire name, which is the kind of thing nobody notices in review.
- */
-const BACKEND_VERDICTS = [
-  "accepted",
-  "absent",
-  "malformed",
-  "missing_kid",
-  "unknown_kid",
-  "untrusted_issuer",
-  "wrong_issuer",
-  "wrong_audience",
-  "expired",
-  "bad_signature",
-  "keys_unreachable",
-  "rejected",
-];
-
-/** Every forgery the API can mint, from `Forgery` in the same file. */
+/** Every forgery the API can mint, from `Forgery` in apps/api/src/scenario/resource.rs. */
 const BACKEND_FORGERIES = [
   "unknown_kid",
   "bad_signature",
@@ -38,49 +12,14 @@ const BACKEND_FORGERIES = [
   "missing_kid",
 ];
 
-describe("VERDICT_LABELS", () => {
-  it("labels every verdict the API can return", () => {
-    for (const verdict of BACKEND_VERDICTS) {
-      expect(VERDICT_LABELS[verdict], `no label for ${verdict}`).toBeDefined();
-    }
-  });
-});
-
 describe("FORGERIES", () => {
   it("offers every forgery the API can mint", () => {
     expect(FORGERIES.map((f) => f.kind).sort()).toEqual([...BACKEND_FORGERIES].sort());
   });
 
-  it("gives each one a distinct button label", () => {
+  it("gives each one a distinct label", () => {
     const labels = FORGERIES.map((f) => f.label);
     expect(new Set(labels).size).toBe(labels.length);
-  });
-});
-
-describe("verdictStyle", () => {
-  // A 401 is the ordinary answer here, so destructive has to mean more than
-  // "refused" or it means nothing.
-  it("reserves destructive for a forgery and for a broken validator", () => {
-    for (const verdict of ["bad_signature", "keys_unreachable"]) {
-      expect(verdictStyle(verdict)).toContain("destructive");
-    }
-  });
-
-  it("treats an ordinary rejection as warning, not destructive", () => {
-    for (const verdict of ["expired", "wrong_audience", "unknown_kid", "untrusted_issuer"]) {
-      expect(verdictStyle(verdict)).toContain("warning");
-      expect(verdictStyle(verdict)).not.toContain("destructive");
-    }
-  });
-
-  it("styles acceptance as success and an absent token as neutral", () => {
-    expect(verdictStyle("accepted")).toContain("success");
-    expect(verdictStyle("absent")).toContain("muted");
-  });
-
-  // A verdict added upstream must still render as *something* legible.
-  it("falls back rather than returning nothing for an unknown verdict", () => {
-    expect(verdictStyle("something_new_upstream")).toContain("warning");
   });
 });
 
@@ -107,13 +46,10 @@ describe("LOCAL_VERDICT_LABELS", () => {
     }
   });
 
-  // The local and remote answers are meant to be compared, which only works
-  // if the same outcome is called the same thing on both sides.
-  it("uses the API's own words where both sides answer the same question", () => {
-    expect(LOCAL_VERDICT_LABELS.unknown_kid).toBe(VERDICT_LABELS.unknown_kid);
-    expect(LOCAL_VERDICT_LABELS.bad_signature).toBe(VERDICT_LABELS.bad_signature);
-    expect(LOCAL_VERDICT_LABELS.missing_kid).toBe(VERDICT_LABELS.missing_kid);
-    expect(LOCAL_VERDICT_LABELS.malformed).toBe(VERDICT_LABELS.malformed);
+  it("gives every verdict a distinct, non-empty label", () => {
+    const labels = Object.values(LOCAL_VERDICT_LABELS);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (const label of labels) expect(label.length).toBeGreaterThan(0);
   });
 });
 
@@ -125,7 +61,7 @@ describe("localVerdictStyle", () => {
     }
   });
 
-  it("styles a local verification as success", () => {
+  it("styles a verification as success", () => {
     expect(localVerdictStyle("verified")).toContain("success");
   });
 
@@ -140,5 +76,22 @@ describe("localVerdictStyle", () => {
     for (const kind of LOCAL_VERDICTS) {
       expect(localVerdictStyle(kind), kind).toContain("border-");
     }
+  });
+});
+
+describe("shouldRefetchKeys", () => {
+  it("refetches when nothing is cached yet", () => {
+    expect(shouldRefetchKeys(null, "https://issuer.example/jwks.json")).toBe(true);
+  });
+
+  it("reuses the cache when the target URL matches what's cached", () => {
+    const url = "https://issuer.example/jwks.json";
+    expect(shouldRefetchKeys(url, url)).toBe(false);
+  });
+
+  it("refetches when the field's URL differs from what's cached", () => {
+    expect(shouldRefetchKeys("https://a.example/jwks.json", "https://b.example/jwks.json")).toBe(
+      true,
+    );
   });
 });

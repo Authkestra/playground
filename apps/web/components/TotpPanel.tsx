@@ -7,6 +7,7 @@ import type { TotpProvision, TotpVerification } from "@playground/api-types";
 import { errorDetail, scenarioAction } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -142,7 +143,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
               scanned the old QR code or secret will stop working.
             </AlertDescription>
           </Alert>
-          <div>
+          <div className="flex justify-end">
             {/*
               `secondary` once a secret already exists: the card's "Verify"
               button below becomes the actual next step at that point, and two
@@ -152,16 +153,15 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
               Verify button to compete with, so this is still the one primary
               action in the card.
             */}
-            <Button
+            <ActionButton
               type="button"
-              size="sm"
               variant={provision ? "secondary" : "default"}
               onClick={() => void handleProvision()}
               disabled={provisioning}
             >
               {provisioning && <Loader2 className="animate-spin" strokeWidth={1.5} aria-hidden="true" />}
               {provisioning ? "Setting up…" : provision ? "Regenerate secret" : "Set up authenticator"}
-            </Button>
+            </ActionButton>
           </div>
         </div>
 

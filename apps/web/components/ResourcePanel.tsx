@@ -1,26 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Forgery, IssuedToken, ProtectedCall } from "@playground/api-types";
-import { scenarioAction } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import type { Forgery, IssuedToken } from "@playground/api-types";
+import { API_BASE, scenarioAction } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
   checkEd25519Support,
-  decodeClaims,
-  decodeHeader,
-  describeExpiry,
-  describeVerdict,
   fetchJwks,
-  formatAudience,
+  describeVerdict,
   verifyTokenSignature,
   type Ed25519Support,
   type Jwk,
   type LocalVerdict,
 } from "@/lib/jwt";
+import { ActionButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 interface Props {
   scenarioId: string;
@@ -29,63 +27,13 @@ interface Props {
 }
 
 /**
- * Colour by what the outcome means, not by HTTP status.
- *
- * A 401 is the normal answer here, so destructive is reserved for the two
- * outcomes that mean something is actually wrong: a signature that does not
- * verify (someone forged or tampered), and a key set that could not be
- * fetched (the resource server is broken, not under attack).
- */
-export function verdictStyle(verdict: string): string {
-  switch (verdict) {
-    case "accepted":
-      return "border-success/30 bg-success/10 text-success-foreground";
-    case "absent":
-      return "border-border bg-muted/60 text-muted-foreground";
-    case "bad_signature":
-    case "keys_unreachable":
-      return "border-destructive/30 bg-destructive/10 text-destructive-foreground";
-    default:
-      return "border-warning/30 bg-warning/10 text-warning-foreground";
-  }
-}
-
-export const VERDICT_LABELS: Record<string, string> = {
-  accepted: "Accepted",
-  absent: "No token sent",
-  malformed: "Malformed token",
-  missing_kid: "No `kid` header",
-  unknown_kid: "Unpublished key",
-  untrusted_issuer: "Untrusted issuer",
-  wrong_issuer: "Wrong issuer",
-  wrong_audience: "Wrong audience",
-  expired: "Expired token",
-  bad_signature: "Bad signature",
-  keys_unreachable: "Key set unreachable",
-  rejected: "Refused",
-};
-
-/** Every forgery the API can mint, and what each one is for. */
-export const FORGERIES: { kind: Forgery; label: string }[] = [
-  { kind: "unknown_kid", label: "Unpublished key" },
-  { kind: "bad_signature", label: "Real `kid`, wrong key" },
-  { kind: "untrusted_issuer", label: "Untrusted issuer" },
-  { kind: "wrong_audience", label: "Another service" },
-  { kind: "expired", label: "Expired" },
-  { kind: "missing_kid", label: "No `kid`" },
-];
-
-/**
- * What to call the verdict the *browser* reached, in the same words the API's
- * verdict uses where the two are answering the same question.
- *
- * Shared vocabulary is the point: a visitor comparing "Unpublished key" here
- * against "Unpublished key" from the API is comparing two independent answers,
- * and a disagreement between them would be visible rather than buried in
- * different phrasing.
+ * What to call the verdict, in words rather than the algorithm's vocabulary.
+ * Kept exported and pinned by a test because a verdict added upstream in
+ * `lib/jwt.ts`'s `LocalVerdict` union that never gets a label here would
+ * render as its raw wire name — the kind of gap nobody notices in review.
  */
 export const LOCAL_VERDICT_LABELS: Record<LocalVerdict["kind"], string> = {
-  verified: "Signature verified here",
+  verified: "Verified",
   bad_signature: "Bad signature",
   unknown_kid: "Unpublished key",
   missing_kid: "No `kid` header",
@@ -95,13 +43,14 @@ export const LOCAL_VERDICT_LABELS: Record<LocalVerdict["kind"], string> = {
 };
 
 /**
- * Colour by what the local verdict means, on the same rule as
- * [`verdictStyle`]: destructive is reserved for a signature that does not
- * verify, because a rejection is the ordinary answer in this scenario and a UI
- * that shouts at every 401 teaches people to ignore it.
+ * Colour by what the verdict means. Destructive is reserved for a signature
+ * that does not verify — someone forged or tampered it — not for every
+ * non-"verified" outcome, because "malformed" or "no `kid`" are usually just
+ * a visitor mid-edit, not a finding.
  *
  * "Cannot be checked here" is deliberately neutral rather than alarming. A
- * browser without Ed25519 is not a finding about the token.
+ * browser without Ed25519, or a key this page cannot import, is not a
+ * finding about the token.
  */
 export function localVerdictStyle(kind: LocalVerdict["kind"]): string {
   switch (kind) {
@@ -118,24 +67,58 @@ export function localVerdictStyle(kind: LocalVerdict["kind"]): string {
 }
 
 /**
- * The same two functions the buttons call, put somewhere a visitor can reach
- * them without our UI in the way.
+ * Whether the key set already fetched can be reused, or this URL needs a
+ * fresh fetch.
  *
- * A panel that says "this ran in your browser" is still the panel saying it.
- * `authkestra.verify(token)` in the console is the same code with our
- * rendering removed — a visitor can paste a token of their own, or one of ours
- * with a character changed, and watch the answer change for a reason they
- * chose.
+ * Its own function rather than an inline comparison because it is the one
+ * rule worth pinning in a test without rendering anything: "same URL as what
+ * is already here, don't ask twice." Editing the token and pressing Verify
+ * again should not cost a second request against the same key set.
+ */
+export function shouldRefetchKeys(cachedUrl: string | null, targetUrl: string): boolean {
+  return cachedUrl !== targetUrl;
+}
+
+/**
+ * Where both fields start: this deployment's own key set, published at the
+ * same well-known path the resource server itself reads (see
+ * `apps/api/src/signing.rs`). A visitor who changes nothing still sees a real
+ * verification happen; changing either field is how they check anything else
+ * — a key set of their own, or a token that never came from here at all.
+ */
+const DEFAULT_JWKS_URL = `${API_BASE}/.well-known/jwks.json`;
+
+/**
+ * Every named way to mint a token that is meant to fail one specific check,
+ * plus an honest one. What the "Try one of ours:" select offers.
+ */
+export const FORGERIES: { kind: Forgery; label: string }[] = [
+  { kind: "unknown_kid", label: "Unpublished key" },
+  { kind: "bad_signature", label: "Real `kid`, wrong key" },
+  { kind: "untrusted_issuer", label: "Untrusted issuer" },
+  { kind: "wrong_audience", label: "Another service" },
+  { kind: "expired", label: "Expired" },
+  { kind: "missing_kid", label: "No `kid`" },
+];
+
+/** Everything "Try one of ours:" can mint: an honest token, or one of six built to fail. */
+export type Choice = "valid" | Forgery;
+
+/**
+ * The same function the button calls, put somewhere a visitor can reach it
+ * without our UI in the way.
+ *
+ * `authkestra.verify(token)` in the console is this code with our rendering
+ * removed — checked against whichever key set is currently in the JWKS field,
+ * with no need to trust that our button did what it says.
  */
 export interface ConsoleHandle {
-  /** Verifies against the key set already in this tab. Makes no request. */
+  /** Verifies against the key set already fetched. Makes no request. */
   verify(token: string, keys?: Jwk[]): Promise<LocalVerdict>;
   /** The one call that does touch the network, kept separate on purpose. */
   fetchKeys(url?: string): Promise<Jwk[]>;
-  /** Whatever the "Fetch the key set" button last brought back. */
+  /** Whatever the last fetch brought back. */
   keys: Jwk[] | null;
-  /** Where those keys came from. */
-  jwksUrl: string | null;
 }
 
 declare global {
@@ -144,45 +127,55 @@ declare global {
   }
 }
 
+/**
+ * Verify a token's signature against a JWKS — anyone's, not just ours — with
+ * nothing sent anywhere but the key-set fetch itself.
+ *
+ * Two fields, always editable, answer the actual question a visitor has:
+ * does this token check out against this key set. The six named forgeries
+ * came back as "Try one of ours:" — a mint-and-fill convenience, not a mode —
+ * because typing a broken token by hand is the wrong first ask of a visitor
+ * who has never seen one. Picking a preset resets the JWKS field to this
+ * deployment's own on purpose: every preset is signed by our key under our
+ * `kid`, so verifying it against some other key set a visitor had typed in
+ * would show `unknown_kid` for nearly all of them, regardless of which one
+ * was picked — masking the specific thing each is named for behind a more
+ * basic "wrong key set entirely" answer. Editing the JWKS field back to
+ * something else afterward is still one keystroke away, and answers a
+ * different, equally honest question: what does *this* key set make of a
+ * token that is really ours.
+ *
+ * Nothing is minted until a visitor actually picks a preset — there is no
+ * token pre-seeded on load — and picking one only fills the fields. Verify
+ * is a separate press, always: minting a real example is one server call a
+ * preset cannot avoid, but checking it is a second, deliberate action, not
+ * something a dropdown should trigger on its own.
+ */
 export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
-  const [issued, setIssued] = useState<IssuedToken | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [result, setResult] = useState<ProtectedCall | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [jwksUrl, setJwksUrl] = useState(DEFAULT_JWKS_URL);
   const [token, setToken] = useState("");
-  // The request the current result came from. Without it the panel only
-  // asserts an outcome; "called with no token, got a 401" is a claim until you
-  // can see the header that was, or was not, sent.
-  const [sentHeader, setSentHeader] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
 
-  // The visitor's own half of the scenario. `keys` is what they fetched, and
-  // it is kept across tokens on purpose: fetch once, then verify as many
-  // tokens as you like with the network switched off.
+  // Reset to "" the instant it fires (see the `Select` below), so it is
+  // always ready to trigger again — including picking the same preset twice
+  // in a row, which a `value`-bound select would otherwise ignore as a
+  // no-op change.
+  const [presetChoice, setPresetChoice] = useState<Choice | "">("");
+
   const [keys, setKeys] = useState<Jwk[] | null>(null);
+  const [keysUrl, setKeysUrl] = useState<string | null>(null);
   const [keysAt, setKeysAt] = useState<string | null>(null);
   const [keysError, setKeysError] = useState<string | null>(null);
   const [local, setLocal] = useState<{ verdict: LocalVerdict; at: string } | null>(null);
   const [support, setSupport] = useState<Ed25519Support | null>(null);
 
-  // Read by the console handle, which is installed once and must not go stale.
-  const keysRef = useRef<Jwk[] | null>(null);
-  const jwksUrlRef = useRef<string | null>(null);
-  useEffect(() => {
-    keysRef.current = keys;
-  }, [keys]);
-  useEffect(() => {
-    jwksUrlRef.current = issued?.jwks_url ?? null;
-  }, [issued]);
-
-  // `exp` is judged against the visitor's clock, so the clock has to actually
-  // run: a token with a sixty-second life should be seen to expire, not be
-  // reported as expired only because something else caused a re-render.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!issued) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [issued]);
+  // "minting" only happens from the preset select; "fetching" and
+  // "verifying" are the two things Verify itself always does, in that
+  // order — this is what keeps the fetch-then-verify separation from #76
+  // visible without a checklist widget to hold it: the button's own label
+  // says which one is happening right now.
+  const [phase, setPhase] = useState<"idle" | "minting" | "fetching" | "verifying">("idle");
+  const busy = phase !== "idle";
 
   // Asked once, up front, so a browser that cannot do Ed25519 is told before
   // it presses the button rather than after.
@@ -196,126 +189,122 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     };
   }, []);
 
-  // The console handle. Installed on mount and removed on unmount, because a
-  // global that outlives the panel that explains it is just litter.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handle: ConsoleHandle = {
-      verify: (value, override) => verifyTokenSignature(value, override ?? keysRef.current ?? []),
-      fetchKeys: (url) => {
-        const target = url ?? jwksUrlRef.current;
-        if (!target) return Promise.reject(new Error("no key set URL yet — issue a token first"));
-        return fetchJwks(target);
-      },
-      get keys() {
-        return keysRef.current;
-      },
-      get jwksUrl() {
-        return jwksUrlRef.current;
-      },
-    };
-    window.authkestra = handle;
-    return () => {
-      if (window.authkestra === handle) delete window.authkestra;
-    };
-  }, []);
-
-  const loadKeys = useCallback(async (url: string) => {
-    setBusy("jwks");
-    setKeysError(null);
-    // The verdict names the key set it was computed against, so it cannot
-    // outlive a fetch of a different one.
-    setLocal(null);
-    try {
-      const fetched = await fetchJwks(url);
-      setKeys(fetched);
-      setKeysAt(new Date().toLocaleTimeString());
-    } catch (error) {
-      setKeys(null);
-      setKeysAt(null);
-      setKeysError(error instanceof Error ? error.message : "the key set could not be fetched");
-    } finally {
-      setBusy(null);
-    }
-  }, []);
-
-  /**
-   * The verdict the visitor can check. Deliberately `await`s nothing but
-   * WebCrypto: everything it needs is already in the tab.
-   */
-  const verifyHere = useCallback(async (value: string, fetched: Jwk[]) => {
-    setBusy("verify");
-    const verdict = await verifyTokenSignature(value, fetched);
-    setLocal({ verdict, at: new Date().toLocaleTimeString() });
-    setBusy(null);
-  }, []);
-
-  async function mint(action: "issue" | "forge", kind?: Forgery) {
-    setBusy(kind ?? action);
-    setBanner(null);
+  /** Mints a token via the API: an honest one, or one built to fail a check. */
+  async function mintToken(action: "issue" | "forge", kind?: Forgery): Promise<IssuedToken | null> {
     const res = await scenarioAction<IssuedToken>(scenarioId, action, kind ? { kind } : {});
-    setBusy(null);
-
     if (!res.ok) {
-      if (res.error.kind === "demo_disabled") return onDemoDisabled();
+      if (res.error.kind === "demo_disabled") {
+        onDemoDisabled();
+        return null;
+      }
       setBanner(
         res.error.kind === "rate_limited" || res.error.kind === "http_error"
           ? res.error.detail
           : "Could not reach the API to mint a token.",
       );
-      return;
+      return null;
     }
-    setIssued(res.data);
-    setToken(res.data.token);
-    setResult(null);
-    setSentHeader(null);
-    // A verdict about the previous token would be actively misleading beside
-    // this one. The fetched key set stays, because it is about the issuer.
-    setLocal(null);
+    return res.data;
   }
 
-  function headerFor(value: string | null): string {
-    const trimmed = value?.trim();
-    return trimmed
-      ? `Authorization: Bearer ${trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed}`
-      : "(no Authorization header)";
-  }
+  /** Fetches a key set. **The only step here that touches the network.** */
+  const loadKeys = useCallback(async (url: string): Promise<Jwk[] | null> => {
+    setKeysError(null);
+    try {
+      const fetched = await fetchJwks(url);
+      setKeys(fetched);
+      setKeysUrl(url);
+      setKeysAt(new Date().toLocaleTimeString());
+      return fetched;
+    } catch (error) {
+      setKeys(null);
+      setKeysUrl(null);
+      setKeysAt(null);
+      setKeysError(error instanceof Error ? error.message : "the key set could not be fetched");
+      return null;
+    }
+  }, []);
 
-  async function call(value: string | null) {
-    setBusy("call");
+  /**
+   * The one thing pressing Verify does: fetch the key set if this field's
+   * URL is not the one already cached, then verify. Picking a preset no
+   * longer chains into this — it only fills the fields (see `runPreset`) —
+   * so this has exactly one caller now, the button below.
+   */
+  async function verify() {
+    if (busy || !token.trim() || !jwksUrl.trim()) return;
+    const tokenValue = token.trim();
+    const jwksUrlValue = jwksUrl.trim();
     setBanner(null);
-    setSentHeader(headerFor(value));
-    const res = await scenarioAction<ProtectedCall>(scenarioId, "call", {
-      token: value ?? undefined,
-    });
-    setBusy(null);
+    setLocal(null);
 
-    if (!res.ok) {
-      if (res.error.kind === "demo_disabled") return onDemoDisabled();
-      setBanner(
-        res.error.kind === "rate_limited" || res.error.kind === "http_error"
-          ? res.error.detail
-          : "Could not reach the API.",
-      );
+    let activeKeys = keys;
+    if (shouldRefetchKeys(keysUrl, jwksUrlValue)) {
+      setPhase("fetching");
+      activeKeys = await loadKeys(jwksUrlValue);
+    }
+    // Reachable if the cache was reused (`activeKeys` is still `keys`) and
+    // nothing has ever been fetched yet, or if the fetch above just failed.
+    if (!activeKeys) {
+      setPhase("idle");
       return;
     }
-    setResult(res.data);
+
+    if (support?.supported === false) {
+      setPhase("idle");
+      return;
+    }
+
+    setPhase("verifying");
+    const verdict = await verifyTokenSignature(tokenValue, activeKeys);
+    setLocal({ verdict, at: new Date().toLocaleTimeString() });
+    setPhase("idle");
   }
 
-  const working = busy !== null;
-  // Decoded from whatever is in the textarea, on every render, so editing the
-  // token changes what is shown before anything is sent anywhere.
-  const header = issued ? decodeHeader(token) : null;
-  const claims = issued ? decodeClaims(token) : null;
-  const expiry = claims ? describeExpiry(claims.exp, now) : null;
-  const tokenAudience = claims ? formatAudience(claims.aud) : null;
+  /**
+   * Mints the chosen preset, then points both fields at it — the JWKS field
+   * included, and unconditionally: see the module doc for why a preset that
+   * left the JWKS field alone would mostly just report `unknown_kid` instead
+   * of the thing it is named for.
+   */
+  async function runPreset(choice: Choice) {
+    if (busy) return;
+    setBanner(null);
+    setLocal(null);
+    setKeysError(null);
+    setPhase("minting");
+    const minted = await mintToken(choice === "valid" ? "issue" : "forge", choice === "valid" ? undefined : choice);
+    setPhase("idle");
+    if (!minted) return;
+    // Fills the fields and stops there — minting is the one server call a
+    // real example needs, but picking an example is not the same thing as
+    // asking to check it. Verify is a separate, deliberate press.
+    setToken(minted.token);
+    setJwksUrl(DEFAULT_JWKS_URL);
+  }
+
+  // The console handle. Installed on mount and removed on unmount, because a
+  // global that outlives the panel that explains it is just litter.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handle: ConsoleHandle = {
+      verify: (value, override) => verifyTokenSignature(value, override ?? keys ?? []),
+      fetchKeys: (url) => fetchJwks(url ?? jwksUrl),
+      keys,
+    };
+    window.authkestra = handle;
+    return () => {
+      if (window.authkestra === handle) delete window.authkestra;
+    };
+  }, [keys, jwksUrl]);
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        A route that validates a token it did not issue. It holds no secret — only the
-        issuer&apos;s name and the URL of its published keys. Issue a token, then present
-        it, then present one built to fail and watch the reason change.
+        Verify a token&apos;s signature against a published key set — entirely in this
+        browser, against a key set that may not even be ours. The JWKS field starts pointed
+        at this deployment&apos;s own; pick an example below or paste a token of your own,
+        then press Verify.
       </p>
 
       {banner && (
@@ -324,277 +313,148 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         </Alert>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" onClick={() => void mint("issue")} disabled={working}>
-          {busy === "issue" ? "Issuing…" : "Issue a valid token"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => void call(token || null)}
-          disabled={working}
-        >
-          {busy === "call" ? "Calling…" : "Call the route"}
-        </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => void call(null)} disabled={working}>
-          Call with no token
-        </Button>
-      </div>
-
-      <div>
-        <p className="text-xs text-muted-foreground">
-          Or mint a token built to fail one specific check. Each is really signed — the
-          verdict comes from real validation, not from a label.
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {FORGERIES.map((f) => (
-            <Button
-              key={f.kind}
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void mint("forge", f.kind)}
-              disabled={working}
-            >
-              {busy === f.kind ? "Minting…" : f.label}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      {issued && (
-        <Card>
-          <CardContent className="p-3">
-            {issued.forged_as ? (
-              <p className="text-xs text-warning-foreground">
-                This one is built to fail: it {issued.forged_as}.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">A valid token, signed by the live key.</p>
-            )}
-
-            {/*
-              Tier 1 of #76. `decodeHeader` already showed the `kid` so it was
-              not hearsay; the claims are where the *reason* for a rejection
-              lives, and four of the six forgeries explain themselves the
-              moment they are visible. Kept to one line of prose: the policy
-              (accepts `{aud}` from `{iss}`) is folded into the mismatch flags
-              below rather than stated again above the table nobody reads.
-            */}
-            <p className="mt-2 text-xs text-muted-foreground">
-              Decoded from your token — compare against{" "}
-              <code className="font-mono text-foreground">{issued.audience}</code> /{" "}
-              <code className="font-mono text-foreground">{issued.issuer}</code>, which is what
-              this route accepts.
-            </p>
-            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-              <dt className="text-muted-foreground">kid</dt>
-              <dd className="break-all font-mono text-foreground">
-                {typeof header?.kid === "string" ? (
-                  header.kid
-                ) : (
-                  <span className="text-warning-foreground">
-                    (absent — nothing says which key to check)
-                  </span>
-                )}
-              </dd>
-
-              <dt className="text-muted-foreground">iss</dt>
-              <dd className="break-all font-mono text-foreground">
-                {claims?.iss ?? "(absent)"}
-                {claims?.iss && claims.iss !== issued.issuer && (
-                  <span className="ml-1 font-sans text-warning-foreground">
-                    — not the issuer this route trusts
-                  </span>
-                )}
-              </dd>
-
-              <dt className="text-muted-foreground">aud</dt>
-              <dd className="break-all font-mono text-foreground">
-                {tokenAudience ?? "(absent)"}
-                {tokenAudience && tokenAudience !== issued.audience && (
-                  <span className="ml-1 font-sans text-warning-foreground">
-                    — another service, not this one
-                  </span>
-                )}
-              </dd>
-
-              <dt className="text-muted-foreground">exp</dt>
-              <dd
-                className={cn(
-                  "break-all font-mono",
-                  expiry?.expired ? "text-warning-foreground" : "text-foreground",
-                )}
-              >
-                {expiry ? expiry.text : "(absent)"}
-              </dd>
-
-              <dt className="text-muted-foreground">sub</dt>
-              <dd className="break-all font-mono text-foreground">{claims?.sub ?? "(absent)"}</dd>
-            </dl>
-
-            {/*
-              The invitation that makes "unpublished key" checkable rather than
-              asserted. A visitor who opens this and searches for the kid above
-              has verified the demo instead of believing it.
-            */}
-            <p className="mt-2 text-xs text-muted-foreground">
-              Look the <code className="font-mono">kid</code> up yourself:{" "}
-              <a
-                href={issued.jwks_url}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-foreground underline underline-offset-2"
-              >
-                {issued.jwks_url}
-              </a>
-            </p>
-
-            <Label className="mt-3 block text-xs font-normal text-muted-foreground" htmlFor="resource-token">
-              Edit before calling to see the rest — change a character in the last segment
-              for a bad signature, or delete one to make it unreadable. Whatever is here is
-              what gets sent.
-            </Label>
-            <textarea
-              id="resource-token"
-              value={token}
-              onChange={(e) => {
-                setToken(e.target.value);
-                // A verdict about bytes that are no longer in the box is worse
-                // than no verdict: change one character and the badge below
-                // goes away until you ask again.
-                setLocal(null);
-              }}
-              spellCheck={false}
-              rows={3}
-              className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
-            />
-          </CardContent>
-        </Card>
+      {support?.supported === false && (
+        <Alert className="border-border bg-muted/60 text-muted-foreground">
+          <AlertDescription className="text-xs">{support.reason}</AlertDescription>
+        </Alert>
       )}
 
       {/*
-        Tier 2 of #76, condensed after review: the same question the API
-        answers, answered again by the one party we do not control. The
-        "how to check" explanation is real but optional reading, so it is a
-        <details> a visitor opens rather than three paragraphs everyone
-        scrolls past. The two steps themselves — fetch, then verify — stay
-        in the open, because those are the demonstration, not the caveat.
+        Back to a row (label beside, not above): a data field like JWKS/token
+        below earns full width, label-above, because a visitor reads and
+        edits it. This is an action trigger, not a field to read back — its
+        row is capped and right-aligned like the Verify button, not stretched
+        to match its siblings just because they happen to share a container.
       */}
-      {issued && (
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-xs text-muted-foreground">
-              Check our answer yourself: fetch the published keys, then verify against them.
-              Step 2 makes no network request.
-            </p>
-
-            {support?.supported === false && (
-              <Alert className="mt-2 border-border bg-muted/60 text-muted-foreground">
-                <AlertDescription className="text-xs">{support.reason}</AlertDescription>
-              </Alert>
-            )}
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void loadKeys(issued.jwks_url)}
-                disabled={working}
-              >
-                {busy === "jwks" ? "Fetching…" : "1 · Fetch the key set"}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => keys && void verifyHere(token, keys)}
-                disabled={working || !keys || support?.supported === false}
-              >
-                {busy === "verify" ? "Verifying…" : "2 · Verify in this browser"}
-              </Button>
-              {!keys && !keysError && (
-                <span className="text-xs text-muted-foreground">needs step 1 first</span>
-              )}
-            </div>
-
-            {keysError && (
-              <p className="mt-2 text-xs text-warning-foreground">
-                Key set unreachable: {keysError}
-              </p>
-            )}
-
-            {keys && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {keys.length === 1 ? "1 key" : `${keys.length} keys`} fetched at {keysAt} from{" "}
-                <span className="break-all font-mono">{issued.jwks_url}</span>
-              </p>
-            )}
-
-            <div aria-live="polite">
-              {local && (
-                <div
-                  className={cn(
-                    "mt-3 rounded-md border px-3 py-2 text-sm",
-                    localVerdictStyle(local.verdict.kind),
-                  )}
-                >
-                  <p className="font-medium">
-                    Your browser · {LOCAL_VERDICT_LABELS[local.verdict.kind]}
-                  </p>
-                  <p className="mt-1 text-xs opacity-90">{describeVerdict(local.verdict)}</p>
-                </div>
-              )}
-            </div>
-
-            {/*
-              A wrong-audience or expired token genuinely verifies here and is
-              still refused by the API — agreement, not conflict, since this
-              checks only the signature. Said once, briefly, tucked behind the
-              disclosure below rather than repeated at full length in the open.
-            */}
-            <details className="mt-3 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none text-foreground">
-                How to confirm this ran in your browser, not ours
-              </summary>
-              <p className="mt-2">
-                Watch your network panel stay silent when you press step 2 — or switch your
-                network off and press it anyway; the answer doesn&apos;t change. This checks
-                only the signature, so a token that fails on audience, issuer or expiry can
-                still verify here — read those from the claims above, not from this badge.
-                Or skip the buttons:{" "}
-                <code className="font-mono text-foreground">
-                  await authkestra.verify(token)
-                </code>{" "}
-                in the console, against the keys already fetched.
-              </p>
-            </details>
-          </CardContent>
-        </Card>
-      )}
-
-      <div aria-live="polite">
-        {sentHeader && (
-          <p className="mb-1 break-all font-mono text-[11px] text-muted-foreground">
-            GET /api/protected · {sentHeader}
-          </p>
-        )}
-        {result && (
-          <div className={cn("rounded-md border px-3 py-2 text-sm", verdictStyle(result.verdict))}>
-            {/* Named, so it sits beside "Your browser · …" as one of two
-                answers rather than as the answer. */}
-            <p className="font-medium">
-              Our API · {result.status} · {VERDICT_LABELS[result.verdict] ?? result.verdict}
-            </p>
-            <p className="mt-1 whitespace-pre-line text-xs opacity-90">{result.detail}</p>
-            {result.subject && (
-              <p className="mt-1 font-mono text-xs opacity-75">sub: {result.subject}</p>
-            )}
-          </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
+          Try one of ours:
+        </Label>
+        <Select
+          id="resource-preset"
+          // Native `<select>` defaults to `h-9`, matching the Verify button
+          // (which no longer specifies size="sm"). `w-fit min-w-28` gives
+          // minimum width matching the Continue button, grows to fit the
+          // longest option.
+          className="w-fit min-w-28"
+          value={presetChoice}
+          disabled={busy}
+          onChange={(e) => {
+            const value = e.target.value as Choice | "";
+            // Reset immediately, not after the mint resolves — see the state
+            // declaration for why.
+            setPresetChoice("");
+            if (value) void runPreset(value);
+          }}
+        >
+          <option value="" disabled hidden>
+            Pick an example…
+          </option>
+          <option value="valid">A valid token</option>
+          <optgroup label="Intentionally broken">
+            {FORGERIES.map((f) => (
+              <option key={f.kind} value={f.kind}>
+                {f.label}
+              </option>
+            ))}
+          </optgroup>
+        </Select>
+        {phase === "minting" && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden />
+            Minting…
+          </span>
         )}
       </div>
+
+      <div>
+        <Label htmlFor="resource-jwks-url" className="text-xs text-muted-foreground">
+          Key set (JWKS) URL
+        </Label>
+        <Input
+          id="resource-jwks-url"
+          value={jwksUrl}
+          onChange={(e) => {
+            setJwksUrl(e.target.value);
+            setLocal(null);
+          }}
+          spellCheck={false}
+          className="mt-1 font-mono text-xs"
+        />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="resource-token" className="text-xs text-muted-foreground">
+            Token
+          </Label>
+          {/*
+            A secondary affordance, not an alternative: jwt.io's own
+            documented algorithm list for verifying a signature has no EdDSA,
+            which is the only thing this deployment signs with — it can
+            decode what is here, never check it. The fields above are the
+            only thing that can. `#token=` is jwt.io's own current deep-link
+            fragment, and a token in a fragment is never sent over the wire,
+            so nothing here reaches a third party by clicking it.
+          */}
+          {token.trim() && (
+            <a
+              href={`https://jwt.io/#token=${encodeURIComponent(token.trim())}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-foreground underline underline-offset-2"
+            >
+              Decode on jwt.io ↗
+            </a>
+          )}
+        </div>
+        <textarea
+          id="resource-token"
+          value={token}
+          onChange={(e) => {
+            setToken(e.target.value);
+            setLocal(null);
+          }}
+          spellCheck={false}
+          rows={3}
+          placeholder="eyJhbGciOi…"
+          className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <ActionButton
+          type="button"
+          onClick={() => void verify()}
+          disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
+        >
+          {phase === "fetching" && (
+            <Loader2 className="mr-1.5 size-3.5 animate-spin" strokeWidth={2} aria-hidden />
+          )}
+          {phase === "verifying" && (
+            <Loader2 className="mr-1.5 size-3.5 animate-spin" strokeWidth={2} aria-hidden />
+          )}
+          {phase === "fetching" ? "Fetching the key set…" : phase === "verifying" ? "Verifying…" : "Verify"}
+        </ActionButton>
+      </div>
+
+      {keysError && (
+        <p className="text-xs text-warning-foreground">The key set could not be read: {keysError}</p>
+      )}
+
+      {local && (
+        <div
+          aria-live="polite"
+          className={cn("rounded-md border px-3 py-2 text-sm", localVerdictStyle(local.verdict.kind))}
+        >
+          <p className="font-medium">{LOCAL_VERDICT_LABELS[local.verdict.kind]}</p>
+          <p className="mt-1 text-xs opacity-90">{describeVerdict(local.verdict)}</p>
+          <p className="mt-1 text-xs opacity-75">
+            Computed at {local.at} against the key set fetched at {keysAt} from{" "}
+            <span className="break-all font-mono">{keysUrl}</span>. No other request was made.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

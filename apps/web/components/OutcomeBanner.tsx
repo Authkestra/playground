@@ -2,8 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { AlertTriangle, CheckCircle2, XCircle, type LucideIcon } from "lucide-react";
+import { ActionButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 
 export type OutcomeTone = "success" | "warning" | "error";
 
@@ -65,15 +65,14 @@ export function OutcomeBanner({
       <Icon className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       <AlertDescription className="flex items-start justify-between gap-3">
         <p>{message}</p>
-        <Button
+        <ActionButton
           type="button"
           variant="ghost"
-          size="sm"
           className="h-auto shrink-0 px-2 py-1 text-xs underline underline-offset-2"
           onClick={onDismiss}
         >
           Dismiss
-        </Button>
+        </ActionButton>
       </AlertDescription>
     </Alert>
   );

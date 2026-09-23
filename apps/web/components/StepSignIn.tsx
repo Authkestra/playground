@@ -11,6 +11,7 @@ import TotpPanel from "@/components/TotpPanel";
 import PasskeysPanel from "@/components/PasskeysPanel";
 import ResourcePanel from "@/components/ResourcePanel";
 import CaptchaPanel from "@/components/CaptchaPanel";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -216,7 +217,18 @@ export default function StepSignIn({
                 </p>
               </div>
 
-              <div className="mx-auto flex w-full max-w-sm flex-col gap-5">
+              {/*
+                Was `mx-auto max-w-sm` — sized for a narrow stack of OAuth
+                buttons, back when that was most of what this column held.
+                The other three panels have since grown real content of
+                their own (ResourcePanel's JWKS URL field and token
+                textarea, TOTP's QR code) that a 384px column just cramps,
+                and every button inside them is `w-full` now regardless —
+                stretching to fill a column narrower than the card around
+                it, rather than the card itself. Filling the parent Card's
+                own width instead.
+              */}
+              <div className="flex w-full flex-col gap-5">
                 {visible.map((id, i) => (
                   <Fragment key={id}>
                     {i > 0 && <Divider />}
@@ -229,13 +241,20 @@ export default function StepSignIn({
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between">
-        <Button type="button" variant="secondary" onClick={onBack}>
+      {/*
+        Both at the right edge, same width and height, rather than opposed
+        ends of the row — neither carries an explicit `size`, so both were
+        already the same height via `Button`'s shared default; only their
+        width (sized to "Back" vs "Continue"'s different lengths) and their
+        position needed fixing.
+      */}
+      <div className="flex justify-end gap-2">
+        <ActionButton type="button" variant="secondary" onClick={onBack}>
           Back
-        </Button>
-        <Button type="button" variant="default" onClick={onContinue}>
+        </ActionButton>
+        <ActionButton type="button" variant="default" onClick={onContinue}>
           Continue
-        </Button>
+        </ActionButton>
       </div>
     </div>
   );

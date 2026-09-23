@@ -67,6 +67,19 @@ Reach for `@/components/ui/*` before writing markup:
 - `Checkbox` + `Label` for `select_many`, `RadioGroup` for `select_one`. Both
   replace bare native inputs, which previously carried no classes at all and so
   rendered at OS default size next to styled controls.
+- `Select` for a single choice from a longer list presented as a dropdown
+  rather than a stack of radios. Unlike every other control above, this one
+  wraps a **native** `<select>`, not a Radix primitive — a native element
+  already opens a listbox, groups options under a heading via `<optgroup>`,
+  and is keyboard- and screen-reader-friendly with zero JavaScript.
+  `@radix-ui/react-select` was tried and reverted (originally for the resource
+  panel's own picker, since replaced by two plain fields — see
+  `scripts/bundle-budget.mjs`'s history of that panel): it pulls in the
+  popper/portal/focus-trap/scroll-lock stack, which cost over 20 kB gzipped
+  for behaviour the native element already had. See that same file's note on
+  why Tooltip was removed for the same reason, at a third of the cost. No
+  current screen uses `Select`, but it stays — the cost of a dropdown done
+  right should not be paid twice.
 - `Button` for every action. `variant="default"` is the step's forward action
   and there is at most one per view; `secondary` for Back; `outline` for a
   side action; `ghost` for anything in a toolbar; `destructive` only for a

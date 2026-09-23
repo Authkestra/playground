@@ -19,7 +19,7 @@ import {
 import { type GithubPushReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
 import { OutcomeBanner } from "@/components/OutcomeBanner";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -329,11 +329,11 @@ export default function StepDownload({
               ))}
             </fieldset>
 
-            <Button
+            <ActionButton
               type="button"
               onClick={() => void handleDownload()}
               disabled={working}
-              className="gap-2"
+              className="w-full gap-2"
             >
               {working ? (
                 <>
@@ -346,7 +346,7 @@ export default function StepDownload({
                   Download the project
                 </>
               )}
-            </Button>
+            </ActionButton>
 
             <div aria-live="polite" className="min-h-[1.25rem]">
               {state.kind === "done" && (
@@ -387,16 +387,15 @@ export default function StepDownload({
                   Creates one new public repository on your GitHub account for
                   this configuration.
                 </p>
-                <Button
+                <ActionButton
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="gap-2"
+                  className="w-full gap-2"
                   onClick={handleConnectGithub}
                 >
                   <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                   Connect GitHub
-                </Button>
+                </ActionButton>
               </>
             ) : (
               <>
@@ -422,26 +421,27 @@ export default function StepDownload({
                   would leave neither reading as the one that matters
                   (DESIGN.md §2).
                 */}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="gap-2"
-                  disabled={pushing || !isValidRepoName(repoNameTrimmed)}
-                  onClick={() => void handlePush()}
-                >
-                  {pushing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
-                      Pushing…
-                    </>
-                  ) : (
-                    <>
-                      <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                      Push to GitHub
-                    </>
-                  )}
-                </Button>
+                <div className="flex justify-end">
+                  <ActionButton
+                    type="button"
+                    variant="secondary"
+                    className="gap-2"
+                    disabled={pushing || !isValidRepoName(repoNameTrimmed)}
+                    onClick={() => void handlePush()}
+                  >
+                    {pushing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
+                        Pushing…
+                      </>
+                    ) : (
+                      <>
+                        <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                        Push to GitHub
+                      </>
+                    )}
+                  </ActionButton>
+                </div>
               </>
             )}
 
@@ -486,10 +486,10 @@ export default function StepDownload({
         </CardContent>
       </Card>
 
-      <div>
-        <Button type="button" variant="secondary" onClick={onBack}>
+      <div className="flex justify-end">
+        <ActionButton type="button" variant="secondary" onClick={onBack}>
           Back
-        </Button>
+        </ActionButton>
       </div>
     </div>
   );

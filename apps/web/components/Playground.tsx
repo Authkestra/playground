@@ -27,8 +27,8 @@ import {
   type GithubPushReturn,
   type OAuthReturn,
 } from "@/lib/oauth";
+import { ActionButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
@@ -288,9 +288,20 @@ export default function Playground() {
               reload this page.
             </p>
             {banner && <p className="font-medium text-warning-foreground">{banner}</p>}
-            <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+            {/*
+              `self-end`, not a container-wide `items-end`: the paragraphs
+              above stay left-aligned prose, and only this one flex child
+              moves to the right — the container's own `items-start` is still
+              what they read against.
+            */}
+            <ActionButton
+              type="button"
+              variant="outline"
+              className="self-end"
+              onClick={() => void load()}
+            >
               Retry
-            </Button>
+            </ActionButton>
           </AlertDescription>
         </Alert>
       </Shell>

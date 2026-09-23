@@ -3,7 +3,7 @@
 import type { ConfigDiff, ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-types";
 import ScenarioPanel, { isControlValueActive } from "@/components/ScenarioPanel";
 import DiffViewer from "@/components/DiffViewer";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight } from "lucide-react";
 
@@ -80,15 +80,22 @@ export default function StepChooseMethods({
           </div>
       </details>
 
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Button onClick={onContinue} disabled={!anyActive}>
-          Continue
-        </Button>
+      {/*
+        Stacked flex column: the button wraps in its own justify-end container
+        so it stays right-aligned whether the hint above is visible or not,
+        rather than relying on space-between to position a single child.
+      */}
+      <div className="flex flex-col gap-2">
         {!anyActive && (
           <p className="text-xs text-muted-foreground">
             Turn on at least one sign-in method above to continue.
           </p>
         )}
+        <div className="flex justify-end">
+          <ActionButton onClick={onContinue} disabled={!anyActive}>
+            Continue
+          </ActionButton>
+        </div>
       </div>
     </div>
   );

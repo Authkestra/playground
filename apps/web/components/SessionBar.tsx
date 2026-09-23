@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DemoSessionView } from "@playground/api-types";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 
@@ -98,9 +98,9 @@ export default function SessionBar({ session, onReset, resetting }: Props) {
           <span className="text-muted-foreground">No session yet</span>
         )}
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={onReset} disabled={resetting}>
+      <ActionButton type="button" variant="outline" onClick={onReset} disabled={resetting}>
         {resetting ? "Resetting…" : "Reset session"}
-      </Button>
+      </ActionButton>
     </Card>
   );
 }
