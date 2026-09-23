@@ -216,7 +216,18 @@ export default function StepSignIn({
                 </p>
               </div>
 
-              <div className="mx-auto flex w-full max-w-sm flex-col gap-5">
+              {/*
+                Was `mx-auto max-w-sm` — sized for a narrow stack of OAuth
+                buttons, back when that was most of what this column held.
+                The other three panels have since grown real content of
+                their own (ResourcePanel's JWKS URL field and token
+                textarea, TOTP's QR code) that a 384px column just cramps,
+                and every button inside them is `w-full` now regardless —
+                stretching to fill a column narrower than the card around
+                it, rather than the card itself. Filling the parent Card's
+                own width instead.
+              */}
+              <div className="flex w-full flex-col gap-5">
                 {visible.map((id, i) => (
                   <Fragment key={id}>
                     {i > 0 && <Divider />}
