@@ -451,11 +451,11 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
           <p className="text-xs text-muted-foreground">
             Registers a passkey with whichever authenticator this browser offers.
           </p>
-          <div>
+          <div className="flex justify-end">
             <Button
               type="button"
               size="sm"
-              className="w-full"
+              className="w-full max-w-xs"
               onClick={() => void handleRegister()}
               disabled={registering}
             >
@@ -493,12 +493,12 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
           <p className="text-xs text-muted-foreground">
             Authenticates using a previously registered passkey.
           </p>
-          <div>
+          <div className="flex justify-end">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="w-full"
+              className="w-full max-w-xs"
               onClick={() => void handleAuthenticate()}
               disabled={authenticating}
             >

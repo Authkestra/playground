@@ -319,27 +319,24 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         </Alert>
       )}
 
-      <div>
-        <div className="flex items-center justify-between gap-2">
-          <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
-            Try one of ours:
-          </Label>
-          {phase === "minting" && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden />
-              Minting…
-            </span>
-          )}
-        </div>
+      {/*
+        Back to a row (label beside, not above): a data field like JWKS/token
+        below earns full width, label-above, because a visitor reads and
+        edits it. This is an action trigger, not a field to read back — its
+        row is capped and right-aligned like the Verify button, not stretched
+        to match its siblings just because they happen to share a container.
+      */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
+          Try one of ours:
+        </Label>
         <Select
           id="resource-preset"
-          // Full width, label above rather than beside it — the same shape
-          // as the JWKS and token fields below, so this is the third field
-          // in the panel rather than the odd one out. `h-8` still overrides
-          // the native `<select>`'s own `h-9` to match the Verify button's
-          // `size="sm"` height; width no longer needs matching by hand, since
-          // both now fill the same row on their own.
-          className="mt-1 h-8 w-full"
+          // `h-8` overrides the native `<select>`'s own `h-9` to match the
+          // Verify button's `size="sm"` height. `max-w-xs` is the same cap
+          // as every other panel's action button — a consistent minimum
+          // rather than one sized to this control's own longest option.
+          className="h-8 w-full max-w-xs"
           value={presetChoice}
           disabled={busy}
           onChange={(e) => {
@@ -362,6 +359,12 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             ))}
           </optgroup>
         </Select>
+        {phase === "minting" && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" strokeWidth={2} aria-hidden />
+            Minting…
+          </span>
+        )}
       </div>
 
       <div>
@@ -419,11 +422,11 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         />
       </div>
 
-      <div>
+      <div className="flex justify-end">
         <Button
           type="button"
           size="sm"
-          className="w-full"
+          className="w-full max-w-xs"
           onClick={() => void verify()}
           disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
         >

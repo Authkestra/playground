@@ -142,7 +142,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
               scanned the old QR code or secret will stop working.
             </AlertDescription>
           </Alert>
-          <div>
+          <div className="flex justify-end">
             {/*
               `secondary` once a secret already exists: the card's "Verify"
               button below becomes the actual next step at that point, and two
@@ -156,7 +156,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
               type="button"
               size="sm"
               variant={provision ? "secondary" : "default"}
-              className="w-full"
+              className="w-full max-w-xs"
               onClick={() => void handleProvision()}
               disabled={provisioning}
             >

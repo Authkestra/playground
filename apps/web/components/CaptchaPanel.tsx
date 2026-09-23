@@ -378,11 +378,11 @@ function CaptchaWidgetCard({
           className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
         />
 
-        <div className="mt-2">
+        <div className="mt-2 flex justify-end">
           <Button
             type="button"
             size="sm"
-            className="w-full"
+            className="w-full max-w-xs"
             onClick={() => void verify(token)}
             disabled={verifying}
           >
