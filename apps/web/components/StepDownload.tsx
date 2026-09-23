@@ -329,26 +329,24 @@ export default function StepDownload({
               ))}
             </fieldset>
 
-            <div className="flex justify-end">
-              <ActionButton
-                type="button"
-                onClick={() => void handleDownload()}
-                disabled={working}
-                className="gap-2"
-              >
-                {working ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
-                    Preparing…
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                    Download the project
-                  </>
-                )}
-              </ActionButton>
-            </div>
+            <ActionButton
+              type="button"
+              onClick={() => void handleDownload()}
+              disabled={working}
+              className="w-full gap-2"
+            >
+              {working ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
+                  Preparing…
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                  Download the project
+                </>
+              )}
+            </ActionButton>
 
             <div aria-live="polite" className="min-h-[1.25rem]">
               {state.kind === "done" && (
@@ -389,17 +387,15 @@ export default function StepDownload({
                   Creates one new public repository on your GitHub account for
                   this configuration.
                 </p>
-                <div className="flex justify-end">
-                  <ActionButton
-                    type="button"
-                    variant="outline"
-                    className="gap-2"
-                    onClick={handleConnectGithub}
-                  >
-                    <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                    Connect GitHub
-                  </ActionButton>
-                </div>
+                <ActionButton
+                  type="button"
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={handleConnectGithub}
+                >
+                  <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                  Connect GitHub
+                </ActionButton>
               </>
             ) : (
               <>
