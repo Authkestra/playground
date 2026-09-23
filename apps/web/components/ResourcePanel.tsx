@@ -375,24 +375,18 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             )}
 
             {/*
-              The route's policy, which is the API's word — and the only thing
-              here that has to be. Everything below is read out of the token,
-              so the two can be compared rather than conflated.
-            */}
-            <p className="mt-2 text-xs text-muted-foreground">
-              This route accepts <code className="font-mono text-foreground">{issued.audience}</code>{" "}
-              in <code className="font-mono">aud</code>, from{" "}
-              <code className="font-mono text-foreground">{issued.issuer}</code>.
-            </p>
-
-            {/*
               Tier 1 of #76. `decodeHeader` already showed the `kid` so it was
               not hearsay; the claims are where the *reason* for a rejection
               lives, and four of the six forgeries explain themselves the
-              moment they are visible.
+              moment they are visible. Kept to one line of prose: the policy
+              (accepts `{aud}` from `{iss}`) is folded into the mismatch flags
+              below rather than stated again above the table nobody reads.
             */}
-            <p className="mt-3 text-xs text-muted-foreground">
-              Decoded from the token in this tab. Nothing below was sent to us, or by us:
+            <p className="mt-2 text-xs text-muted-foreground">
+              Decoded from your token — compare against{" "}
+              <code className="font-mono text-foreground">{issued.audience}</code> /{" "}
+              <code className="font-mono text-foreground">{issued.issuer}</code>, which is what
+              this route accepts.
             </p>
             <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
               <dt className="text-muted-foreground">kid</dt>
@@ -440,15 +434,6 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
               <dd className="break-all font-mono text-foreground">{claims?.sub ?? "(absent)"}</dd>
             </dl>
 
-            {header && (
-              <div className="mt-2">
-                <p className="text-xs text-muted-foreground">Raw header</p>
-                <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground">
-                  <code>{JSON.stringify(header)}</code>
-                </pre>
-              </div>
-            )}
-
             {/*
               The invitation that makes "unpublished key" checkable rather than
               asserted. A visitor who opens this and searches for the kid above
@@ -490,35 +475,19 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
       )}
 
       {/*
-        Tier 2 of #76: the same question the API answers, answered again by
-        the one party in this scenario that we do not control.
-
-        The two steps are separate on purpose, and the separation is the
-        evidence. Fetching the key set is a visible request the visitor makes;
-        verifying is silent. If verification fetched its own keys there would
-        be no moment at which this page can be seen answering without us.
+        Tier 2 of #76, condensed after review: the same question the API
+        answers, answered again by the one party we do not control. The
+        "how to check" explanation is real but optional reading, so it is a
+        <details> a visitor opens rather than three paragraphs everyone
+        scrolls past. The two steps themselves — fetch, then verify — stay
+        in the open, because those are the demonstration, not the caveat.
       */}
       {issued && (
         <Card>
           <CardContent className="p-3">
             <p className="text-xs text-muted-foreground">
-              Everything above is our word for it. Below, your browser answers the same
-              question — first fetch the published keys, then verify against them here.
-            </p>
-            {/*
-              Said before the verdict, because without it the two answers look
-              like they contradict each other. A wrong-audience token really
-              does verify: it was signed by the live key. The API refuses it on
-              policy, which is a different question from whether the bytes are
-              authentic — and the claims above are where that question is
-              answered, by the visitor, for themselves.
-            */}
-            <p className="mt-2 text-xs text-muted-foreground">
-              Your browser answers only the cryptographic half — did a published key sign
-              these exact bytes. Whether the issuer is trusted, the audience is this service
-              and the clock has run out is policy, which you read off the claims above. An
-              expired or wrongly-addressed token verifies here and is still refused there;
-              that is agreement, not conflict.
+              Check our answer yourself: fetch the published keys, then verify against them.
+              Step 2 makes no network request.
             </p>
 
             {support?.supported === false && (
@@ -527,7 +496,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
               </Alert>
             )}
 
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 size="sm"
@@ -543,43 +512,25 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
                 variant="outline"
                 onClick={() => keys && void verifyHere(token, keys)}
                 disabled={working || !keys || support?.supported === false}
-                aria-describedby="resource-verify-note"
               >
                 {busy === "verify" ? "Verifying…" : "2 · Verify in this browser"}
               </Button>
+              {!keys && !keysError && (
+                <span className="text-xs text-muted-foreground">needs step 1 first</span>
+              )}
             </div>
-
-            <p id="resource-verify-note" className="mt-2 text-xs text-muted-foreground">
-              {keys
-                ? "Step 2 makes no request of any kind. The keys are already here."
-                : "Step 2 needs the keys first — it will not fetch them for you."}
-            </p>
 
             {keysError && (
               <p className="mt-2 text-xs text-warning-foreground">
-                The key set could not be read: {keysError}
+                Key set unreachable: {keysError}
               </p>
             )}
 
             {keys && (
-              <div className="mt-2">
-                <p className="text-xs text-muted-foreground">
-                  {keys.length === 1 ? "1 key" : `${keys.length} keys`} fetched at {keysAt} from{" "}
-                  <span className="break-all font-mono">{issued.jwks_url}</span>
-                </p>
-                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-                  {keys.map((key, index) => (
-                    <div key={typeof key.kid === "string" ? key.kid : index} className="contents">
-                      <dt className="break-all font-mono text-foreground">
-                        {typeof key.kid === "string" ? key.kid : "(no kid)"}
-                      </dt>
-                      <dd className="font-mono text-muted-foreground">
-                        {[key.kty, key.crv, key.alg].filter(Boolean).join(" · ")}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {keys.length === 1 ? "1 key" : `${keys.length} keys`} fetched at {keysAt} from{" "}
+                <span className="break-all font-mono">{issued.jwks_url}</span>
+              </p>
             )}
 
             <div aria-live="polite">
@@ -594,34 +545,32 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
                     Your browser · {LOCAL_VERDICT_LABELS[local.verdict.kind]}
                   </p>
                   <p className="mt-1 text-xs opacity-90">{describeVerdict(local.verdict)}</p>
-                  <p className="mt-1 text-xs opacity-75">
-                    Computed at {local.at} against the key set you fetched at {keysAt}. No
-                    request was made.
-                  </p>
                 </div>
               )}
             </div>
 
             {/*
-              Saying "this ran locally" is still us saying it. These are the
-              two checks that do not depend on believing the page, which is
-              why they are spelled out rather than implied.
+              A wrong-audience or expired token genuinely verifies here and is
+              still refused by the API — agreement, not conflict, since this
+              checks only the signature. Said once, briefly, tucked behind the
+              disclosure below rather than repeated at full length in the open.
             */}
-            <p className="mt-3 text-xs text-muted-foreground">
-              Two ways to check that for yourself, rather than take it from us: open your
-              browser&apos;s network panel and watch it stay silent while you press step 2 — or
-              switch your network off entirely and press it anyway. The answer is the same
-              offline, which is the whole capability this scenario is about: a resource server
-              validates a token without calling the issuer.
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Or skip our buttons altogether —{" "}
-              <code className="break-all font-mono text-foreground">
-                await authkestra.verify(&quot;&lt;paste a token&gt;&quot;)
-              </code>{" "}
-              in the console runs the same function, on a token of your own, against the keys
-              already in this tab.
-            </p>
+            <details className="mt-3 text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none text-foreground">
+                How to confirm this ran in your browser, not ours
+              </summary>
+              <p className="mt-2">
+                Watch your network panel stay silent when you press step 2 — or switch your
+                network off and press it anyway; the answer doesn&apos;t change. This checks
+                only the signature, so a token that fails on audience, issuer or expiry can
+                still verify here — read those from the claims above, not from this badge.
+                Or skip the buttons:{" "}
+                <code className="font-mono text-foreground">
+                  await authkestra.verify(token)
+                </code>{" "}
+                in the console, against the keys already fetched.
+              </p>
+            </details>
           </CardContent>
         </Card>
       )}
