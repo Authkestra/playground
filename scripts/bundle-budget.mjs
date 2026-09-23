@@ -150,13 +150,34 @@ const NEXT = join(APP, ".next");
  * actually clicked it open: three paragraphs restating, in prose, a
  * distinction the panel already states once, inline, exactly when it
  * applies (the "agreement, not conflict" line beside the result cards). Cut
- * to one paragraph, plus a "View on jwt.io ↗" link beside the raw header for
- * whoever wants the familiar debugger view — it decodes client-side off a
- * URL fragment, which browsers never put on the wire, so nothing is handed
- * to a third party. Net effect on the number below is noise: 140.6 kB.
+ * to one paragraph, plus a "Decode on jwt.io ↗" link beside the raw header
+ * for whoever wants the familiar debugger view — it decodes client-side off
+ * a URL fragment, which browsers never put on the wire, so nothing is
+ * handed to a third party. Net effect on the number below is noise: 140.6 kB.
+ *
+ * ## And then 141 -> 142, for a fourth "Try:" option
+ *
+ * jwt.io was asked to do double duty — decode a token *and* verify it — and
+ * cannot: its own documented algorithm list for signature verification is
+ * HS384/512, RS384/512, PS256/384 and ES256/384, no EdDSA, so no public key
+ * pasted into it will ever check a token this scenario issues. Verifying an
+ * arbitrary token — one built by hand, or one of ours edited — was only ever
+ * going to happen here, because `lib/jwt.ts` is the only thing on either side
+ * of this feature that speaks Ed25519 at all.
+ *
+ * "Your own token" is a fourth `<option>` in the same `<select>`, wired
+ * through the same mint-call-fetch-verify chain `runIt` already ran for the
+ * other three — the one new dependency-free thing is a fallback for
+ * `jwks_url` (`/.well-known/jwks.json` off this API's own base URL) for the
+ * case a pasted token is the very first thing a visitor tries, before any
+ * mint has ever supplied one. Measured at 140.9 kB against 140.6 kB before it
+ * — three tenths of a kilobyte for a fourth option and one constant. The
+ * budget below moves to 142 not because this needed it, but because 141
+ * left it none: a change that costs nothing should not be the one blamed for
+ * tripping the budget on ordinary output drift.
  */
 const BUDGETS_KB = {
-  "/page": 141,
+  "/page": 142,
   "/_not-found/page": 92,
   "/how-it-works/page": 93,
 };

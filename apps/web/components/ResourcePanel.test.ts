@@ -64,17 +64,19 @@ describe("FORGERIES", () => {
 });
 
 describe("FIXED_CHOICE_LABELS", () => {
-  // The "Try:" select offers these two alongside the six forgeries; they
-  // must read as distinct from every forgery label too, or "No token" could
-  // be confused for one of the broken-on-purpose options.
+  // The "Try:" select offers these three alongside the six forgeries; they
+  // must read as distinct from every forgery label too, or e.g. "No token"
+  // could be confused for one of the broken-on-purpose options.
   it("is distinct from every forgery label", () => {
     const forgeryLabels = new Set(FORGERIES.map((f) => f.label));
     expect(forgeryLabels.has(FIXED_CHOICE_LABELS.valid)).toBe(false);
     expect(forgeryLabels.has(FIXED_CHOICE_LABELS.none)).toBe(false);
+    expect(forgeryLabels.has(FIXED_CHOICE_LABELS.custom)).toBe(false);
   });
 
-  it("gives the two fixed choices distinct labels", () => {
-    expect(FIXED_CHOICE_LABELS.valid).not.toBe(FIXED_CHOICE_LABELS.none);
+  it("gives all three fixed choices distinct labels", () => {
+    const labels = Object.values(FIXED_CHOICE_LABELS);
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });
 

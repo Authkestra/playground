@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, CircleDashed, Loader2, MinusCircle } from "lucide-react";
 import type { Forgery, IssuedToken, ProtectedCall } from "@playground/api-types";
-import { scenarioAction } from "@/lib/api";
+import { API_BASE, scenarioAction } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
   checkEd25519Support,
@@ -85,23 +85,35 @@ export const FORGERIES: { kind: Forgery; label: string }[] = [
 ];
 
 /**
- * What "Try:" offers beyond the six forgeries: an honest token, and no token
- * at all. Kept as a record rather than inline strings so a test can pin the
- * wording the same way [`FORGERIES`]'s labels are pinned.
+ * What "Try:" offers beyond the six forgeries: an honest token, no token at
+ * all, and one the visitor brings themselves. Kept as a record rather than
+ * inline strings so a test can pin the wording the same way [`FORGERIES`]'s
+ * labels are pinned.
+ *
+ * "custom" exists because jwt.io cannot stand in for it: its own documented
+ * algorithm list for signature verification (HS384/512, RS384/512, PS256/384,
+ * ES256/384) has no EdDSA, so it can decode a token this scenario issues but
+ * never verify one — and it dropped query-parameter deep-linking years ago,
+ * so there is not even a URL that could hand it a public key to try. Checking
+ * an arbitrary token — one built by hand, or one of ours edited — has to
+ * happen here, because `lib/jwt.ts` is the only thing present that speaks
+ * Ed25519 at all.
  */
-export const FIXED_CHOICE_LABELS: Record<"valid" | "none", string> = {
+export const FIXED_CHOICE_LABELS: Record<"valid" | "none" | "custom", string> = {
   valid: "A valid token",
   none: "No token",
+  custom: "Your own token",
 };
 
 /**
  * Everything the "Try:" dropdown can be set to: mint an honest token, mint one
- * of the six forgeries, or send no token at all. One value, one control — the
- * three top buttons and the six forgery buttons this replaces were all
- * answering the same question ("what should we present to the route?"), so
- * they are one choice now instead of nine.
+ * of the six forgeries, send no token at all, or verify one the visitor
+ * supplies. One value, one control — the three top buttons and the six
+ * forgery buttons this replaces were all answering the same question ("what
+ * should we present to the route?"), so they are one choice now instead of
+ * nine.
  */
-export type Choice = "valid" | "none" | Forgery;
+export type Choice = "valid" | "none" | "custom" | Forgery;
 
 /**
  * What to call the verdict the *browser* reached, in the same words the API's
@@ -171,6 +183,19 @@ export const RUN_STEP_LABELS: Record<keyof RunSteps, string> = {
 const PENDING_STEPS: RunSteps = { call: "pending", fetchKeys: "pending", verify: "pending" };
 
 /**
+ * Where to fetch the key set when nothing has been minted yet.
+ *
+ * Every `IssuedToken` carries its own `jwks_url`, which is always preferred
+ * when one is available — but a "Your own token" run may be the very first
+ * thing a visitor does, before any mint has happened, so there has to be a
+ * way to find the deployment's key set with no prior API response to read it
+ * from. `/.well-known/jwks.json` is the same well-known path the resource
+ * server itself publishes to (see `apps/api/src/signing.rs`), and this API's
+ * own base URL is the one the frontend already talks to for everything else.
+ */
+const DEFAULT_JWKS_URL = `${API_BASE}/.well-known/jwks.json`;
+
+/**
  * Whether the key set cached from a previous run can be reused, or a fresh
  * one is needed for this run.
  *
@@ -233,6 +258,12 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   // hollow circles for steps nobody asked for yet.
   const [steps, setSteps] = useState<RunSteps | null>(null);
 
+  // Sticky once true, unlike `token`: a custom run never sets `issued`, so
+  // without this the disclosure below would have nothing to gate on except
+  // the live textarea — and would vanish the instant a visitor cleared it to
+  // paste over, taking the very box they were editing with it.
+  const [everRanCustom, setEverRanCustom] = useState(false);
+
   // The visitor's own half of the scenario. `keys` is what they fetched, kept
   // across runs on purpose: fetch once per issuer, then verify as many tokens
   // as you like — see `shouldRefetchKeys`.
@@ -255,13 +286,15 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
 
   // `exp` is judged against the visitor's clock, so the clock has to actually
   // run: a token with a sixty-second life should be seen to expire, not be
-  // reported as expired only because something else caused a re-render.
+  // reported as expired only because something else caused a re-render. Keyed
+  // on `token` rather than `issued`, so a pasted token's own `exp` ticks too —
+  // it did not come from a mint, but it can still expire while it sits here.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!issued) return;
+    if (!token) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [issued]);
+  }, [token]);
 
   // Asked once, up front, so a browser that cannot do Ed25519 is told before
   // it presses the button rather than after.
@@ -387,11 +420,12 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   }, []);
 
   /**
-   * One press does the whole scenario: mint (or send nothing), call, fetch
-   * the key set if this run's issuer is not the one already cached, then
-   * verify. `steps` is updated between each `await` rather than all at once
-   * at the end, which is what keeps the fetch-then-verify separation from
-   * #76 *visible* even though nothing gates it behind a second click anymore.
+   * One press does the whole scenario: mint, use whatever was pasted, or send
+   * nothing — then call, fetch the key set if this run's issuer is not the
+   * one already cached, then verify. `steps` is updated between each `await`
+   * rather than all at once at the end, which is what keeps the
+   * fetch-then-verify separation from #76 *visible* even though nothing gates
+   * it behind a second click anymore.
    */
   async function runIt() {
     if (busy) return;
@@ -406,7 +440,21 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     let activeIssued = issued;
     let activeToken: string | null = null;
 
-    if (choice !== "none") {
+    if (choice === "custom") {
+      // Not minted, so there is no `IssuedToken` to attach — clearing
+      // `issued` rather than leaving a previous mint's is what stops its
+      // `forged_as` from being shown beside a token it does not describe.
+      // `issued.jwks_url` and the audience/issuer policy line are deployment
+      // facts rather than per-token ones, so losing them here is the only
+      // real cost, and `jwksUrlForDisplay`'s fallback covers the first.
+      activeToken = token.trim();
+      activeIssued = null;
+      setIssued(null);
+      setToken(activeToken);
+      setResult(null);
+      setSentHeader(null);
+      setEverRanCustom(true);
+    } else if (choice !== "none") {
       const minted = await mint(choice === "valid" ? "issue" : "forge", choice === "valid" ? undefined : choice);
       if (!minted) {
         setBusy(false);
@@ -427,17 +475,23 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     setSteps((s) => (s ? { ...s, call: "done" } : s));
 
     // Nothing was sent, so there is nothing to check cryptographically —
-    // that is a fact about this run, not a failure of it.
-    if (!activeToken || !activeIssued) {
+    // that is a fact about this run, not a failure of it. Only "none" can
+    // reach this now: "custom" always has a trimmed, non-empty token by the
+    // time it gets here, because "Run it" is disabled until it does.
+    if (!activeToken) {
       setSteps((s) => (s ? { ...s, fetchKeys: "skipped", verify: "skipped" } : s));
       setBusy(false);
       return;
     }
 
+    // A mint always carries its own `jwks_url`; a pasted token never has one
+    // to carry, so it falls back to the deployment's well-known path instead.
+    const jwksTarget = activeIssued?.jwks_url ?? DEFAULT_JWKS_URL;
+
     setSteps((s) => (s ? { ...s, fetchKeys: "active" } : s));
     let activeKeys = keys;
-    if (shouldRefetchKeys(keysUrl, activeIssued.jwks_url)) {
-      activeKeys = await loadKeys(activeIssued.jwks_url);
+    if (shouldRefetchKeys(keysUrl, jwksTarget)) {
+      activeKeys = await loadKeys(jwksTarget);
       if (!activeKeys) {
         setSteps((s) => (s ? { ...s, fetchKeys: "error", verify: "skipped" } : s));
         setBusy(false);
@@ -471,16 +525,23 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
    * textarea — edited or not — without minting anything new. Reuses the same
    * fetch-if-needed-then-verify chain as `runIt`, so editing a byte and
    * pressing this is the same demonstration with one fewer step.
+   *
+   * Guards on `token`, not `issued`: a "Your own token" run never sets
+   * `issued` at all (see `runIt`), and re-checking an edit to a pasted token
+   * is exactly as valid a thing to do here as re-checking an edit to a minted
+   * one — the falling back to [`DEFAULT_JWKS_URL`] below is what makes that
+   * possible with nothing minted yet.
    */
   async function reverifyEdited() {
-    if (busy || !issued) return;
+    if (busy || !token) return;
     setBusy(true);
     setSteps({ call: "skipped", fetchKeys: "pending", verify: "pending" });
 
+    const jwksTarget = issued?.jwks_url ?? DEFAULT_JWKS_URL;
     let activeKeys = keys;
-    if (shouldRefetchKeys(keysUrl, issued.jwks_url)) {
+    if (shouldRefetchKeys(keysUrl, jwksTarget)) {
       setSteps((s) => (s ? { ...s, fetchKeys: "active" } : s));
-      activeKeys = await loadKeys(issued.jwks_url);
+      activeKeys = await loadKeys(jwksTarget);
       if (!activeKeys) {
         setSteps((s) => (s ? { ...s, fetchKeys: "error", verify: "skipped" } : s));
         setBusy(false);
@@ -509,18 +570,24 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   }
 
   // Decoded from whatever is in the textarea, on every render, so editing the
-  // token changes what is shown before anything is sent anywhere.
-  const header = issued ? decodeHeader(token) : null;
-  const claims = issued ? decodeClaims(token) : null;
+  // token changes what is shown before anything is sent anywhere. Gated on
+  // `token` rather than `issued`, so this decodes a pasted token exactly as
+  // readily as a minted one.
+  const header = token ? decodeHeader(token) : null;
+  const claims = token ? decodeClaims(token) : null;
   const expiry = claims ? describeExpiry(claims.exp, now) : null;
   const tokenAudience = claims ? formatAudience(claims.aud) : null;
+  // What "look the kid up yourself" points at when nothing has been minted —
+  // a real `IssuedToken`'s own `jwks_url` is always preferred over this.
+  const jwksUrlForDisplay = issued?.jwks_url ?? DEFAULT_JWKS_URL;
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
         A route that validates a token it did not issue. It holds no secret — only the
-        issuer&apos;s name and the URL of its published keys. Pick what to present, run it, and
-        watch the API and your own browser answer independently.
+        issuer&apos;s name and the URL of its published keys. Pick what to present — ours,
+        broken on purpose, or one you bring — run it, and watch the API and your own browser
+        answer independently.
       </p>
 
       {banner && (
@@ -548,6 +615,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         >
           <option value="valid">{FIXED_CHOICE_LABELS.valid}</option>
           <option value="none">{FIXED_CHOICE_LABELS.none}</option>
+          <option value="custom">{FIXED_CHOICE_LABELS.custom}</option>
           <optgroup label="Intentionally broken">
             {FORGERIES.map((f) => (
               <option key={f.kind} value={f.kind}>
@@ -556,10 +624,43 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             ))}
           </optgroup>
         </Select>
-        <Button type="button" size="sm" onClick={() => void runIt()} disabled={busy}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void runIt()}
+          disabled={busy || (choice === "custom" && !token.trim())}
+        >
           {busy ? "Running…" : "Run it"}
         </Button>
       </div>
+
+      {/*
+        The one control the dropdown alone cannot offer: somewhere to put the
+        bytes. Bound to the same `token` state as the tamper textarea in the
+        disclosure below, on purpose — a token brought here and one edited
+        after a mint are the same kind of thing to this scenario, so they
+        share the one place that holds it.
+      */}
+      {choice === "custom" && (
+        <div>
+          <Label htmlFor="resource-custom-token" className="block text-xs text-muted-foreground">
+            Paste a JWT — one you built by hand, an old one of ours, or ours with a character
+            changed.
+          </Label>
+          <textarea
+            id="resource-custom-token"
+            value={token}
+            onChange={(e) => {
+              setToken(e.target.value);
+              setLocal(null);
+            }}
+            spellCheck={false}
+            rows={3}
+            placeholder="eyJhbGciOi…"
+            className="mt-1 w-full resize-y break-all rounded-md border border-input bg-transparent p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
+          />
+        </div>
+      )}
 
       {steps && (
         <ul aria-live="polite" className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -647,7 +748,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         visitor who just wants the verdict, so it is one `<details>` rather
         than three-plus standing paragraphs and a JSON dump always on screen.
       */}
-      {issued && (
+      {(issued || everRanCustom) && (
         <details className="group rounded-xl border bg-card text-card-foreground shadow">
           <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-xs font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight
@@ -658,24 +759,36 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             Show the token, its claims, and how to check us
           </summary>
           <CardContent className="flex flex-col gap-3 border-t p-3 pt-3">
-            {issued.forged_as ? (
-              <p className="text-xs text-warning-foreground">
-                This one is built to fail: it {issued.forged_as}.
-              </p>
+            {issued ? (
+              issued.forged_as ? (
+                <p className="text-xs text-warning-foreground">
+                  This one is built to fail: it {issued.forged_as}.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">A valid token, signed by the live key.</p>
+              )
             ) : (
-              <p className="text-xs text-muted-foreground">A valid token, signed by the live key.</p>
+              <p className="text-xs text-muted-foreground">
+                Yours, not ours — decoded below exactly as pasted. Nothing above this line is a
+                claim we made.
+              </p>
             )}
 
             {/*
               The route's policy, which is the API's word — and the only thing
               here that has to be. Everything below is read out of the token,
-              so the two can be compared rather than conflated.
+              so the two can be compared rather than conflated. Only known
+              once something has actually been minted: it describes the
+              route's fixed configuration, not any one token, but a pasted
+              token that arrived before any mint has nothing to read it from.
             */}
-            <p className="text-xs text-muted-foreground">
-              This route accepts <code className="font-mono text-foreground">{issued.audience}</code>{" "}
-              in <code className="font-mono">aud</code>, from{" "}
-              <code className="font-mono text-foreground">{issued.issuer}</code>.
-            </p>
+            {issued && (
+              <p className="text-xs text-muted-foreground">
+                This route accepts <code className="font-mono text-foreground">{issued.audience}</code>{" "}
+                in <code className="font-mono">aud</code>, from{" "}
+                <code className="font-mono text-foreground">{issued.issuer}</code>.
+              </p>
+            )}
 
             <div>
               <p className="text-xs text-muted-foreground">
@@ -696,7 +809,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
                 <dt className="text-muted-foreground">iss</dt>
                 <dd className="break-all font-mono text-foreground">
                   {claims?.iss ?? "(absent)"}
-                  {claims?.iss && claims.iss !== issued.issuer && (
+                  {issued && claims?.iss && claims.iss !== issued.issuer && (
                     <span className="ml-1 font-sans text-warning-foreground">
                       — not the issuer this route trusts
                     </span>
@@ -706,7 +819,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
                 <dt className="text-muted-foreground">aud</dt>
                 <dd className="break-all font-mono text-foreground">
                   {tokenAudience ?? "(absent)"}
-                  {tokenAudience && tokenAudience !== issued.audience && (
+                  {issued && tokenAudience && tokenAudience !== issued.audience && (
                     <span className="ml-1 font-sans text-warning-foreground">
                       — another service, not this one
                     </span>
@@ -733,21 +846,25 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">Raw header</p>
                   {/*
-                    A secondary affordance, not a replacement: jwt.io can show
-                    the familiar debugger view, but it does not know this
-                    issuer's JWKS, so it cannot tell you whether *this* route
-                    would accept the token, and it cannot re-run the tamper
-                    check below against our actual key set. The token travels
-                    only in the fragment, which browsers never send over the
-                    wire, so nothing here is handed to a third party.
+                    A secondary affordance, not an alternative: jwt.io's own
+                    documented algorithm list for verifying a signature is
+                    HS384/512, RS384/512, PS256/384 and ES256/384 — no EdDSA,
+                    which is the only thing this issuer signs with. It can
+                    decode what is here; it cannot check it, at any key,
+                    because it does not speak this signature scheme at all.
+                    The "Your browser" card above is the only thing on this
+                    page, or off it, that can. `#token=` is jwt.io's own
+                    current deep-link fragment — it retired query-parameter
+                    linking, and a token in a fragment is never sent over the
+                    wire, so nothing here reaches a third party by clicking it.
                   */}
                   <a
-                    href={`https://jwt.io/#debugger-io?token=${encodeURIComponent(token)}`}
+                    href={`https://jwt.io/#token=${encodeURIComponent(token)}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-medium text-foreground underline underline-offset-2"
                   >
-                    View on jwt.io ↗
+                    Decode on jwt.io ↗
                   </a>
                 </div>
                 <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground">
@@ -764,12 +881,12 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
             <p className="text-xs text-muted-foreground">
               Look the <code className="font-mono">kid</code> up yourself:{" "}
               <a
-                href={issued.jwks_url}
+                href={jwksUrlForDisplay}
                 target="_blank"
                 rel="noreferrer"
                 className="font-medium text-foreground underline underline-offset-2"
               >
-                {issued.jwks_url}
+                {jwksUrlForDisplay}
               </a>
             </p>
 
