@@ -144,6 +144,12 @@ declare global {
  * something else afterward is still one keystroke away, and answers a
  * different, equally honest question: what does *this* key set make of a
  * token that is really ours.
+ *
+ * Nothing is minted until a visitor actually picks a preset — there is no
+ * token pre-seeded on load — and picking one only fills the fields. Verify
+ * is a separate press, always: minting a real example is one server call a
+ * preset cannot avoid, but checking it is a second, deliberate action, not
+ * something a dropdown should trigger on its own.
  */
 export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   const [jwksUrl, setJwksUrl] = useState(DEFAULT_JWKS_URL);
@@ -201,25 +207,6 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     return res.data;
   }
 
-  // The token field defaults to a real, working token rather than a
-  // hardcoded example — a hardcoded one would already be expired, since
-  // these are short-lived, and a default that fails before anything is
-  // pressed teaches the wrong lesson. If this fails (rate-limited, the demo
-  // disabled, the API unreachable) the field just stays empty; pasting a
-  // token by hand still works.
-  useEffect(() => {
-    let cancelled = false;
-    void mintToken("issue").then((minted) => {
-      if (!cancelled && minted) setToken(minted.token);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // Intentionally once per mount: this seeds a starting example, it does
-    // not track `scenarioId` changing under a fixed panel instance.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   /** Fetches a key set. **The only step here that touches the network.** */
   const loadKeys = useCallback(async (url: string): Promise<Jwk[] | null> => {
     setKeysError(null);
@@ -239,44 +226,39 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   }, []);
 
   /**
-   * The fetch-if-needed-then-verify chain, shared by the button (which
-   * checks whatever is currently in the two fields) and a preset pick (which
-   * checks the token and JWKS URL it just set, before either has actually
-   * landed in state to be read back out again).
+   * The one thing pressing Verify does: fetch the key set if this field's
+   * URL is not the one already cached, then verify. Picking a preset no
+   * longer chains into this — it only fills the fields (see `runPreset`) —
+   * so this has exactly one caller now, the button below.
    */
-  const runVerification = useCallback(
-    async (tokenValue: string, jwksUrlValue: string) => {
-      setLocal(null);
-
-      let activeKeys = keys;
-      if (shouldRefetchKeys(keysUrl, jwksUrlValue)) {
-        setPhase("fetching");
-        activeKeys = await loadKeys(jwksUrlValue);
-      }
-      // Reachable if the cache was reused (`activeKeys` is still `keys`) and
-      // nothing has ever been fetched yet, or if the fetch above just failed.
-      if (!activeKeys) {
-        setPhase("idle");
-        return;
-      }
-
-      if (support?.supported === false) {
-        setPhase("idle");
-        return;
-      }
-
-      setPhase("verifying");
-      const verdict = await verifyTokenSignature(tokenValue, activeKeys);
-      setLocal({ verdict, at: new Date().toLocaleTimeString() });
-      setPhase("idle");
-    },
-    [keys, keysUrl, loadKeys, support],
-  );
-
   async function verify() {
     if (busy || !token.trim() || !jwksUrl.trim()) return;
+    const tokenValue = token.trim();
+    const jwksUrlValue = jwksUrl.trim();
     setBanner(null);
-    await runVerification(token.trim(), jwksUrl.trim());
+    setLocal(null);
+
+    let activeKeys = keys;
+    if (shouldRefetchKeys(keysUrl, jwksUrlValue)) {
+      setPhase("fetching");
+      activeKeys = await loadKeys(jwksUrlValue);
+    }
+    // Reachable if the cache was reused (`activeKeys` is still `keys`) and
+    // nothing has ever been fetched yet, or if the fetch above just failed.
+    if (!activeKeys) {
+      setPhase("idle");
+      return;
+    }
+
+    if (support?.supported === false) {
+      setPhase("idle");
+      return;
+    }
+
+    setPhase("verifying");
+    const verdict = await verifyTokenSignature(tokenValue, activeKeys);
+    setLocal({ verdict, at: new Date().toLocaleTimeString() });
+    setPhase("idle");
   }
 
   /**
@@ -288,15 +270,17 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
   async function runPreset(choice: Choice) {
     if (busy) return;
     setBanner(null);
+    setLocal(null);
+    setKeysError(null);
     setPhase("minting");
     const minted = await mintToken(choice === "valid" ? "issue" : "forge", choice === "valid" ? undefined : choice);
-    if (!minted) {
-      setPhase("idle");
-      return;
-    }
+    setPhase("idle");
+    if (!minted) return;
+    // Fills the fields and stops there — minting is the one server call a
+    // real example needs, but picking an example is not the same thing as
+    // asking to check it. Verify is a separate, deliberate press.
     setToken(minted.token);
     setJwksUrl(DEFAULT_JWKS_URL);
-    await runVerification(minted.token, DEFAULT_JWKS_URL);
   }
 
   // The console handle. Installed on mount and removed on unmount, because a
@@ -318,9 +302,9 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
         Verify a token&apos;s signature against a published key set — entirely in this
-        browser, against a key set that may not even be ours. Starts pointed at this
-        deployment&apos;s own key set and a token it just issued you; change either to check
-        anything else, or pick a broken one below.
+        browser, against a key set that may not even be ours. The JWKS field starts pointed
+        at this deployment&apos;s own; pick an example below or paste a token of your own,
+        then press Verify.
       </p>
 
       {banner && (
@@ -389,9 +373,30 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
       </div>
 
       <div>
-        <Label htmlFor="resource-token" className="text-xs text-muted-foreground">
-          Token
-        </Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="resource-token" className="text-xs text-muted-foreground">
+            Token
+          </Label>
+          {/*
+            A secondary affordance, not an alternative: jwt.io's own
+            documented algorithm list for verifying a signature has no EdDSA,
+            which is the only thing this deployment signs with — it can
+            decode what is here, never check it. The fields above are the
+            only thing that can. `#token=` is jwt.io's own current deep-link
+            fragment, and a token in a fragment is never sent over the wire,
+            so nothing here reaches a third party by clicking it.
+          */}
+          {token.trim() && (
+            <a
+              href={`https://jwt.io/#token=${encodeURIComponent(token.trim())}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-foreground underline underline-offset-2"
+            >
+              Decode on jwt.io ↗
+            </a>
+          )}
+        </div>
         <textarea
           id="resource-token"
           value={token}
@@ -406,7 +411,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         />
       </div>
 
-      <div>
+      <div className="flex justify-end">
         <Button
           type="button"
           size="sm"
