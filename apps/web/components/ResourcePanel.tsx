@@ -333,10 +333,9 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         <Select
           id="resource-preset"
           // `h-8` overrides the native `<select>`'s own `h-9` to match the
-          // Verify button's `size="sm"` height. `max-w-xs` is the same cap
-          // as every other panel's action button — a consistent minimum
-          // rather than one sized to this control's own longest option.
-          className="h-8 w-full max-w-xs"
+          // Verify button's `size="sm"` height. `w-fit min-w-28` gives minimum
+          // width matching the Continue button, grows to fit the longest option.
+          className="h-8 w-fit min-w-28"
           value={presetChoice}
           disabled={busy}
           onChange={(e) => {
@@ -426,7 +425,7 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         <Button
           type="button"
           size="sm"
-          className="w-full max-w-xs"
+          className="w-fit min-w-28"
           onClick={() => void verify()}
           disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
         >

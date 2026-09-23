@@ -156,7 +156,7 @@ export default function TotpPanel({ scenarioId, onDemoDisabled }: Props) {
               type="button"
               size="sm"
               variant={provision ? "secondary" : "default"}
-              className="w-full max-w-xs"
+              className="w-fit min-w-28"
               onClick={() => void handleProvision()}
               disabled={provisioning}
             >

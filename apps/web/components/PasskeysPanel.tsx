@@ -455,7 +455,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
             <Button
               type="button"
               size="sm"
-              className="w-full max-w-xs"
+              className="w-fit min-w-28"
               onClick={() => void handleRegister()}
               disabled={registering}
             >
@@ -498,7 +498,7 @@ export default function PasskeysPanel({ scenarioId, onDemoDisabled }: Props) {
               type="button"
               variant="outline"
               size="sm"
-              className="w-full max-w-xs"
+              className="w-fit min-w-28"
               onClick={() => void handleAuthenticate()}
               disabled={authenticating}
             >

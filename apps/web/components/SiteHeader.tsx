@@ -58,7 +58,7 @@ export default function SiteHeader() {
             A visitor who likes what they see should not have to go hunting for the
             framework — the playground exists to send people there.
           */}
-          <Button asChild variant="outline" size="sm" className="shrink-0">
+          <Button asChild variant="outline" size="sm" className="w-fit min-w-28 shrink-0">
             <a href={AUTHKESTRA_SITE} target="_blank" rel="noreferrer">
               authkestra docs
               <span aria-hidden="true">→</span>

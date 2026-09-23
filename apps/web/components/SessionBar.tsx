@@ -98,7 +98,7 @@ export default function SessionBar({ session, onReset, resetting }: Props) {
           <span className="text-muted-foreground">No session yet</span>
         )}
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={onReset} disabled={resetting}>
+      <Button type="button" variant="outline" size="sm" className="w-fit min-w-28" onClick={onReset} disabled={resetting}>
         {resetting ? "Resetting…" : "Reset session"}
       </Button>
     </Card>

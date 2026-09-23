@@ -248,10 +248,10 @@ export default function StepSignIn({
         position needed fixing.
       */}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" className="w-28" onClick={onBack}>
+        <Button type="button" variant="secondary" className="w-fit min-w-28" onClick={onBack}>
           Back
         </Button>
-        <Button type="button" variant="default" className="w-28" onClick={onContinue}>
+        <Button type="button" variant="default" className="w-fit min-w-28" onClick={onContinue}>
           Continue
         </Button>
       </div>

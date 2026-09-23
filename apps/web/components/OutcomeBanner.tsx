@@ -69,7 +69,7 @@ export function OutcomeBanner({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-auto shrink-0 px-2 py-1 text-xs underline underline-offset-2"
+          className="w-fit min-w-28 h-auto shrink-0 px-2 py-1 text-xs underline underline-offset-2"
           onClick={onDismiss}
         >
           Dismiss

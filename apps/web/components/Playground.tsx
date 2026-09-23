@@ -298,7 +298,7 @@ export default function Playground() {
               type="button"
               variant="outline"
               size="sm"
-              className="self-end"
+              className="w-fit min-w-28 self-end"
               onClick={() => void load()}
             >
               Retry

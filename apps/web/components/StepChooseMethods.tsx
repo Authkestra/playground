@@ -81,11 +81,9 @@ export default function StepChooseMethods({
       </details>
 
       {/*
-        Stacked rather than side-by-side: `justify-between` with only the
-        button present (`anyActive` true, hint hidden) collapsed to a single
-        flex child, which sits at the *start* under `space-between` — the
-        button was reading as left-aligned exactly when there was nothing to
-        share the row with. Full width sidesteps that rather than patching it.
+        Stacked flex column: the button wraps in its own justify-end container
+        so it stays right-aligned whether the hint above is visible or not,
+        rather than relying on space-between to position a single child.
       */}
       <div className="flex flex-col gap-2">
         {!anyActive && (
@@ -93,9 +91,11 @@ export default function StepChooseMethods({
             Turn on at least one sign-in method above to continue.
           </p>
         )}
-        <Button onClick={onContinue} disabled={!anyActive} className="w-full">
-          Continue
-        </Button>
+        <div className="flex justify-end">
+          <Button onClick={onContinue} disabled={!anyActive} className="w-fit min-w-28">
+            Continue
+          </Button>
+        </div>
       </div>
     </div>
   );

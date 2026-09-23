@@ -329,12 +329,13 @@ export default function StepDownload({
               ))}
             </fieldset>
 
-            <Button
-              type="button"
-              onClick={() => void handleDownload()}
-              disabled={working}
-              className="w-full gap-2"
-            >
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={() => void handleDownload()}
+                disabled={working}
+                className="w-fit min-w-28 gap-2"
+              >
               {working ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
@@ -346,7 +347,8 @@ export default function StepDownload({
                   Download the project
                 </>
               )}
-            </Button>
+              </Button>
+            </div>
 
             <div aria-live="polite" className="min-h-[1.25rem]">
               {state.kind === "done" && (
@@ -387,16 +389,18 @@ export default function StepDownload({
                   Creates one new public repository on your GitHub account for
                   this configuration.
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-2"
-                  onClick={handleConnectGithub}
-                >
-                  <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                  Connect GitHub
-                </Button>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit min-w-28 gap-2"
+                    onClick={handleConnectGithub}
+                  >
+                    <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                    Connect GitHub
+                  </Button>
+                </div>
               </>
             ) : (
               <>
@@ -422,14 +426,15 @@ export default function StepDownload({
                   would leave neither reading as the one that matters
                   (DESIGN.md §2).
                 */}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="w-full gap-2"
-                  disabled={pushing || !isValidRepoName(repoNameTrimmed)}
-                  onClick={() => void handlePush()}
-                >
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="w-fit min-w-28 gap-2"
+                    disabled={pushing || !isValidRepoName(repoNameTrimmed)}
+                    onClick={() => void handlePush()}
+                  >
                   {pushing ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} aria-hidden />
@@ -440,8 +445,9 @@ export default function StepDownload({
                       <GitBranch className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                       Push to GitHub
                     </>
-                  )}
-                </Button>
+                    )}
+                  </Button>
+                </div>
               </>
             )}
 
@@ -486,8 +492,8 @@ export default function StepDownload({
         </CardContent>
       </Card>
 
-      <div>
-        <Button type="button" variant="secondary" className="w-full" onClick={onBack}>
+      <div className="flex justify-end">
+        <Button type="button" variant="secondary" className="w-fit min-w-28" onClick={onBack}>
           Back
         </Button>
       </div>
