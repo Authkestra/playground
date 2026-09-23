@@ -381,7 +381,6 @@ function CaptchaWidgetCard({
         <div className="mt-2 flex justify-end">
           <Button
             type="button"
-            size="sm"
             className="w-fit min-w-28"
             onClick={() => void verify(token)}
             disabled={verifying}

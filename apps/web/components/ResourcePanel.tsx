@@ -332,10 +332,11 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         </Label>
         <Select
           id="resource-preset"
-          // `h-8` overrides the native `<select>`'s own `h-9` to match the
-          // Verify button's `size="sm"` height. `w-fit min-w-28` gives minimum
-          // width matching the Continue button, grows to fit the longest option.
-          className="h-8 w-fit min-w-28"
+          // Native `<select>` defaults to `h-9`, matching the Verify button
+          // (which no longer specifies size="sm"). `w-fit min-w-28` gives
+          // minimum width matching the Continue button, grows to fit the
+          // longest option.
+          className="w-fit min-w-28"
           value={presetChoice}
           disabled={busy}
           onChange={(e) => {
@@ -424,7 +425,6 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
       <div className="flex justify-end">
         <Button
           type="button"
-          size="sm"
           className="w-fit min-w-28"
           onClick={() => void verify()}
           disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
