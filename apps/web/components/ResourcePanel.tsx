@@ -319,13 +319,17 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Label htmlFor="resource-preset" className="text-xs text-muted-foreground">
           Try one of ours:
         </Label>
         <Select
           id="resource-preset"
-          className="w-[220px]"
+          // Matches the Verify button below in both dimensions: `h-8` is the
+          // native `<select>`'s own default height (`h-9`), overridden to
+          // line up with `Button`'s `size="sm"`, and the width is the same
+          // literal class as the button's, not just a similar-looking one.
+          className="h-8 w-[200px]"
           value={presetChoice}
           disabled={busy}
           onChange={(e) => {
@@ -415,6 +419,9 @@ export default function ResourcePanel({ scenarioId, onDemoDisabled }: Props) {
         <Button
           type="button"
           size="sm"
+          // Same literal width as the preset `Select` above — `size="sm"`
+          // already matches its overridden `h-8`.
+          className="w-[200px]"
           onClick={() => void verify()}
           disabled={busy || !token.trim() || !jwksUrl.trim() || support?.supported === false}
         >
