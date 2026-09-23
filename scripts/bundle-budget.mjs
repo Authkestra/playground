@@ -104,12 +104,12 @@ const NEXT = join(APP, ".next");
  * ## And why it then went 138 -> 140
  *
  * Verifying the resource scenario's tokens in the visitor's own browser
- * (#76). Measured at 139.7 kB against 136.7 kB before it, so three
+ * (#76). Measured at 139.4 kB against 136.7 kB before it, so under three
  * kilobytes, and no dependency: the signature check is `crypto.subtle` with
- * Ed25519, which every supported browser already ships. What the three
- * kilobytes buy is the decoder for the token's claims, a two-step
- * fetch-then-verify flow, and the prose that tells a visitor how to catch us
- * out — watch the network panel stay silent, or go offline and verify anyway.
+ * Ed25519, which every supported browser already ships. What that buys is the
+ * decoder for the token's claims, a two-step fetch-then-verify flow, and a
+ * `<details>` explaining how a visitor can catch us out — watch the network
+ * panel stay silent, or go offline and verify anyway.
  *
  * Most of it is that prose, and that is the right trade rather than an
  * embarrassing one. A verdict computed locally is worth no more than a verdict
