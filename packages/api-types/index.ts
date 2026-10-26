@@ -38,3 +38,7 @@ export type { CaptchaVerification } from "./generated/CaptchaVerification";
 export type { GitHubPushRequest } from "./generated/GitHubPushRequest";
 export type { GitHubPushResponse } from "./generated/GitHubPushResponse";
 export type { GithubPushDeployTargets } from "./generated/GithubPushDeployTargets";
+export type { McpInvocationResult } from "./generated/McpInvocationResult";
+export type { PasswordlessActionResult } from "./generated/PasswordlessActionResult";
+export type { PolicyEvaluationResult } from "./generated/PolicyEvaluationResult";
+export type { SsfEventResult } from "./generated/SsfEventResult";

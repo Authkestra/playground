@@ -115,7 +115,7 @@ describe("hasSignInMethod", () => {
   });
 
   it("is true as soon as a real sign-in method is showing", () => {
-    for (const id of ["oauth", "passkeys", "totp"]) {
+    for (const id of ["oauth", "passkeys", "totp", "passwordless"]) {
       expect(hasSignInMethod(["captcha", id])).toBe(true);
     }
   });
@@ -125,7 +125,17 @@ describe("PANEL_ORDER", () => {
   // A scenario with a tester but no entry here renders nothing, which is the
   // failure this whole file exists to catch.
   it("covers every scenario that has a flow tester", () => {
-    for (const id of ["captcha", "oauth", "passkeys", "totp", "resource"]) {
+    for (const id of [
+      "captcha",
+      "policy",
+      "oauth",
+      "passwordless",
+      "passkeys",
+      "totp",
+      "resource",
+      "mcp",
+      "ssf",
+    ]) {
       expect(PANEL_ORDER).toContain(id);
     }
   });

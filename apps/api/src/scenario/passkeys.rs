@@ -21,13 +21,17 @@
 
 use std::sync::Arc;
 
-use authkestra_engine::auth::webauthn::WebAuthnAuthMethod;
-use authkestra_engine::auth::{AuthMethod, WebAuthnStarter};
+use authkestra_engine::auth::webauthn::{
+    PasskeyEnrolment as EnginePasskeyEnrolment, WebAuthnAuthMethod,
+};
+use authkestra_engine::auth::{
+    AuthMethod, Identity, ReproofRequirement, WebAuthnStarter, IDENTITY_ATTR_AUTH_TIME,
+};
 use authkestra_engine::AuthInput;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
-use webauthn_rs::prelude::{Passkey, PasskeyRegistration, Webauthn};
+use webauthn_rs::prelude::{Passkey, Webauthn};
 use webauthn_rs::WebauthnBuilder;
 
 use super::{
@@ -687,8 +691,21 @@ async fn passkey_login_finish(
 
         match action {
             "register_start" => {
+                let mut attributes = std::collections::HashMap::new();
+                attributes.insert(
+                    IDENTITY_ATTR_AUTH_TIME.to_string(),
+                    chrono::Utc::now().timestamp().to_string(),
+                );
+                let identity = Identity {
+                    provider_id: "demo".into(),
+                    external_id: user_id.clone(),
+                    email: None,
+                    username: Some("demo-visitor".into()),
+                    attributes,
+                };
+                let gate = ReproofRequirement::new(3600);
                 let (challenge, state) = method
-                    .start_register(&user_id, "demo-visitor")
+                    .start_register(&identity, &gate, "demo-visitor")
                     .map_err(|e| ApiError::Scenario(e.to_string()))?;
 
                 ctx.ceremonies
@@ -734,10 +751,10 @@ async fn passkey_login_finish(
                 else {
                     return Err(ApiError::CeremonyExpired);
                 };
-                let state: PasskeyRegistration = serde_json::from_str(&raw)
+                let state: EnginePasskeyEnrolment = serde_json::from_str(&raw)
                     .map_err(|e| ApiError::Scenario(format!("bad ceremony state: {e}")))?;
 
-                match method.finish_register(&user_id, credential, state).await {
+                match method.finish_register(state, credential).await {
                     Ok(_) => {
                         tracing::info!(session_id = %ctx.session_id, "passkey registered");
                         ctx.record(

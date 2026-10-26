@@ -1,11 +1,14 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import type { ConfigDiff, ControlValue, DemoConfig, ScenarioSpec } from "@playground/api-types";
 import ScenarioPanel, { isControlValueActive } from "@/components/ScenarioPanel";
 import DiffViewer from "@/components/DiffViewer";
 import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight } from "lucide-react";
+
+const FlowTopology = dynamic(() => import("@/components/FlowTopology"), { ssr: false });
 
 interface Props {
   scenarios: ScenarioSpec[];
@@ -38,6 +41,8 @@ export default function StepChooseMethods({
           them. Every change below shows exactly how it reshapes the config.
         </p>
       </div>
+
+      <FlowTopology scenarios={scenarios} config={config} />
 
       <ScenarioPanel
         scenarios={scenarios}

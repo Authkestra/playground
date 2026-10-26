@@ -143,6 +143,8 @@ fn run() -> Result<(), String> {
     let options = api::scenario::KitOptions {
         openapi: named.openapi || args.iter().any(|a| a == "--openapi"),
         ts_client: named.ts_client || args.iter().any(|a| a == "--ts-client"),
+        skill_file: named.skill_file || args.iter().any(|a| a == "--skill"),
+        cursor_rules: named.cursor_rules || args.iter().any(|a| a == "--cursor"),
         // None by default: this binary's main job is compiling the generated
         // Rust project in CI, and a manifest is not Rust. `--deploy` opts in,
         // so the manifests can be generated for inspection and so a workflow

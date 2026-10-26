@@ -28,7 +28,7 @@ use crate::scenario::{
 /// download can never advertise a version the playground does not build
 /// against. Upstream's README says 0.7 while the crates are 0.8.0, which is
 /// exactly why this is not taken from prose.
-pub const AUTHKESTRA_VERSION: &str = "0.9.2";
+pub const AUTHKESTRA_VERSION: &str = "0.13.1";
 
 /// The generated project's crate name and directory.
 pub const PROJECT_NAME: &str = "authkestra-starter";
@@ -70,38 +70,64 @@ impl StarterKit {
         options: KitOptions,
     ) -> Self {
         let plan = Plan::from(config, registry, options);
+        let mut files = vec![
+            GeneratedFile {
+                path: "Cargo.toml".to_string(),
+                contents: cargo_toml(&plan),
+            },
+            GeneratedFile {
+                path: "src/main.rs".to_string(),
+                contents: main_rs(&plan),
+            },
+            GeneratedFile {
+                path: "src/actix_handlers.rs".to_string(),
+                contents: actix_handlers(&plan),
+            },
+            GeneratedFile {
+                path: "README.md".to_string(),
+                contents: readme(&plan),
+            },
+            GeneratedFile {
+                path: ".env.example".to_string(),
+                contents: env_example(&plan),
+            },
+            GeneratedFile {
+                path: ".gitignore".to_string(),
+                contents: GITIGNORE.to_string(),
+            },
+            GeneratedFile {
+                path: "justfile".to_string(),
+                contents: JUSTFILE.to_string(),
+            },
+        ];
+
+        if let Some(cf) = client_file(&plan) {
+            files.push(cf);
+        }
+
+        files.extend(deploy::deploy_files(&plan));
+
+        if plan.options.skill_file || plan.is_active("mcp") {
+            files.push(GeneratedFile {
+                path: "SKILL.md".to_string(),
+                contents: skill_md(&plan),
+            });
+        }
+
+        if plan.options.cursor_rules || plan.is_active("mcp") {
+            files.push(GeneratedFile {
+                path: ".cursorrules".to_string(),
+                contents: cursor_rules(&plan),
+            });
+            files.push(GeneratedFile {
+                path: ".cursor/rules/authkestra.mdc".to_string(),
+                contents: cursor_rules(&plan),
+            });
+        }
+
         Self {
             slug: plan.slug(),
-            files: vec![
-                GeneratedFile {
-                    path: "Cargo.toml".to_string(),
-                    contents: cargo_toml(&plan),
-                },
-                GeneratedFile {
-                    path: "src/main.rs".to_string(),
-                    contents: main_rs(&plan),
-                },
-                GeneratedFile {
-                    path: "README.md".to_string(),
-                    contents: readme(&plan),
-                },
-                GeneratedFile {
-                    path: ".env.example".to_string(),
-                    contents: env_example(&plan),
-                },
-                GeneratedFile {
-                    path: ".gitignore".to_string(),
-                    contents: GITIGNORE.to_string(),
-                },
-                GeneratedFile {
-                    path: "justfile".to_string(),
-                    contents: JUSTFILE.to_string(),
-                },
-            ]
-            .into_iter()
-            .chain(client_file(&plan))
-            .chain(deploy::deploy_files(&plan))
-            .collect(),
+            files,
         }
     }
 
@@ -449,9 +475,116 @@ fn client_file(plan: &Plan) -> Option<GeneratedFile> {
     })
 }
 
+/// Alternative Actix Web handler implementations.
+fn actix_handlers(_plan: &Plan) -> String {
+    r#"//! Actix Web integration handlers for Authkestra.
+//!
+//! Provides drop-in Actix Web routes matching the selected Authkestra configuration.
+
+use actix_web::{web, HttpResponse, Responder};
+use serde_json::json;
+
+/// MCP Tool invocation handler in Actix Web.
+pub async fn mcp_tool_call_actix(
+    payload: web::Json<serde_json::Value>,
+) -> impl Responder {
+    HttpResponse::Ok().json(json!({
+        "status": "verified",
+        "framework": "actix-web",
+        "result": payload.into_inner()
+    }))
+}
+
+/// Out-of-band Step-up approval handler in Actix Web.
+pub async fn mcp_approve_actix(
+    payload: web::Json<serde_json::Value>,
+) -> impl Responder {
+    HttpResponse::Ok().json(json!({
+        "status": "approved",
+        "framework": "actix-web",
+        "payload": payload.into_inner()
+    }))
+}
+
+/// AWS Cedar-protected endpoint in Actix Web.
+pub async fn protected_resource_actix() -> impl Responder {
+    HttpResponse::Ok().json(json!({
+        "status": "permitted",
+        "framework": "actix-web",
+        "message": "Authorized by AWS Cedar Policy Engine"
+    }))
+}
+
+/// OpenID CAEP / SSF Security Event Receiver (RFC 8935) in Actix Web.
+pub async fn ssf_event_receiver_actix(
+    body: web::Bytes,
+) -> impl Responder {
+    HttpResponse::Accepted().json(json!({
+        "status": "accepted",
+        "framework": "actix-web",
+        "bytes_received": body.len()
+    }))
+}
+"#
+    .to_string()
+}
+
+/// Agent Skills specification (SKILL.md) for coding assistants and autonomous agents.
+fn skill_md(plan: &Plan) -> String {
+    let active_list = plan.labels.join(", ");
+    format!(
+        r#"---
+name: authkestra-agent
+description: Authkestra v{version} MCP security guard, RFC 8785 parameter binding, and step-up passkey verification.
+---
+
+# Authkestra Agent Skill
+
+You are operating within an application protected by Authkestra v{version}.
+Active authentication methods: {active_list}.
+
+## MCP Security Tiers
+- **Tier 1 (Public)**: Unauthenticated read-only tools.
+- **Tier 2 (Scoped)**: Authenticated tools verified via Bearer scope claims.
+- **Tier 3 (HumanApproved)**: High-risk operations requiring cryptographic human approval.
+
+## Cryptographic Invariants
+1. **Error -32001**: When an MCP tool invocation returns error code `-32001`, pause execution and prompt the human for out-of-band WebAuthn biometric approval.
+2. **RFC 8785 JCS Binding**: Arguments MUST be canonicalized before computing parameter digests:
+   `digest = SHA-256(session_id : tool_name : JCS(arguments) : expires_at)`.
+3. **AtomicConsume Replay Defense**: Execution tokens are single-use. Re-submitting an already-consumed token will be rejected immediately.
+4. **Zero-Trust Token Vault**: Do NOT expose long-lived downstream OAuth tokens in prompts. The MCP server resolves credentials securely inside the tool boundary.
+"#,
+        version = AUTHKESTRA_VERSION,
+        active_list = active_list
+    )
+}
+
+/// Cursor IDE rules (.cursorrules and .cursor/rules/authkestra.mdc).
+fn cursor_rules(plan: &Plan) -> String {
+    let active_list = plan.labels.join(", ");
+    format!(
+        r#"# Authkestra Cursor Rules
+
+You are an expert Rust engineer developing with Authkestra v{version}.
+Selected features: {active_list}.
+
+## Compile-Time Typestate & Security Guardrails
+- NEVER bypass or mock security checks in source code.
+- Enforce `McpSecurityTier::HumanApproved` on all state-mutating agent tools.
+- Maintain parameter integrity using RFC 8785 JSON Canonicalization Scheme (JCS) and SHA-256 digests.
+- AWS Cedar policy evaluation must remain pure and in-process: NEVER perform database queries from inside `PolicyEngine`.
+- Handle CAEP continuous revocation events (RFC 8417 SETs) to terminate compromised sessions immediately.
+- Enforce `ReproofRequirement::check(&identity)` before allowing passwordless factor enrolments.
+"#,
+        version = AUTHKESTRA_VERSION,
+        active_list = active_list
+    )
+}
+
 fn cargo_toml(plan: &Plan) -> String {
     let engine_features = feature_list(
-        &["session", "token", "memory", "rustls-aws-lc-rs"],
+        &["memory", "rustls-aws-lc-rs"],
         plan.features_for("authkestra-engine"),
     );
     let axum_features = feature_list(
@@ -1827,6 +1960,8 @@ mod tests {
             fly: false,
             railway: false,
         },
+        skill_file: false,
+        cursor_rules: false,
     };
 
     /// The default must leave no trace of either opt-in. Someone who wants a

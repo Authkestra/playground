@@ -269,6 +269,8 @@ export function serializeDeployTargets(selection: DeploySelection | undefined): 
 export interface StarterKitOptions {
   openapi: boolean;
   tsClient: boolean;
+  skill?: boolean;
+  cursor?: boolean;
   /** See `serializeDeployTargets` for the absent-vs-empty distinction. */
   deploy?: DeploySelection;
 }
@@ -279,6 +281,8 @@ export async function downloadStarterKit(
   const query = new URLSearchParams();
   if (options.openapi) query.set("openapi", "1");
   if (options.tsClient) query.set("client", "1");
+  if (options.skill) query.set("skill", "1");
+  if (options.cursor) query.set("cursor", "1");
   const deployParam = serializeDeployTargets(options.deploy);
   if (deployParam !== undefined) query.set("deploy", deployParam);
   const suffix = query.size > 0 ? `?${query}` : "";
