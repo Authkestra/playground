@@ -114,7 +114,7 @@ mod tests {
         (0..archive.len())
             .map(|i| {
                 let mut entry = archive.by_index(i).expect("entry");
-                let name = entry.name().to_string();
+                let name = entry.name().expect("valid utf-8 entry name").to_string();
                 let mut contents = String::new();
                 entry.read_to_string(&mut contents).expect("utf-8 contents");
                 (name, contents)

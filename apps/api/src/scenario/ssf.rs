@@ -99,10 +99,7 @@ impl Scenario for SsfScenario {
                 "Compromised credentials trigger instant token invalidation across connected nodes."
                     .to_string(),
             ],
-            crates: vec![
-                CrateRequirement::new("authkestra-ssf", &["default"]),
-                CrateRequirement::new("authkestra-axum", &["ssf"]),
-            ],
+            crates: vec![CrateRequirement::new("authkestra-ssf", &["default"])],
         }
     }
 
@@ -215,7 +212,6 @@ async fn ssf_events_handler(
             openapi_schemas: Vec::new(),
             crates: vec![
                 CrateRequirement::new("authkestra-ssf", &["default"]),
-                CrateRequirement::new("authkestra-axum", &["ssf"]),
             ],
             env: Vec::new(),
             notes: vec![

@@ -151,7 +151,7 @@ impl Scenario for PolicyScenario {
             ],
             crates: vec![
                 CrateRequirement::new("authkestra-policy", &[]),
-                CrateRequirement::new("authkestra-resource", &["policy"]),
+                CrateRequirement::new("authkestra-resource", &[]),
             ],
         }
     }
@@ -319,7 +319,7 @@ async fn protected_handler(
             openapi_schemas: Vec::new(),
             crates: vec![
                 CrateRequirement::new("authkestra-policy", &[]),
-                CrateRequirement::new("authkestra-resource", &["policy"]),
+                CrateRequirement::new("authkestra-resource", &[]),
             ],
             env: Vec::new(),
             notes: vec![
