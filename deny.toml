@@ -49,6 +49,7 @@ ignore = [
     # Exit condition: when authkestra-engine bumps `redis`, bump in step and
     # remove this.
     { id = "RUSTSEC-2025-0134", reason = "unmaintained PEM parser (rustls-pemfile), superseded by rustls-pki-types; no vulnerability and no safe upgrade; transitive via redis 0.27 whose version is pinned by authkestra-engine's RedisStore::with_client" },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 timing variability, transitive via jsonwebtoken 11 -> p256 0.13.2 / p384 0.13.1 -> elliptic-curve 0.13.8; fixed in crypto-bigint 0.7.6+ which has no stable elliptic-curve 0.14 release yet" },
 
 ]
 

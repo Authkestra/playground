@@ -15,7 +15,7 @@
 //! add an image encoder to a service that otherwise only speaks JSON.
 
 use authkestra_engine::auth::totp::TotpAuthMethod;
-use authkestra_engine::auth::AuthMethod;
+use authkestra_engine::auth::{AuthMethod, Identity, ReproofRequirement, IDENTITY_ATTR_AUTH_TIME};
 use authkestra_engine::AuthInput;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -142,6 +142,7 @@ impl Scenario for TotpScenario {
                 "use authkestra_engine::auth::store::CredentialStore;".to_string(),
                 "use authkestra_engine::auth::AuthInput;".to_string(),
                 "use authkestra_engine::auth::AuthMethod;".to_string(),
+                "use authkestra_engine::auth::{Identity, ReproofRequirement, IDENTITY_ATTR_AUTH_TIME};".to_string(),
                 "use axum::extract::State;".to_string(),
                 "use axum::routing::post;".to_string(),
                 "use uuid::Uuid;".to_string(),
@@ -204,8 +205,26 @@ async fn totp_enrol(
             .into_response();
     }
 
+    let mut attributes = std::collections::HashMap::new();
+    attributes.insert(
+        IDENTITY_ATTR_AUTH_TIME.to_string(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string(),
+    );
+    let identity = Identity {
+        provider_id: "starter".into(),
+        external_id: user_id.clone(),
+        email: None,
+        username: Some(body.username.clone()),
+        attributes,
+    };
+    let gate = ReproofRequirement::new(3600);
+
     match method
-        .register_totp(&user_id, "Authkestra Starter", &body.username)
+        .register_totp(&identity, &gate, "Authkestra Starter", &body.username)
         .await
     {
         Ok((secret, uri)) => (StatusCode::OK, Json(json!({ "secret": secret, "uri": uri })))
@@ -339,8 +358,21 @@ async fn totp_verify(
             // secret under a fixed id. That used to need an explicit delete
             // here; it is now impossible to get wrong.
             "provision" => {
+                let mut attributes = std::collections::HashMap::new();
+                attributes.insert(
+                    IDENTITY_ATTR_AUTH_TIME.to_string(),
+                    chrono::Utc::now().timestamp().to_string(),
+                );
+                let identity = Identity {
+                    provider_id: "demo".into(),
+                    external_id: user_id.clone(),
+                    email: None,
+                    username: Some("demo-visitor".into()),
+                    attributes,
+                };
+                let gate = ReproofRequirement::new(3600);
                 let (secret, uri) = method
-                    .register_totp(&user_id, ISSUER, "demo-visitor")
+                    .register_totp(&identity, &gate, ISSUER, "demo-visitor")
                     .await
                     .map_err(|e| ApiError::Scenario(e.to_string()))?;
 

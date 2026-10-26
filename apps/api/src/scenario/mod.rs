@@ -11,9 +11,13 @@
 
 pub mod captcha;
 pub mod dummy;
+pub mod mcp;
 pub mod oauth;
 pub mod passkeys;
+pub mod passwordless;
+pub mod policy;
 pub mod resource;
+pub mod ssf;
 pub mod totp;
 
 use std::collections::HashMap;
@@ -427,6 +431,10 @@ pub struct KitOptions {
     pub ts_client: bool,
     /// Which deployment manifests to include.
     pub deploy: DeployTargets,
+    /// Emit SKILL.md in Agent Skills format.
+    pub skill_file: bool,
+    /// Emit .cursorrules for Cursor IDE.
+    pub cursor_rules: bool,
 }
 
 /// Which deployment manifests a download should carry, beyond the project
@@ -671,7 +679,11 @@ impl ScenarioRegistry {
         } = config;
 
         let mut r = Self::new();
+        r.register(Arc::new(mcp::McpScenario));
         r.register(Arc::new(passkeys::PasskeysScenario));
+        r.register(Arc::new(passwordless::PasswordlessScenario));
+        r.register(Arc::new(policy::PolicyScenario));
+        r.register(Arc::new(ssf::SsfScenario));
         r.register(Arc::new(oauth::OAuthScenario::new(oauth_providers)));
         r.register(Arc::new(totp::TotpScenario));
         r.register(Arc::new(resource::ResourceScenario::new(signing)));

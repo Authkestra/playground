@@ -417,13 +417,9 @@ async fn admin_client_ip(
 struct StarterKitQuery {
     openapi: Option<String>,
     client: Option<String>,
-    /// Deployment manifests to include, as a comma-separated list of host
-    /// names (`docker,render,fly,railway`).
-    ///
-    /// One parameter rather than four booleans because the set is what the
-    /// visitor picks — "Docker and Render" is one choice, not two — and a
-    /// list keeps the query string readable when it lands in a bug report.
     deploy: Option<String>,
+    skill: Option<String>,
+    cursor: Option<String>,
 }
 
 impl StarterKitQuery {
@@ -432,6 +428,8 @@ impl StarterKitQuery {
             openapi: is_truthy(self.openapi.as_deref()),
             ts_client: is_truthy(self.client.as_deref()),
             deploy: parse_deploy_targets(self.deploy.as_deref()),
+            skill_file: is_truthy(self.skill.as_deref()),
+            cursor_rules: is_truthy(self.cursor.as_deref()),
         }
     }
 }

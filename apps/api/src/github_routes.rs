@@ -397,6 +397,8 @@ async fn push(
         openapi: body.openapi,
         ts_client: body.ts_client,
         deploy: merge_deploy_targets(body.deploy),
+        skill_file: false,
+        cursor_rules: false,
     };
     let kit =
         crate::kit::StarterKit::generate_with(&session.config, state.sessions.registry(), options);

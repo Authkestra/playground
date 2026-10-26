@@ -108,6 +108,8 @@ export default function StepDownload({
   const [options, setOptions] = useState<StarterKitOptions>({
     openapi: false,
     tsClient: false,
+    skill: false,
+    cursor: false,
     deploy: { docker: true, render: false, fly: false, railway: false },
   });
 
@@ -299,6 +301,44 @@ export default function StepDownload({
                     A dependency-free client that handles the base64url conversion{" "}
                     <code className="font-mono">navigator.credentials</code> needs.
                     No Rust dependency.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <Checkbox
+                  id="option-skill-file"
+                  checked={options.skill ?? false}
+                  onCheckedChange={(checked) =>
+                    setOptions((o) => ({ ...o, skill: checked === true }))
+                  }
+                  className="mt-0.5"
+                />
+                <div className="grid gap-1 leading-none">
+                  <Label htmlFor="option-skill-file" className="cursor-pointer">
+                    Agent Skill (SKILL.md)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Agent Skills specification instructing AI agents on tool calling and step-up auth ceremonies.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5">
+                <Checkbox
+                  id="option-cursor-rules"
+                  checked={options.cursor ?? false}
+                  onCheckedChange={(checked) =>
+                    setOptions((o) => ({ ...o, cursor: checked === true }))
+                  }
+                  className="mt-0.5"
+                />
+                <div className="grid gap-1 leading-none">
+                  <Label htmlFor="option-cursor-rules" className="cursor-pointer">
+                    Cursor Rules (.cursorrules)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Cursor AI rules (.cursorrules &amp; .cursor/rules/authkestra.mdc) for architectural boundaries.
                   </p>
                 </div>
               </div>

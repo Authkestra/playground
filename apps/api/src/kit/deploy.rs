@@ -645,6 +645,8 @@ mod host_bound_env_tests {
                 openapi: false,
                 ts_client: false,
                 deploy,
+                skill_file: false,
+                cursor_rules: false,
             },
         )
     }
@@ -778,6 +780,8 @@ mod readme_deploy_list_tests {
                     fly: false,
                     railway: false,
                 },
+                skill_file: false,
+                cursor_rules: false,
             },
         );
         let readme = &kit

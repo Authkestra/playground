@@ -2,20 +2,38 @@
 
 import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
-import { Fingerprint, Globe, LogIn, ShieldQuestion, Smartphone, type LucideIcon } from "lucide-react";
+import dynamic from "next/dynamic";
+import {
+  Bot,
+  FileCheck,
+  Fingerprint,
+  Globe,
+  LogIn,
+  Mail,
+  Radio,
+  ShieldQuestion,
+  Smartphone,
+  type LucideIcon,
+} from "lucide-react";
 import type { DemoConfig, OAuthMode, ScenarioSpec } from "@playground/api-types";
 import { loginUrl, type OAuthReturn } from "@/lib/oauth";
 import { isControlValueActive } from "@/components/ScenarioPanel";
 import { OutcomeBanner } from "@/components/OutcomeBanner";
-import TotpPanel from "@/components/TotpPanel";
-import PasskeysPanel from "@/components/PasskeysPanel";
-import ResourcePanel from "@/components/ResourcePanel";
-import CaptchaPanel from "@/components/CaptchaPanel";
 import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+const FlowTopology = dynamic(() => import("@/components/FlowTopology"), { ssr: false });
+const CaptchaPanel = dynamic(() => import("@/components/CaptchaPanel"), { ssr: false });
+const PasskeysPanel = dynamic(() => import("@/components/PasskeysPanel"), { ssr: false });
+const TotpPanel = dynamic(() => import("@/components/TotpPanel"), { ssr: false });
+const ResourcePanel = dynamic(() => import("@/components/ResourcePanel"), { ssr: false });
+const McpPanel = dynamic(() => import("@/components/McpPanel"), { ssr: false });
+const PasswordlessPanel = dynamic(() => import("@/components/PasswordlessPanel"), { ssr: false });
+const PolicyPanel = dynamic(() => import("@/components/PolicyPanel"), { ssr: false });
+const SsfPanel = dynamic(() => import("@/components/SsfPanel"), { ssr: false });
 
 interface Props {
   scenarios: ScenarioSpec[];
@@ -33,7 +51,17 @@ interface Props {
  * Bot protection leads: a captcha guards the form, so it belongs in front of
  * the methods rather than after them.
  */
-export const PANEL_ORDER = ["captcha", "oauth", "passkeys", "totp", "resource"] as const;
+export const PANEL_ORDER = [
+  "captcha",
+  "policy",
+  "oauth",
+  "passwordless",
+  "passkeys",
+  "totp",
+  "resource",
+  "mcp",
+  "ssf",
+] as const;
 
 /** Switched on by the visitor *and* usable on this deployment. */
 export function isScenarioLive(
@@ -74,21 +102,31 @@ export function visiblePanels(
 
 /** Whether any of the live panels is actually a way to sign in. */
 export function hasSignInMethod(visible: string[]): boolean {
-  return visible.some((id) => id === "oauth" || id === "passkeys" || id === "totp");
+  return visible.some(
+    (id) => id === "oauth" || id === "passkeys" || id === "totp" || id === "passwordless",
+  );
 }
 
 const PANEL_ICON: Record<string, LucideIcon> = {
   captcha: ShieldQuestion,
+  policy: FileCheck,
   passkeys: Fingerprint,
+  passwordless: Mail,
   totp: Smartphone,
   resource: Globe,
+  mcp: Bot,
+  ssf: Radio,
 };
 
 const PANEL_TITLE: Record<string, string> = {
   captcha: "Bot protection",
+  policy: "Cedar Policy Engine",
   passkeys: "Passkey",
+  passwordless: "Passwordless & Recovery",
   totp: "Authenticator app",
   resource: "Protected API route",
+  mcp: "AI Agent MCP Guard",
+  ssf: "Continuous Trust (CAEP / SSF)",
 };
 
 export default function StepSignIn({
@@ -151,6 +189,18 @@ export default function StepSignIn({
             </div>
           </div>
         );
+      case "policy":
+        return (
+          <MethodPanel id="policy">
+            <PolicyPanel scenarioId="policy" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
+        );
+      case "passwordless":
+        return (
+          <MethodPanel id="passwordless">
+            <PasswordlessPanel scenarioId="passwordless" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
+        );
       case "passkeys":
         return (
           <MethodPanel id="passkeys">
@@ -169,6 +219,18 @@ export default function StepSignIn({
             <ResourcePanel scenarioId="resource" onDemoDisabled={onDemoDisabled} />
           </MethodPanel>
         );
+      case "mcp":
+        return (
+          <MethodPanel id="mcp">
+            <McpPanel scenarioId="mcp" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
+        );
+      case "ssf":
+        return (
+          <MethodPanel id="ssf">
+            <SsfPanel scenarioId="ssf" onDemoDisabled={onDemoDisabled} />
+          </MethodPanel>
+        );
       default:
         return null;
     }
@@ -184,6 +246,8 @@ export default function StepSignIn({
           trust.
         </p>
       </div>
+
+      <FlowTopology scenarios={scenarios} config={config} />
 
       <Card className="mx-auto w-full max-w-2xl">
         <CardContent className="flex flex-col gap-5 pt-6">

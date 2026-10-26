@@ -35,6 +35,11 @@ pub const CEREMONY_TTL_SECONDS: i64 = 300;
 pub enum CeremonyKind {
     Registration,
     Authentication,
+    McpChallenge,
+    McpExecution,
+    MagicLink,
+    Otp,
+    RecoveryCodes,
 }
 
 impl CeremonyKind {
@@ -42,6 +47,11 @@ impl CeremonyKind {
         match self {
             CeremonyKind::Registration => "registration",
             CeremonyKind::Authentication => "authentication",
+            CeremonyKind::McpChallenge => "mcp_challenge",
+            CeremonyKind::McpExecution => "mcp_execution",
+            CeremonyKind::MagicLink => "magic_link",
+            CeremonyKind::Otp => "otp",
+            CeremonyKind::RecoveryCodes => "recovery_codes",
         }
     }
 }
