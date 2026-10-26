@@ -142,6 +142,7 @@ impl Scenario for TotpScenario {
                 "use authkestra_engine::auth::store::CredentialStore;".to_string(),
                 "use authkestra_engine::auth::AuthInput;".to_string(),
                 "use authkestra_engine::auth::AuthMethod;".to_string(),
+                "use authkestra_engine::auth::{Identity, ReproofRequirement, IDENTITY_ATTR_AUTH_TIME};".to_string(),
                 "use axum::extract::State;".to_string(),
                 "use axum::routing::post;".to_string(),
                 "use uuid::Uuid;".to_string(),
@@ -204,8 +205,26 @@ async fn totp_enrol(
             .into_response();
     }
 
+    let mut attributes = std::collections::HashMap::new();
+    attributes.insert(
+        IDENTITY_ATTR_AUTH_TIME.to_string(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string(),
+    );
+    let identity = Identity {
+        provider_id: "starter".into(),
+        external_id: user_id.clone(),
+        email: None,
+        username: Some(body.username.clone()),
+        attributes,
+    };
+    let gate = ReproofRequirement::new(3600);
+
     match method
-        .register_totp(&user_id, "Authkestra Starter", &body.username)
+        .register_totp(&identity, &gate, "Authkestra Starter", &body.username)
         .await
     {
         Ok((secret, uri)) => (StatusCode::OK, Json(json!({ "secret": secret, "uri": uri })))

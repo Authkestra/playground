@@ -183,10 +183,12 @@ impl Scenario for PasskeysScenario {
         Some(KitFragment {
             imports: vec![
                 "use authkestra_engine::auth::store::CredentialStore;".to_string(),
+                "use authkestra_engine::auth::webauthn::PasskeyEnrolment;".to_string(),
                 "use authkestra_engine::auth::webauthn::WebAuthnAuthMethod;".to_string(),
                 "use authkestra_engine::auth::AuthInput;".to_string(),
                 "use authkestra_engine::auth::AuthMethod;".to_string(),
                 "use authkestra_engine::auth::WebAuthnStarter;".to_string(),
+                "use authkestra_engine::auth::{Identity, ReproofRequirement, IDENTITY_ATTR_AUTH_TIME};".to_string(),
                 "use axum::extract::State;".to_string(),
                 "use axum::routing::post;".to_string(),
                 "use std::collections::HashMap;".to_string(),
@@ -194,7 +196,6 @@ impl Scenario for PasskeysScenario {
                 "use std::time::{Duration, Instant};".to_string(),
                 "use uuid::Uuid;".to_string(),
                 "use webauthn_rs::prelude::Passkey;".to_string(),
-                "use webauthn_rs::prelude::PasskeyRegistration;".to_string(),
                 "use webauthn_rs::prelude::RegisterPublicKeyCredential;".to_string(),
                 "use webauthn_rs::prelude::WebauthnBuilder;".to_string(),
             ],
@@ -301,8 +302,25 @@ async fn passkey_register_start(
     Json(body): Json<PasskeyStart>,
 ) -> impl IntoResponse {
     let user_id = user_id_for(&body.username);
+    let mut attributes = HashMap::new();
+    attributes.insert(
+        IDENTITY_ATTR_AUTH_TIME.to_string(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string(),
+    );
+    let identity = Identity {
+        provider_id: "starter".into(),
+        external_id: user_id.clone(),
+        email: None,
+        username: Some(body.username.clone()),
+        attributes,
+    };
+    let gate = ReproofRequirement::new(3600);
 
-    match passkey_method(&state).start_register(&user_id, &body.username) {
+    match passkey_method(&state).start_register(&identity, &gate, &body.username) {
         Ok((challenge, registration)) => {
             let stored = serde_json::to_string(&registration)
                 .expect("webauthn registration state serialises");
@@ -356,7 +374,7 @@ async fn passkey_register_finish(
             .into_response();
     };
 
-    let registration: PasskeyRegistration = match serde_json::from_str(&ceremony.state) {
+    let registration: PasskeyEnrolment = match serde_json::from_str(&ceremony.state) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "stored ceremony state is unreadable");
@@ -369,7 +387,7 @@ async fn passkey_register_finish(
     };
 
     match passkey_method(&state)
-        .finish_register(&ceremony.user_id, credential, registration)
+        .finish_register(registration, credential)
         .await
     {
         Ok(_) => (StatusCode::OK, Json(json!({ "enrolled": true }))).into_response(),

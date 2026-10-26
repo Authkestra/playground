@@ -585,7 +585,10 @@ Selected features: {active_list}.
 fn cargo_toml(plan: &Plan) -> String {
     let engine_features = feature_list(
         &["memory", "rustls-aws-lc-rs"],
-        plan.features_for("authkestra-engine"),
+        plan.features_for("authkestra-engine")
+            .into_iter()
+            .filter(|f| f != "session" && f != "token")
+            .collect(),
     );
     let axum_features = feature_list(
         &["macros", "session", "token", "rustls-aws-lc-rs"],
