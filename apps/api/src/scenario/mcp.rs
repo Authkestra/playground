@@ -318,6 +318,14 @@ impl Scenario for McpScenario {
                     ));
                 }
 
+                if let Some(ref client_digest) = body.digest {
+                    if client_digest != &challenge.challenge_digest {
+                        return Err(ApiError::InvalidValue(
+                            "challenge digest mismatch during biometric approval".to_string(),
+                        ));
+                    }
+                }
+
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -371,9 +379,7 @@ impl Scenario for McpScenario {
 
             "execute" => {
                 let body: ExecuteBody = serde_json::from_value(body).map_err(|e| {
-                    ApiError::InvalidValue(format!(
-                        "expected {{ execution_token }}: {e}"
-                    ))
+                    ApiError::InvalidValue(format!("expected {{ execution_token }}: {e}"))
                 })?;
 
                 // AtomicConsume: retrieve and remove execution record in one atomic action
@@ -414,10 +420,12 @@ impl Scenario for McpScenario {
                 }
 
                 let tool_name = body.tool_name.unwrap_or_else(|| record.tool_name.clone());
-                let arguments = body.arguments.unwrap_or_else(|| json!({
-                    "amount": 50000,
-                    "destination": "treasury-corp-4"
-                }));
+                let arguments = body.arguments.unwrap_or_else(|| {
+                    json!({
+                        "amount": 50000,
+                        "destination": "treasury-corp-4"
+                    })
+                });
 
                 // Verify JCS SHA-256 parameter binding
                 let canonical_bytes = canonicalize_arguments(&arguments).map_err(|e| {
@@ -494,15 +502,15 @@ impl Scenario for McpScenario {
 
             "tamper" => {
                 let body: ExecuteBody = serde_json::from_value(body).map_err(|e| {
-                    ApiError::InvalidValue(format!(
-                        "expected {{ execution_token }}: {e}"
-                    ))
+                    ApiError::InvalidValue(format!("expected {{ execution_token }}: {e}"))
                 })?;
 
-                let original_args = body.arguments.unwrap_or_else(|| json!({
-                    "amount": 50000,
-                    "destination": "treasury-corp-4"
-                }));
+                let original_args = body.arguments.unwrap_or_else(|| {
+                    json!({
+                        "amount": 50000,
+                        "destination": "treasury-corp-4"
+                    })
+                });
 
                 let mut tampered_args = original_args.clone();
                 if let Some(obj) = tampered_args.as_object_mut() {
