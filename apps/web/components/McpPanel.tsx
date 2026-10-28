@@ -59,8 +59,8 @@ export default function McpPanel({ scenarioId, onDemoDisabled }: Props) {
     }
 
     const res = await scenarioAction<McpInvocationResult>(scenarioId, "invoke", {
-      tool,
-      params: parsedParams,
+      tool_name: tool,
+      arguments: parsedParams,
     });
 
     setInvoking(false);
@@ -106,9 +106,18 @@ export default function McpPanel({ scenarioId, onDemoDisabled }: Props) {
     setApproving(true);
     setBanner(null);
 
+    let parsedParams: unknown;
+    try {
+      parsedParams = JSON.parse(paramsText);
+    } catch {
+      // ignore
+    }
+
     const res = await scenarioAction<McpInvocationResult>(scenarioId, "execute", {
       execution_token: result.execution_token,
       digest: result.digest,
+      tool_name: tool,
+      arguments: parsedParams,
     });
 
     setApproving(false);
@@ -130,8 +139,17 @@ export default function McpPanel({ scenarioId, onDemoDisabled }: Props) {
     setTampering(true);
     setBanner(null);
 
+    let parsedParams: unknown;
+    try {
+      parsedParams = JSON.parse(paramsText);
+    } catch {
+      // ignore
+    }
+
     const res = await scenarioAction<McpInvocationResult>(scenarioId, "tamper", {
       execution_token: result.execution_token,
+      tool_name: tool,
+      arguments: parsedParams,
     });
 
     setTampering(false);
@@ -201,14 +219,14 @@ export default function McpPanel({ scenarioId, onDemoDisabled }: Props) {
             </div>
             <Badge
               variant={
-                result.status === "step_up_required"
+                result.status === "step_up_required" || result.status === "challenge"
                   ? "outline"
                   : result.status === "completed" || result.status === "executed"
                     ? "default"
                     : "destructive"
               }
             >
-              {result.status}
+              {result.status === "challenge" ? "step_up_required" : result.status}
             </Badge>
           </div>
 
@@ -221,7 +239,7 @@ export default function McpPanel({ scenarioId, onDemoDisabled }: Props) {
             </div>
           )}
 
-          {result.status === "step_up_required" && (
+          {(result.status === "step_up_required" || result.status === "challenge") && (
             <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
               <div className="flex items-center gap-2 text-xs font-medium text-foreground">
                 <ShieldAlert className="h-4 w-4 text-primary-accent" strokeWidth={1.5} aria-hidden />

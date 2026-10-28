@@ -272,12 +272,16 @@ export default function StepSignIn({
             <>
               <div className="text-center">
                 <h3 className="text-base font-semibold text-foreground">
-                  Sign in to Authkestra
+                  {visible.length === 1 && visible[0] === "mcp"
+                    ? "MCP Tool Call Policy Verification"
+                    : "Sign in to Authkestra"}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {signInMethodOn
-                    ? "Choose how you'd like to continue."
-                    : "No sign-in method is on — try what you did turn on below."}
+                  {visible.length === 1 && visible[0] === "mcp"
+                    ? "Interactive human step-up & cryptographic anti-tamper verification"
+                    : signInMethodOn
+                      ? "Choose how you'd like to continue."
+                      : "No sign-in method is on — try what you did turn on below."}
                 </p>
               </div>
 
