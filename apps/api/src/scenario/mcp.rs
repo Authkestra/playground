@@ -38,20 +38,26 @@ pub struct McpInvocationResult {
 
 #[derive(Debug, Deserialize)]
 struct CallBody {
+    #[serde(alias = "tool")]
     tool_name: String,
+    #[serde(alias = "params")]
     arguments: Value,
 }
 
 #[derive(Debug, Deserialize)]
 struct ApproveBody {
     challenge_id: String,
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ExecuteBody {
     execution_token: String,
-    tool_name: String,
-    arguments: Value,
+    #[serde(default, alias = "tool")]
+    tool_name: Option<String>,
+    #[serde(default, alias = "params")]
+    arguments: Option<Value>,
 }
 
 #[async_trait::async_trait]
@@ -91,7 +97,7 @@ impl Scenario for McpScenario {
     }
 
     fn actions(&self) -> Vec<&'static str> {
-        vec!["call", "approve", "execute", "tamper"]
+        vec!["call", "invoke", "approve", "execute", "tamper"]
     }
 
     fn consequences(&self, value: &ControlValue) -> Consequences {
@@ -154,7 +160,7 @@ impl Scenario for McpScenario {
         };
 
         match action {
-            "call" => {
+            "call" | "invoke" => {
                 let body: CallBody = serde_json::from_value(body).map_err(|e| {
                     ApiError::InvalidValue(format!("expected {{ tool_name, arguments }}: {e}"))
                 })?;
@@ -266,7 +272,7 @@ impl Scenario for McpScenario {
                 .await;
 
                 Ok(serde_json::to_value(McpInvocationResult {
-                    status: "challenge".to_string(),
+                    status: "step_up_required".to_string(),
                     tier: "human_approved".to_string(),
                     challenge_id: Some(challenge_id),
                     digest: Some(digest),
@@ -310,6 +316,14 @@ impl Scenario for McpScenario {
                     return Err(ApiError::InvalidValue(
                         "challenge_id does not match pending challenge".to_string(),
                     ));
+                }
+
+                if let Some(ref client_digest) = body.digest {
+                    if client_digest != &challenge.challenge_digest {
+                        return Err(ApiError::InvalidValue(
+                            "challenge digest mismatch during biometric approval".to_string(),
+                        ));
+                    }
                 }
 
                 let now = SystemTime::now()
@@ -365,9 +379,7 @@ impl Scenario for McpScenario {
 
             "execute" => {
                 let body: ExecuteBody = serde_json::from_value(body).map_err(|e| {
-                    ApiError::InvalidValue(format!(
-                        "expected {{ execution_token, tool_name, arguments }}: {e}"
-                    ))
+                    ApiError::InvalidValue(format!("expected {{ execution_token }}: {e}"))
                 })?;
 
                 // AtomicConsume: retrieve and remove execution record in one atomic action
@@ -407,14 +419,22 @@ impl Scenario for McpScenario {
                     ));
                 }
 
+                let tool_name = body.tool_name.unwrap_or_else(|| record.tool_name.clone());
+                let arguments = body.arguments.unwrap_or_else(|| {
+                    json!({
+                        "amount": 50000,
+                        "destination": "treasury-corp-4"
+                    })
+                });
+
                 // Verify JCS SHA-256 parameter binding
-                let canonical_bytes = canonicalize_arguments(&body.arguments).map_err(|e| {
+                let canonical_bytes = canonicalize_arguments(&arguments).map_err(|e| {
                     ApiError::InvalidValue(format!("arguments could not be canonicalized: {e}"))
                 })?;
 
                 let computed_digest = compute_challenge_digest(
                     &record.session_id,
-                    &body.tool_name,
+                    &tool_name,
                     &canonical_bytes,
                     record.expires_at,
                 );
@@ -457,7 +477,7 @@ impl Scenario for McpScenario {
                             "Token consumed atomically, parameters verified via JCS digest. \
                              Downstream credential resolved from Zero-Trust Token Vault without prompt leakage.",
                         )
-                        .fact("tool", body.tool_name.clone())
+                        .fact("tool", tool_name.clone())
                         .fact("vault", "AES-256-GCM DPoP token released"),
                 )
                 .await;
@@ -470,8 +490,8 @@ impl Scenario for McpScenario {
                     execution_token: Some(body.execution_token),
                     output: Some(json!({
                         "confirmed": true,
-                        "tool": body.tool_name,
-                        "executed_with": body.arguments,
+                        "tool": tool_name,
+                        "executed_with": arguments,
                         "vault_token_used": "dpop_vault_tok_verified",
                     })),
                     detail: "Tool executed securely with single-use approval and zero-trust vault token."
@@ -482,12 +502,17 @@ impl Scenario for McpScenario {
 
             "tamper" => {
                 let body: ExecuteBody = serde_json::from_value(body).map_err(|e| {
-                    ApiError::InvalidValue(format!(
-                        "expected {{ execution_token, tool_name, arguments }}: {e}"
-                    ))
+                    ApiError::InvalidValue(format!("expected {{ execution_token }}: {e}"))
                 })?;
 
-                let mut tampered_args = body.arguments.clone();
+                let original_args = body.arguments.unwrap_or_else(|| {
+                    json!({
+                        "amount": 50000,
+                        "destination": "treasury-corp-4"
+                    })
+                });
+
+                let mut tampered_args = original_args.clone();
                 if let Some(obj) = tampered_args.as_object_mut() {
                     if let Some(amt) = obj.get_mut("amount") {
                         *amt = json!(999999.0);
@@ -512,7 +537,7 @@ impl Scenario for McpScenario {
                     digest: None,
                     execution_token: Some(body.execution_token),
                     output: Some(json!({
-                        "original_arguments": body.arguments,
+                        "original_arguments": original_args,
                         "tampered_arguments": tampered_args,
                         "attack_neutralized": true,
                     })),
