@@ -118,9 +118,25 @@ jobs:
             *) echo "::error::VERCEL_PROJECT_ID does not begin with 'prj_'. It wants the Project ID from Project Settings > General, not the project's name or slug."; exit 1 ;;
           esac
 
+          team_param=""
+          case "$VERCEL_ORG_ID" in
+            team_*) team_param="?teamId=$VERCEL_ORG_ID" ;;
+          esac
+
           code=$(curl -s -o /tmp/vproj.json -w '%{http_code}' --max-time 20 \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
-            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" || true)
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID$team_param" || true)
+
+          # If querying with teamId fails (e.g. personal account or user-scoped token), try directly
+          if [ "$code" != "200" ] && [ -n "$team_param" ]; then
+            fb_code=$(curl -s -o /tmp/vproj_fb.json -w '%{http_code}' --max-time 20 \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID" || true)
+            if [ "$fb_code" = "200" ]; then
+              mv /tmp/vproj_fb.json /tmp/vproj.json
+              code="200"
+            fi
+          fi
 
           if [ "$code" = "200" ]; then
             echo "project resolves: $(jq -r '.name // "?"' /tmp/vproj.json)"
