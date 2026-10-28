@@ -243,7 +243,7 @@ jobs:
         if: steps.check.outputs.ready == 'true'
         env:
           URL: https://play.authkestra.com
-          MARKER: Unpublished key
+          MARKER: Choose sign-in methods
         run: |
           # Verify the whole chain on each attempt rather than once through.
           # Immediately after aliasing, the edge can serve the new HTML while a
