@@ -391,11 +391,14 @@ local ok, obj = pcall(cjson.decode, raw)
 if not ok or type(obj) ~= 'table' then
   return -1
 end
-local cred_id = obj['credential_id']
-if cred_id == nil then
-  cred_id = obj['id']
+local function nonblank(v)
+  if type(v) == 'string' and string.match(v, '%S') ~= nil then
+    return v
+  end
+  return nil
 end
-if cred_id ~= ARGV[1] then
+local cred_id = nonblank(obj['credential_id']) or nonblank(obj['id'])
+if not cred_id or cred_id ~= ARGV[1] then
   return 0
 end
 local matched = tonumber(ARGV[2])
@@ -632,11 +635,11 @@ impl KeyValue for MemoryKv {
         matched_step: u64,
         ttl: Duration,
     ) -> Result<bool, StoreError> {
-        let now = self.now();
-        let expires_at = now
-            + chrono::Duration::from_std(ttl)
-                .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
+        let ttl_chrono = chrono::Duration::from_std(ttl)
+            .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
         let mut guard = self.entries.write().expect("memory store poisoned");
+        let now = self.now();
+        let expires_at = now + ttl_chrono;
         let Some(entry) = guard.get_mut(key).filter(|e| now < e.expires_at) else {
             return Ok(false);
         };
@@ -647,11 +650,12 @@ impl KeyValue for MemoryKv {
                 "stored TOTP credential is not a JSON object".into(),
             ));
         };
-        let stored_id = obj
-            .get("credential_id")
-            .or_else(|| obj.get("id"))
-            .and_then(|v| v.as_str());
-        if stored_id != Some(credential_id) {
+        let stored_id = ["credential_id", "id"].into_iter().find_map(|field| {
+            obj.get(field)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+        });
+        if stored_id != Some(credential_id) || credential_id.trim().is_empty() {
             return Ok(false);
         }
         let current = obj
@@ -773,6 +777,59 @@ mod tests {
             ],
             "reading one bucket must name its counters and leave the next alone"
         );
+
+        // claim_totp_step: fallback across empty credential_id -> id, blank rejection,
+        // and atomic competing-claim winner selection
+        kv.set(
+            "totp:legacy",
+            r#"{"credential_id":"","id":"legacy","last_used_step":0}"#,
+            ttl,
+        )
+        .await
+        .unwrap();
+        assert!(!kv
+            .claim_totp_step("totp:legacy", "", 10, ttl)
+            .await
+            .unwrap());
+        assert!(kv
+            .claim_totp_step("totp:legacy", "legacy", 10, ttl)
+            .await
+            .unwrap());
+        assert!(!kv
+            .claim_totp_step("totp:legacy", "legacy", 10, ttl)
+            .await
+            .unwrap());
+
+        kv.set(
+            "totp:race",
+            r#"{"credential_id":"c1","last_used_step":0}"#,
+            ttl,
+        )
+        .await
+        .unwrap();
+        let barrier = tokio::sync::Barrier::new(2);
+        let (r1, r2) = tokio::join!(
+            async {
+                barrier.wait().await;
+                kv.claim_totp_step("totp:race", "c1", 77, ttl)
+                    .await
+                    .unwrap()
+            },
+            async {
+                barrier.wait().await;
+                kv.claim_totp_step("totp:race", "c1", 77, ttl)
+                    .await
+                    .unwrap()
+            },
+        );
+        assert_eq!(
+            u8::from(r1) + u8::from(r2),
+            1,
+            "competing callers claiming the same TOTP step must yield exactly one winner"
+        );
+        let raw = kv.get("totp:race").await.unwrap().expect("totp record");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["last_used_step"], 77);
     }
 
     #[tokio::test]
