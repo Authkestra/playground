@@ -278,6 +278,19 @@ impl CredentialStore for KvCredentialStore {
         tracing::debug!(credential_id, "credential updated");
         Ok(())
     }
+
+    async fn claim_totp_step(
+        &self,
+        user_id: &str,
+        credential_id: &str,
+        matched_step: u64,
+    ) -> Result<bool, AuthError> {
+        let key = Self::credential_key(user_id, "totp", TOTP_CREDENTIAL_ID);
+        self.kv
+            .claim_totp_step(&key, credential_id, matched_step, self.ttl)
+            .await
+            .map_err(|e| AuthError::Internal(e.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -515,5 +528,68 @@ mod stale_reference_tests {
             .unwrap();
         let stored = creds.get_credentials("s1", "totp").await.unwrap();
         assert_eq!(stored[0]["last_used_step"], 9);
+    }
+
+    #[tokio::test]
+    async fn claim_totp_step_is_strictly_monotonic_and_scoped() {
+        let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
+        let creds = KvCredentialStore::new(kv, Duration::from_secs(3600));
+        creds
+            .save_credential(
+                "s1",
+                "totp",
+                json!({ "credential_id": "cred1", "secret": "AAA", "last_used_step": 0 }),
+            )
+            .await
+            .unwrap();
+
+        assert!(creds.claim_totp_step("s1", "cred1", 50).await.unwrap());
+        assert!(!creds.claim_totp_step("s1", "cred1", 50).await.unwrap());
+        assert!(!creds.claim_totp_step("s1", "cred1", 49).await.unwrap());
+        assert!(creds.claim_totp_step("s1", "cred1", 51).await.unwrap());
+        assert!(!creds.claim_totp_step("s1", "other", 52).await.unwrap());
+        assert!(!creds.claim_totp_step("s2", "cred1", 52).await.unwrap());
+
+        // Blank credential_id falls back to `id`, matching authkestra-engine.
+        creds
+            .save_credential(
+                "s1",
+                "totp",
+                json!({ "credential_id": "", "id": "legacy", "secret": "AAA", "last_used_step": 0 }),
+            )
+            .await
+            .unwrap();
+        assert!(!creds.claim_totp_step("s1", "", 60).await.unwrap());
+        assert!(creds.claim_totp_step("s1", "legacy", 60).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn claim_totp_step_concurrent_race_allows_only_one_winner() {
+        let kv: Arc<dyn KeyValue> = Arc::new(MemoryKv::new());
+        let creds = KvCredentialStore::new(kv, Duration::from_secs(3600));
+        creds
+            .save_credential(
+                "s1",
+                "totp",
+                json!({ "credential_id": "cred1", "secret": "AAA", "last_used_step": 0 }),
+            )
+            .await
+            .unwrap();
+
+        let barrier = tokio::sync::Barrier::new(2);
+        let (a, b) = tokio::join!(
+            async {
+                barrier.wait().await;
+                creds.claim_totp_step("s1", "cred1", 88).await.unwrap()
+            },
+            async {
+                barrier.wait().await;
+                creds.claim_totp_step("s1", "cred1", 88).await.unwrap()
+            },
+        );
+        assert_eq!(u8::from(a) + u8::from(b), 1);
+
+        let stored = creds.get_credentials("s1", "totp").await.unwrap();
+        assert_eq!(stored[0]["last_used_step"], 88);
     }
 }

@@ -108,6 +108,18 @@ pub trait KeyValue: Send + Sync {
 
     /// Read a list written by [`KeyValue::append_capped`], oldest first.
     async fn list(&self, key: &str) -> Result<Vec<String>, StoreError>;
+
+    /// Atomically claim a monotonically increasing TOTP time step on a stored
+    /// JSON credential object whose `"credential_id"` (or `"id"`) matches
+    /// `credential_id`. Returns `true` and advances `"last_used_step"` when
+    /// `matched_step > current`, or `false` if absent, mismatched, or stale.
+    async fn claim_totp_step(
+        &self,
+        key: &str,
+        credential_id: &str,
+        matched_step: u64,
+        ttl: Duration,
+    ) -> Result<bool, StoreError>;
 }
 
 /// Read a JSON value from the store.
@@ -360,6 +372,62 @@ impl KeyValue for RedisKv {
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         Ok(removed as u64)
     }
+
+    async fn claim_totp_step(
+        &self,
+        key: &str,
+        credential_id: &str,
+        matched_step: u64,
+        ttl: Duration,
+    ) -> Result<bool, StoreError> {
+        // Lua script executes atomically in Redis so concurrent requests with the
+        // same TOTP code cannot race the compare-and-advance check.
+        const SCRIPT: &str = r#"
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, obj = pcall(cjson.decode, raw)
+if not ok or type(obj) ~= 'table' then
+  return -1
+end
+local function nonblank(v)
+  if type(v) == 'string' and string.match(v, '%S') ~= nil then
+    return v
+  end
+  return nil
+end
+local cred_id = nonblank(obj['credential_id']) or nonblank(obj['id'])
+if not cred_id or cred_id ~= ARGV[1] then
+  return 0
+end
+local matched = tonumber(ARGV[2])
+local current = tonumber(obj['last_used_step']) or 0
+if matched > current then
+  obj['last_used_step'] = matched
+  redis.call('SET', KEYS[1], cjson.encode(obj), 'EX', tonumber(ARGV[3]))
+  return 1
+end
+return 0
+"#;
+        let mut conn = self.conn().await?;
+        let secs = ttl.as_secs().max(1);
+        let outcome: i64 = redis::Script::new(SCRIPT)
+            .key(self.full(key))
+            .arg(credential_id)
+            .arg(matched_step.to_string())
+            .arg(secs)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        match outcome {
+            1 => Ok(true),
+            0 => Ok(false),
+            _ => Err(StoreError::Decode(
+                "stored TOTP credential is not a JSON object".into(),
+            )),
+        }
+    }
 }
 
 // --------------------------------------------------------------------- memory
@@ -559,6 +627,54 @@ impl KeyValue for MemoryKv {
         guard.retain(|k, _| !k.starts_with(prefix));
         Ok((before - guard.len()) as u64)
     }
+
+    async fn claim_totp_step(
+        &self,
+        key: &str,
+        credential_id: &str,
+        matched_step: u64,
+        ttl: Duration,
+    ) -> Result<bool, StoreError> {
+        let ttl_chrono = chrono::Duration::from_std(ttl)
+            .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
+        let mut guard = self.entries.write().expect("memory store poisoned");
+        let now = self.now();
+        let expires_at = now + ttl_chrono;
+        let Some(entry) = guard.get_mut(key).filter(|e| now < e.expires_at) else {
+            return Ok(false);
+        };
+        let mut value: serde_json::Value =
+            serde_json::from_str(&entry.value).map_err(|e| StoreError::Decode(e.to_string()))?;
+        let Some(obj) = value.as_object_mut() else {
+            return Err(StoreError::Decode(
+                "stored TOTP credential is not a JSON object".into(),
+            ));
+        };
+        let stored_id = ["credential_id", "id"].into_iter().find_map(|field| {
+            obj.get(field)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+        });
+        if stored_id != Some(credential_id) || credential_id.trim().is_empty() {
+            return Ok(false);
+        }
+        let current = obj
+            .get("last_used_step")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if matched_step > current {
+            obj.insert(
+                "last_used_step".to_string(),
+                serde_json::json!(matched_step),
+            );
+            entry.value =
+                serde_json::to_string(&value).map_err(|e| StoreError::Decode(e.to_string()))?;
+            entry.expires_at = expires_at;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -661,6 +777,59 @@ mod tests {
             ],
             "reading one bucket must name its counters and leave the next alone"
         );
+
+        // claim_totp_step: fallback across empty credential_id -> id, blank rejection,
+        // and atomic competing-claim winner selection
+        kv.set(
+            "totp:legacy",
+            r#"{"credential_id":"","id":"legacy","last_used_step":0}"#,
+            ttl,
+        )
+        .await
+        .unwrap();
+        assert!(!kv
+            .claim_totp_step("totp:legacy", "", 10, ttl)
+            .await
+            .unwrap());
+        assert!(kv
+            .claim_totp_step("totp:legacy", "legacy", 10, ttl)
+            .await
+            .unwrap());
+        assert!(!kv
+            .claim_totp_step("totp:legacy", "legacy", 10, ttl)
+            .await
+            .unwrap());
+
+        kv.set(
+            "totp:race",
+            r#"{"credential_id":"c1","last_used_step":0}"#,
+            ttl,
+        )
+        .await
+        .unwrap();
+        let barrier = tokio::sync::Barrier::new(2);
+        let (r1, r2) = tokio::join!(
+            async {
+                barrier.wait().await;
+                kv.claim_totp_step("totp:race", "c1", 77, ttl)
+                    .await
+                    .unwrap()
+            },
+            async {
+                barrier.wait().await;
+                kv.claim_totp_step("totp:race", "c1", 77, ttl)
+                    .await
+                    .unwrap()
+            },
+        );
+        assert_eq!(
+            u8::from(r1) + u8::from(r2),
+            1,
+            "competing callers claiming the same TOTP step must yield exactly one winner"
+        );
+        let raw = kv.get("totp:race").await.unwrap().expect("totp record");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["last_used_step"], 77);
     }
 
     #[tokio::test]

@@ -450,6 +450,15 @@ impl crate::store::KeyValue for BrokenKv {
     ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
         Err(down())
     }
+    async fn claim_totp_step(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+        _: Duration,
+    ) -> Result<bool, crate::store::StoreError> {
+        Err(down())
+    }
 }
 
 fn down() -> crate::store::StoreError {
