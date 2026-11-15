@@ -108,6 +108,18 @@ pub trait KeyValue: Send + Sync {
 
     /// Read a list written by [`KeyValue::append_capped`], oldest first.
     async fn list(&self, key: &str) -> Result<Vec<String>, StoreError>;
+
+    /// Atomically claim a monotonically increasing TOTP time step on a stored
+    /// JSON credential object whose `"credential_id"` (or `"id"`) matches
+    /// `credential_id`. Returns `true` and advances `"last_used_step"` when
+    /// `matched_step > current`, or `false` if absent, mismatched, or stale.
+    async fn claim_totp_step(
+        &self,
+        key: &str,
+        credential_id: &str,
+        matched_step: u64,
+        ttl: Duration,
+    ) -> Result<bool, StoreError>;
 }
 
 /// Read a JSON value from the store.
@@ -360,6 +372,59 @@ impl KeyValue for RedisKv {
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         Ok(removed as u64)
     }
+
+    async fn claim_totp_step(
+        &self,
+        key: &str,
+        credential_id: &str,
+        matched_step: u64,
+        ttl: Duration,
+    ) -> Result<bool, StoreError> {
+        // Lua script executes atomically in Redis so concurrent requests with the
+        // same TOTP code cannot race the compare-and-advance check.
+        const SCRIPT: &str = r#"
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, obj = pcall(cjson.decode, raw)
+if not ok or type(obj) ~= 'table' then
+  return -1
+end
+local cred_id = obj['credential_id']
+if cred_id == nil then
+  cred_id = obj['id']
+end
+if cred_id ~= ARGV[1] then
+  return 0
+end
+local matched = tonumber(ARGV[2])
+local current = tonumber(obj['last_used_step']) or 0
+if matched > current then
+  obj['last_used_step'] = matched
+  redis.call('SET', KEYS[1], cjson.encode(obj), 'EX', tonumber(ARGV[3]))
+  return 1
+end
+return 0
+"#;
+        let mut conn = self.conn().await?;
+        let secs = ttl.as_secs().max(1);
+        let outcome: i64 = redis::Script::new(SCRIPT)
+            .key(self.full(key))
+            .arg(credential_id)
+            .arg(matched_step.to_string())
+            .arg(secs)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        match outcome {
+            1 => Ok(true),
+            0 => Ok(false),
+            _ => Err(StoreError::Decode(
+                "stored TOTP credential is not a JSON object".into(),
+            )),
+        }
+    }
 }
 
 // --------------------------------------------------------------------- memory
@@ -558,6 +623,53 @@ impl KeyValue for MemoryKv {
         let before = guard.len();
         guard.retain(|k, _| !k.starts_with(prefix));
         Ok((before - guard.len()) as u64)
+    }
+
+    async fn claim_totp_step(
+        &self,
+        key: &str,
+        credential_id: &str,
+        matched_step: u64,
+        ttl: Duration,
+    ) -> Result<bool, StoreError> {
+        let now = self.now();
+        let expires_at = now
+            + chrono::Duration::from_std(ttl)
+                .map_err(|e| StoreError::Backend(format!("bad ttl: {e}")))?;
+        let mut guard = self.entries.write().expect("memory store poisoned");
+        let Some(entry) = guard.get_mut(key).filter(|e| now < e.expires_at) else {
+            return Ok(false);
+        };
+        let mut value: serde_json::Value =
+            serde_json::from_str(&entry.value).map_err(|e| StoreError::Decode(e.to_string()))?;
+        let Some(obj) = value.as_object_mut() else {
+            return Err(StoreError::Decode(
+                "stored TOTP credential is not a JSON object".into(),
+            ));
+        };
+        let stored_id = obj
+            .get("credential_id")
+            .or_else(|| obj.get("id"))
+            .and_then(|v| v.as_str());
+        if stored_id != Some(credential_id) {
+            return Ok(false);
+        }
+        let current = obj
+            .get("last_used_step")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if matched_step > current {
+            obj.insert(
+                "last_used_step".to_string(),
+                serde_json::json!(matched_step),
+            );
+            entry.value =
+                serde_json::to_string(&value).map_err(|e| StoreError::Decode(e.to_string()))?;
+            entry.expires_at = expires_at;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
